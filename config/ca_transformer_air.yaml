@@ -1,0 +1,36 @@
+
+device: 0
+
+
+data:
+  data_path: "C:/Users/jayao/Desktop/python_projects/DSCP/data/air-10/chronos/chronos_air-10_data.pkl"
+  train_ratio: 0.7
+  valid_ratio: 0.15
+  normalize: True
+  strided_features: "xry"
+
+
+model:
+  dim_model: 128
+  num_head: 4
+  num_layer: 4
+  dropout: 0.
+  target_quantiles:
+    - [0.950, 0.05]
+  prediction_step: 1
+  window_size: 100
+  calibration_size: 1000
+  similarity_fn: "dot_product"
+  temperature: 1
+  sampling_num: 1000
+
+
+training:
+  batch_size: 32
+  learning_rate: 0.0001
+  epochs: 2
+  early_stop: 3
+
+
+saving_dir: "C:/Users/jayao/Desktop/run_test/"
+

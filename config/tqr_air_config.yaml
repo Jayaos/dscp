@@ -1,0 +1,33 @@
+
+device: 0
+
+
+data:
+  data_path: "C:/Users/jayao/Desktop/python_projects/DSCP/data/air-10/chronos/chronos_air-10_data.pkl"
+  train_ratio: 0.6
+  valid_ratio: 0.2
+  normalize: True
+  shifted_concatenation: False
+  strided_features: "xr"
+
+
+model:
+  dim_model: 64
+  num_head: 4
+  num_layers: 4
+  dropout: 0.
+  use_current_feature: True
+  target_quantiles:
+    - [0.95, 0.05]
+  prediction_step: 1
+  window_size: 100
+
+
+training:
+  batch_size: 64
+  learning_rate: 0.001
+  epochs: 1
+  early_stop: 2
+
+saving_dir: "C:/Users/jayao/Desktop/run_test/"
+

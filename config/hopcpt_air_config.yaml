@@ -1,0 +1,29 @@
+
+device: 0
+
+data:
+  data_path: "C:/Users/jayao/Desktop/lr_air-10_data.pkl"
+  train_ratio: 0.6
+  valid_ratio: 0.2
+  normalize: False
+  memory_features: "xy"
+
+
+model:
+  dim_context_encoding: 12
+  dim_hopfield_hidden: 12
+  beta: 1
+  memory_size: 500
+  prediction_step: 1
+  alpha: 0.1
+  sampling_num: 1000
+
+
+training:
+  batch_size: 64
+  learning_rate: 0.01
+  epochs: 3000
+  validation_epochs: 5
+
+saving_dir: "C:/Users/jayao/Desktop/hopcpt_run/"
+

@@ -1,0 +1,19 @@
+data:
+  data_path: "C:/Users/jayao/Desktop/lr_toy_data.pkl"
+  train_ratio: 0.6
+  valid_ratio: 0.2
+  normalize: False
+
+
+model:
+  n_estimators: 10
+  max_depth: 2
+  criterion: "squared_error"
+  target_quantiles:
+    - [0.950, 0.05]
+  prediction_step: 1
+  window_size: 100
+
+
+saving_dir: "C:/Users/jayao/Desktop/spci_test/"
+
