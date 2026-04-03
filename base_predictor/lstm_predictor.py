@@ -112,10 +112,10 @@ class LSTMPredictor:
 
         merged_train_x_seq = np.vstack(merged_train_x_seq)
         merged_train_y_seq = np.vstack(merged_train_y_seq)
-        merged_train_x_seq = _shuffle_array(merged_train_x_seq, seed)
-        merged_train_y_seq = _shuffle_array(merged_train_y_seq, seed)
         train_x_seq, valid_x_seq = _split_before(merged_train_x_seq, train_ratio)
         train_y_seq, valid_y_seq = _split_before(merged_train_y_seq, train_ratio)
+        train_x_seq, train_y_seq = _shuffle_in_unison(train_x_seq, train_y_seq, seed)
+        valid_x_seq, valid_y_seq = _shuffle_in_unison(valid_x_seq, valid_y_seq, seed)
 
         train_dataset = LSTMPredictorDataset(train_x_seq, train_y_seq)
         valid_dataset = LSTMPredictorDataset(valid_x_seq, valid_y_seq)
@@ -213,7 +213,8 @@ class LSTMPredictor:
 
     def save(self, save_dir):
 
-        data_record_save_path = os.path.join(save_dir + "lstm_" + str(self.data_type) + "_data.pkl")
+        os.makedirs(save_dir, exist_ok=True)
+        data_record_save_path = os.path.join(save_dir, f"lstm_{self.data_type}_data.pkl")
         data_record = dict()
 
         for key, item in tqdm(self.data_processed.items()):
@@ -234,7 +235,7 @@ class LSTMPredictor:
                                 "train_y_std" : item["train_y_std"],
                                 "heldout_predictions" : self.predictions[key]}
             
-        predictor_results_save_path = os.path.join(save_dir + "lstm_" + str(self.data_type) + "_results.pkl")
+        predictor_results_save_path = os.path.join(save_dir, f"lstm_{self.data_type}_results.pkl")
         predictor_results = {"window_length" : self.window_length,
                              "embedding_dim" : self.embedding_dim,
                              "hidden_dim" : self.hidden_dim,
@@ -262,15 +263,17 @@ class LSTMPredictorDataset(Dataset):
         return self.X[idx], self.Y[idx]
     
 
-def _shuffle_array(arr, seed=None):
+def _shuffle_in_unison(x, y, seed=None):
+    if len(x) != len(y):
+        raise ValueError("x and y must have the same length")
 
     if seed is not None:
         rng = np.random.default_rng(seed)
-        idx = rng.permutation(len(arr))
+        idx = rng.permutation(len(x))
     else:
-        idx = np.random.permutation(len(arr))
+        idx = np.random.permutation(len(x))
 
-    return arr[idx]
+    return x[idx], y[idx]
 
 
 def _split_before(arr, split_ratio):
@@ -296,6 +299,13 @@ def _make_sequence_prediction_data(x, y, k):
         y = y[:, None]
 
     T, D = x.shape
+    if T < k:
+        print(
+            "Warning: sequence length ({}) is shorter than window length ({}); "
+            "returning empty sequence data.".format(T, k)
+        )
+        return np.empty((0, k, D), dtype=x.dtype), np.empty((0, y.shape[1]), dtype=y.dtype)
+
     # Build X_seq
     # j ranges 0..T-k, window is x[j:j+k]
     X_seq = np.stack([x[j:j+k] for j in range(T - k + 1)], axis=0)  # (T-k+1, k, D)

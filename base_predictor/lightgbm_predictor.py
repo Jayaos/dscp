@@ -58,7 +58,7 @@ class LightGBMPredictor:
 
             print("making predictions on heldout set...")
             all_x = concatenate([item["train_x"], item["heldout_x"]], axis="time")
-            past_x = all_x[len(item["train_x"])-(past_window+1):]
+            past_x = all_x[len(item["train_x"])-past_window:]
             predictions = model.predict(len(item["heldout_y"]), past_covariates=past_x)
             mse_heldout = mse(item["heldout_y"], predictions)
             mae_heldout = mae(item["heldout_y"], predictions)
@@ -74,7 +74,8 @@ class LightGBMPredictor:
 
     def save(self, save_dir):
 
-        save_path = os.path.join(save_dir + "lightgbm_" + str(self.data_type) + "_data.pkl")
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, f"lightgbm_{self.data_type}_data.pkl")
         data_record = dict()
         
         for key, item in tqdm(self.data_darts_format.items()):

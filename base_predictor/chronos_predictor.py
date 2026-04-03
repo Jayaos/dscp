@@ -76,7 +76,8 @@ class ChronosPredictor:
 
     def save(self, save_dir):
 
-        data_record_save_path = os.path.join(save_dir + "chronos_" + str(self.data_type) + "_data.pkl")
+        os.makedirs(save_dir, exist_ok=True)
+        data_record_save_path = os.path.join(save_dir, f"chronos_{self.data_type}_data.pkl")
         data_record = dict()
 
         for key, data in self.data.items():
@@ -84,7 +85,7 @@ class ChronosPredictor:
                                 "heldout_y" : data["y"][self.window_length:],
                                 "heldout_predictions" : self.predictions[key]}
 
-        predictor_results_save_path = os.path.join(save_dir + "chronos_" + str(self.data_type) + "_results.pkl")
+        predictor_results_save_path = os.path.join(save_dir, f"chronos_{self.data_type}_results.pkl")
         predictor_results = {"window_length" : self.window_length,
                              "prediction_length" : self.prediction_length,
                              "average_mse" : self.average_mse,
