@@ -4,10 +4,12 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 import os
+import warnings
 from darts import TimeSeries, concatenate
 from darts.models import LightGBMModel
 from darts.metrics import mse, mae
 
+warnings.filterwarnings("ignore", category=UserWarning)
 
 class LightGBMPredictor:
     # TODO: prediction plot function
@@ -61,7 +63,6 @@ class LightGBMPredictor:
             print("making predictions on heldout set...")
             all_x = concatenate([item["train_x"], item["heldout_x"]], axis="time")
             past_x = all_x[len(item["train_x"])-past_window:]
-            print(past_x.components, flush=True)
 
             predictions = model.predict(len(item["heldout_y"]), 
                                         past_covariates=past_x,
