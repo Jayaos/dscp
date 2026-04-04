@@ -35,6 +35,8 @@ class LightGBMPredictor:
             train_x, heldout_x = x_ts.split_before(self.train_ratio)
             train_y, heldout_y = y_ts.split_before(self.train_ratio)
 
+            print(train_x)
+
             self.data_darts_format[key] = {"train_x" : train_x,
                                       "heldout_x" : heldout_x,
                                       "train_y" : train_y,
@@ -49,7 +51,6 @@ class LightGBMPredictor:
 
         for key, item in tqdm(self.data_darts_format.items()):
             print("fitting lightGBM model on {}".format(key))
-            print(past_window)
             model = LightGBMModel(lags=past_window,
                                   lags_past_covariates=past_window,
                                   output_chunk_length=prediction_step,
