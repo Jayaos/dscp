@@ -14,6 +14,8 @@ dependencies:
   - pandas=2.3.3
   - scikit-learn=1.7.2
   - tqdm=4.67.1
+  - pytorch=2.2.0
+  - pytorch-cuda=12.1
   - pip:
       - accelerate==1.12.0
       - asttokens==3.0.1
@@ -74,7 +76,6 @@ dependencies:
       - sympy==1.14.0
       - threadpoolctl==3.6.0
       - tokenizers==0.22.2
-      - torch==2.2.0+cu121
       - tornado==6.5.4
       - traitlets==5.14.3
       - transformers==4.57.6
