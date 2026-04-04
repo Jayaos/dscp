@@ -35,7 +35,7 @@ class LightGBMPredictor:
             train_x, heldout_x = x_ts.split_before(self.train_ratio)
             train_y, heldout_y = y_ts.split_before(self.train_ratio)
 
-            print(train_x)
+            print(train_x.components)
 
             self.data_darts_format[key] = {"train_x" : train_x,
                                       "heldout_x" : heldout_x,
