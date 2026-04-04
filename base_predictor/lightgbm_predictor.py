@@ -49,6 +49,7 @@ class LightGBMPredictor:
 
         for key, item in tqdm(self.data_darts_format.items()):
             print("fitting lightGBM model on {}".format(key))
+            print(past_window)
             model = LightGBMModel(lags=past_window,
                                   lags_past_covariates=past_window,
                                   output_chunk_length=prediction_step,
@@ -59,7 +60,10 @@ class LightGBMPredictor:
             print("making predictions on heldout set...")
             all_x = concatenate([item["train_x"], item["heldout_x"]], axis="time")
             past_x = all_x[len(item["train_x"])-past_window:]
-            predictions = model.predict(len(item["heldout_y"]), past_covariates=past_x)
+            predictions = model.predict(len(item["heldout_y"]), 
+                                        past_covariates=past_x,
+                                        show_warnings=False) 
+            # show_warinings=False to turn of 
             mse_heldout = mse(item["heldout_y"], predictions)
             mae_heldout = mae(item["heldout_y"], predictions)
 
