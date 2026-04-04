@@ -61,6 +61,8 @@ class LightGBMPredictor:
             print("making predictions on heldout set...")
             all_x = concatenate([item["train_x"], item["heldout_x"]], axis="time")
             past_x = all_x[len(item["train_x"])-past_window:]
+            print(past_x.components)
+            
             predictions = model.predict(len(item["heldout_y"]), 
                                         past_covariates=past_x,
                                         show_warnings=False) 
