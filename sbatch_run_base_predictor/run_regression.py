@@ -52,8 +52,8 @@ def main() -> None:
     base_predictor_data = BasePredictorData()
     base_predictor_data.load_data(args.data_type, str(data_dir))
 
-    predictor = LinearRegressionPredictor(base_predictor_data, args.train_ratio)
-    predictor.fit_predict(args.past_window, args.prediction_step)
+    predictor = LinearRegressionPredictor(base_predictor_data, args.train_ratio, args.past_window, args.prediction_step)
+    predictor.fit_predict()
     predictor.save(str(save_dir))
 
 
