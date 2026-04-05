@@ -13,11 +13,13 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 class LightGBMPredictor:
     # TODO: prediction plot function
-    def __init__(self, data: BasePredictorData, train_ratio):
+    def __init__(self, data: BasePredictorData, train_ratio, past_window, prediction_step):
         super(LightGBMPredictor, self).__init__()
         self.data = data.data
         self.data_type = data.data_type
         self.train_ratio = train_ratio
+        self.past_window = past_window
+        self.prediction_step = prediction_step
         self.data_darts_format = dict()
         self.models = dict()
         self.predictions = dict()
@@ -42,7 +44,7 @@ class LightGBMPredictor:
                                       "train_y" : train_y,
                                       "heldout_y" : heldout_y}
             
-    def fit_predict(self, past_window, prediction_step):
+    def fit_predict(self):
         """
         fit lightGBM predictor on data and make point prediction
         """
@@ -51,16 +53,16 @@ class LightGBMPredictor:
 
         for key, item in tqdm(self.data_darts_format.items()):
             print("fitting lightGBM model on {}".format(key))
-            model = LightGBMModel(lags=past_window,
-                                  lags_past_covariates=past_window,
-                                  output_chunk_length=prediction_step,
+            model = LightGBMModel(lags=self.past_window,
+                                  lags_past_covariates=self.past_window,
+                                  output_chunk_length=self.prediction_step,
                                   verbose=-1)
             
             model.fit(item["train_y"], past_covariates=item["train_x"])
 
             print("making predictions on heldout set...")
             all_x = concatenate([item["train_x"], item["heldout_x"]], axis="time")
-            past_x = all_x[len(item["train_x"])-past_window:]
+            past_x = all_x[len(item["train_x"])-self.past_window:]
 
             predictions = model.predict(len(item["heldout_y"]), 
                                         past_covariates=past_x,
@@ -75,8 +77,10 @@ class LightGBMPredictor:
             self.predictions[key] = predictions
             self.models[key] = model
 
-        print("average MSE over {} sequences : {}".format(len(self.data), np.mean(mse_list)))
-        print("average MAE over {} sequences : {}".format(len(self.data), np.mean(mae_list)))
+        self.average_mse = np.mean(mse_list)
+        self.average_mae = np.mean(mae_list)
+        print("average MSE over {} sequences : {}".format(len(self.data), self.average_mse))
+        print("average MAE over {} sequences : {}".format(len(self.data), self.average_mae))
 
     def save(self, save_dir):
 
@@ -92,5 +96,12 @@ class LightGBMPredictor:
                                 "heldout_y" : item["heldout_y"].values(),
                                 "heldout_predictions" : self.predictions[key].values()}
             
+        predictor_results_save_path = os.path.join(save_dir, f"lightgbm_{self.data_type}_results.pkl")
+        predictor_results = {"past_window" : self.past_window,
+                             "prediction_step" : self.prediction_step,
+                             "average_mse" : self.average_mse,
+                             "average_mae" : self.average_mae}
+            
         save_data(save_path, data_record)
+        save_data(predictor_results_save_path, predictor_results)
     

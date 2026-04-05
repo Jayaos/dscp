@@ -41,6 +41,7 @@ class ChronosPredictor:
             iter_num = int(np.ceil((y.shape[0] - window_length) / prediction_length))
             
             predictions = []
+            series_targets = []
             for i in tqdm(range(iter_num)):
 
                 context_x = x[i*prediction_length:i*prediction_length+window_length,:]
@@ -59,14 +60,17 @@ class ChronosPredictor:
                 )
 
                 predictions.extend(pred_df["predictions"].to_list())
-
-                mse = torch.nn.functional.mse_loss(torch.from_numpy(pred_df["predictions"].to_numpy()), 
-                                                   torch.from_numpy(future_y).to(torch.float32))
-                mse_list.append(mse.item())
-                mae = torch.nn.functional.l1_loss(torch.from_numpy(pred_df["predictions"].to_numpy()), 
-                                                   torch.from_numpy(future_y).to(torch.float32))
-                mae_list.append(mae.item())
+                series_targets.extend(future_y.tolist())
             
+            predictions_array = np.asarray(predictions, dtype=np.float32)
+            targets_array = np.asarray(series_targets, dtype=np.float32)
+
+            mse = torch.nn.functional.mse_loss(torch.from_numpy(predictions_array),
+                                               torch.from_numpy(targets_array))
+            mae = torch.nn.functional.l1_loss(torch.from_numpy(predictions_array),
+                                              torch.from_numpy(targets_array))
+            mse_list.append(mse.item())
+            mae_list.append(mae.item())
             self.predictions[key] = predictions
 
         self.average_mse = np.mean(mse_list)

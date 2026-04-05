@@ -188,6 +188,7 @@ class LSTMPredictor:
             heldout_dataloader = DataLoader(heldout_dataset, batch_size=batch_size, shuffle=False)
 
             predictions = []
+            series_targets = []
             for x_batch, y_batch in tqdm(heldout_dataloader):
 
                 with torch.no_grad():
@@ -198,13 +199,17 @@ class LSTMPredictor:
                     denormalized_y_batch = denormalize_array(y_batch, y_mu, y_std)
                     denormalized_preds = denormalize_array(preds, y_mu, y_std)
                     predictions.append(denormalized_preds)
-    
-                    mse = torch.nn.functional.mse_loss(denormalized_preds, denormalized_y_batch)
-                    mse_list.append(mse.item())
-                    mae = torch.nn.functional.l1_loss(denormalized_preds, denormalized_y_batch)
-                    mae_list.append(mae.item())
+                    series_targets.append(denormalized_y_batch)
 
-            self.predictions[key] = torch.vstack(predictions)
+            series_predictions = torch.vstack(predictions)
+            series_targets = torch.vstack(series_targets)
+
+            mse = torch.nn.functional.mse_loss(series_predictions, series_targets)
+            mae = torch.nn.functional.l1_loss(series_predictions, series_targets)
+            mse_list.append(mse.item())
+            mae_list.append(mae.item())
+
+            self.predictions[key] = series_predictions
 
         self.average_mse = np.mean(mse_list)
         self.average_mae = np.mean(mae_list)
