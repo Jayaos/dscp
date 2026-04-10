@@ -541,4 +541,4 @@ def _compute_average_interval_width(interval_width_dict):
     for cp, interval_widths in interval_width_dict.items():
         avg_interval_width.append(np.mean(interval_widths))
 
-    return np.mean(interval_widths)
+    return np.mean(avg_interval_width)
