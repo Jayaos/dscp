@@ -41,7 +41,7 @@ class QuantileRegressionRNN(torch.nn.Module):
         B, T, D = x.shape
         x_emb = self.input_linear(x)
         # (batch_size, window_len, model_dim)
-        h, (_, _) = self.rnn(x_emb)
+        h, _ = self.rnn(x_emb)
         
         if current_feature != None:
             # (batch_size, window_len, model_dim+current_feature_dim)
