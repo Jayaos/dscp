@@ -5,7 +5,7 @@ import copy
 import numpy as np
 from tqdm import tqdm
 from dscp.models.transformer_predictor import TransformerPredictor
-from dscp.models.cdf_approximation import CDFApproximation
+from dscp.models.local_approximation import CDFApproximation
 from dscp.loss import compute_loss_transformer_predictor
 from dscp.data import ConformalPredictionData
 from utils.utils import load_data, save_data, read_setup, flatten, generate_strided_feature
