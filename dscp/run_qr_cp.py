@@ -10,7 +10,7 @@ from dscp.loss import compute_loss_quantile_regression_transformer, compute_loss
 from dscp.data import ConformalPredictionData
 from utils.utils import load_data, save_data, read_setup, generate_strided_feature
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, summarize_evaluation_results
-from utils.plotting import plot_qr_cp_prediction_intervals
+from utils.plotting import plot_cp_prediction_intervals
 from torch.utils.data import DataLoader
 
 
@@ -265,7 +265,6 @@ def run_transformer_quantile_regression(config_path):
             evaluation_results[tuple_confidence_pair]["avg_interval_width"] = avg_interval_width
             evaluation_results[tuple_confidence_pair]["avg_winkler_score"] = avg_winkler_score
 
-
         log[key] = {"train_loss" : train_loss,
                     "valid_loss" : valid_loss,
                     "evaluation_results" : evaluation_results}
@@ -297,7 +296,7 @@ def run_transformer_quantile_regression(config_path):
     save_data(os.path.join(config.saving_dir, "summary_results.pkl"), summary_results)
 
     if config.plotting.plotting:
-        plot_qr_cp_prediction_intervals(log, 
+        plot_cp_prediction_intervals(log, 
                                         config.model.target_quantiles, 
                                         config.plotting.plotting_seq_len,
                                         os.path.join(config.saving_dir, "plots"))
@@ -580,7 +579,7 @@ def run_rnn_quantile_regression(config_path):
     save_data(os.path.join(config.saving_dir, "summary_results.pkl"), summary_results)
 
     if config.plotting.plotting:
-        plot_qr_cp_prediction_intervals(log, 
+        plot_cp_prediction_intervals(log, 
                                         config.model.target_quantiles, 
                                         config.plotting.plotting_seq_len,
                                         os.path.join(config.saving_dir, "plots"))

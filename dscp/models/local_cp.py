@@ -8,15 +8,16 @@ SIM_FN_MAP = {
 }
 
 
-class CDFApproximation():
+class LocalConformalPrediction():
     """
     class to approximate cdf using weight
     """
 
     def __init__(self, encoded_rep, target, similarity_fn, temperature, device):
         """
-        :param encoded_rep: encoded representation for each timestep in the calibration set, (calib_size, dim)
-        :param target: residual for each timestep, (calib_size, )
+        Args
+            encoded_rep: tensor, encoded representation for each timestep in the calibration set, (calib_size, dim)
+            target: tensor, residual for each timestep, (calib_size, 1)
         """
 
         self.encoded_rep = encoded_rep

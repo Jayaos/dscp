@@ -68,3 +68,15 @@ def compute_loss_transformer_predictor(transformer_predictor, x, target):
     errors = target - output[:, -1, :] # (batch_size, prediction_step)
 
     return (errors**2).mean()
+
+
+def compute_loss_rnn_predictor(rnn_predictor, x, target):
+    """
+    compute prediction loss for RNN predictor
+    :param x: input, (batch_size, window_size, feature_dim)
+    :param target: target_residual, (batch_size, prediction_step)
+    """
+    output = rnn_predictor(x)  # (batch_size, window_size, prediction_step)
+    errors = target - output[:, -1, :]  # (batch_size, prediction_step)
+
+    return (errors**2).mean()

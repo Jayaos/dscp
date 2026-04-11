@@ -102,7 +102,7 @@ def plot_chronous_predictions(prediction_data, plot_len, n_seqs, save_dir=None):
             plt.show()
 
 
-def plot_qr_cp_prediction_intervals(log, target_quantiles, plotting_seq_length, save_dir=None):
+def plot_cp_prediction_intervals(log, target_quantiles, plotting_seq_length, save_dir=None):
 
     if save_dir is not None:
         os.makedirs(save_dir, exist_ok=True)
