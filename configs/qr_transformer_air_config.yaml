@@ -4,8 +4,8 @@ device: 0
 
 data:
   data_path: "C:/Users/jayao/Desktop/python_projects/DSCP/data/air-10/chronos/chronos_air-10_data.pkl"
-  train_ratio: 0.6
-  valid_ratio: 0.2
+  train_ratio: 0.7
+  valid_ratio: 0.15
   normalize: True
   shifted_concatenation: False
   strided_features: "xr"
@@ -28,6 +28,12 @@ training:
   learning_rate: 0.001
   epochs: 1
   early_stop: 2
+
+
+plotting:
+  plotting: True
+  plotting_seq_len: 200
+
 
 saving_dir: "C:/Users/jayao/Desktop/run_test/"
 

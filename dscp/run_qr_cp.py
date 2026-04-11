@@ -8,8 +8,9 @@ from dscp.models.qr_transformer import QuantileRegressionTransformer
 from dscp.models.qr_rnn import QuantileRegressionRNN
 from dscp.loss import compute_loss_quantile_regression_transformer, compute_loss_quantile_regression_rnn
 from dscp.data import ConformalPredictionData
-from utils.utils import load_data, save_data, read_setup, generate_strided_feature_for_quantile_regression
-from utils.utils import compute_coverage, compute_interval_width, compute_winkler_score
+from utils.utils import load_data, save_data, read_setup, generate_strided_feature
+from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, summarize_evaluation_results
+from utils.plotting import plot_qr_cp_prediction_intervals
 from torch.utils.data import DataLoader
 
 
@@ -63,7 +64,7 @@ def run_transformer_quantile_regression(config_path):
                                                     config.model.dim_model, 
                                                     config.model.num_head,
                                                     config.model.dim_model*4, 
-                                                    config.model.num_layer, 
+                                                    config.model.num_layers, 
                                                     config.model.target_quantiles,
                                                     config.model.prediction_step, 
                                                     config.model.dropout,
@@ -74,7 +75,7 @@ def run_transformer_quantile_regression(config_path):
                                                     config.model.dim_model, 
                                                     config.model.num_head,
                                                     config.model.dim_model*4, 
-                                                    config.model.num_layer, 
+                                                    config.model.num_layers, 
                                                     config.model.target_quantiles,
                                                     config.model.prediction_step, 
                                                     config.model.dropout,
@@ -100,10 +101,10 @@ def run_transformer_quantile_regression(config_path):
                 # target_x : (batch, 1, current_feature_dim)
 
                 optimizer.zero_grad()
-                strided_feature = generate_strided_feature_for_quantile_regression(strided_x, 
-                                                                                   strided_residual, 
-                                                                                   strided_y,
-                                                                                   config.data.strided_features)
+                strided_feature = generate_strided_feature(strided_x, 
+                                                           strided_residual, 
+                                                           strided_y,
+                                                           config.data.strided_features)
                 strided_feature = strided_feature.to(device)
                 target_residual = target_residual.to(device)
                 target_x = target_x.to(device)
@@ -130,10 +131,10 @@ def run_transformer_quantile_regression(config_path):
             qr_transformer.eval()
             for strided_x, strided_residual, strided_y, target_x, target_residual, _, _ in tqdm(valid_dataloader):
 
-                strided_feature = generate_strided_feature_for_quantile_regression(strided_x, 
-                                                                                   strided_residual, 
-                                                                                   strided_y,
-                                                                                   config.data.strided_features)
+                strided_feature = generate_strided_feature(strided_x, 
+                                                           strided_residual, 
+                                                           strided_y,
+                                                           config.data.strided_features)
                 strided_feature = strided_feature.to(device)
                 target_residual = target_residual.to(device)
                 target_x = target_x.to(device)
@@ -188,14 +189,12 @@ def run_transformer_quantile_regression(config_path):
         for strided_x, strided_residual, strided_y, target_x, target_residual, target_y, target_predictions in tqdm(test_dataloader):
             
             with torch.no_grad():
-                strided_feature = generate_strided_feature_for_quantile_regression(strided_x, 
-                                                                                   strided_residual, 
-                                                                                   strided_y,
-                                                                                   config.data.strided_features)
+                strided_feature = generate_strided_feature(strided_x, 
+                                                           strided_residual, 
+                                                           strided_y,
+                                                           config.data.strided_features)
                 strided_feature = strided_feature.to(device)
-                target_residual = target_residual.to(device)
                 target_x = target_x.to(device)
-                target_y = target_y.to(device)
 
                 if config.model.use_current_feature:
                     # (batch_size, 2*len(target_quantiles))
@@ -238,8 +237,8 @@ def run_transformer_quantile_regression(config_path):
                                                                tuple_confidence_pair, 
                                                                normalized_params=None)
                 
-                evaluation_results[tuple_confidence_pair]["upper_interval"].extend(hi)
-                evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lo)
+                evaluation_results[tuple_confidence_pair]["upper_interval"].extend(hi.tolist())
+                evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lo.tolist())
                 evaluation_results[tuple_confidence_pair]["coverage"].extend(this_coverage)
                 evaluation_results[tuple_confidence_pair]["interval_width"].extend(this_interval_width)
                 evaluation_results[tuple_confidence_pair]["winkler_score"].extend(this_winkler_score)
@@ -252,15 +251,20 @@ def run_transformer_quantile_regression(config_path):
         
         for confidence_pair in config.model.target_quantiles:
             tuple_confidence_pair = tuple(confidence_pair)
+            target_alpha = max(tuple_confidence_pair) - min(tuple_confidence_pair)
             avg_coverage = np.mean(evaluation_results[tuple_confidence_pair]["coverage"])
+            avg_delta_coverage = avg_coverage - target_alpha
             avg_interval_width = np.mean(evaluation_results[tuple_confidence_pair]["interval_width"])
             avg_winkler_score = np.mean(evaluation_results[tuple_confidence_pair]["winkler_score"])
-            print("avg coverage: {}".format(np.mean(evaluation_results[tuple_confidence_pair]["coverage"])))
-            print("avg interval width: {}".format(np.mean(evaluation_results[tuple_confidence_pair]["interval_width"])))
-            print("avg winkler score: {}".format(np.mean(evaluation_results[tuple_confidence_pair]["winkler_score"])))
+            print("avg coverage: {}".format(avg_coverage))
+            print("avg delta coverage: {}".format(avg_delta_coverage))
+            print("avg interval width: {}".format(avg_interval_width))
+            print("avg winkler score: {}".format(avg_winkler_score))
             evaluation_results[tuple_confidence_pair]["avg_coverage"] = avg_coverage
+            evaluation_results[tuple_confidence_pair]["avg_delta_coverage"] = avg_delta_coverage
             evaluation_results[tuple_confidence_pair]["avg_interval_width"] = avg_interval_width
             evaluation_results[tuple_confidence_pair]["avg_winkler_score"] = avg_winkler_score
+
 
         log[key] = {"train_loss" : train_loss,
                     "valid_loss" : valid_loss,
@@ -268,6 +272,35 @@ def run_transformer_quantile_regression(config_path):
         
         torch.save(best_model, os.path.join(config.saving_dir, key + '_model.pt'))
         save_data(os.path.join(config.saving_dir, "log.pkl"), log)
+
+    summary_results = summarize_evaluation_results(log, config.model.target_quantiles)
+
+    for tuple_confidence_pair, summary in summary_results.items():
+        print("Summary for confidence pair {}".format(tuple_confidence_pair))
+        print("avg_coverage mean: {}, std: {}".format(
+            summary["avg_coverage_mean"],
+            summary["avg_coverage_std"])
+        )
+        print("avg_delta_coverage mean: {}, std: {}".format(
+            summary["avg_delta_coverage_mean"],
+            summary["avg_delta_coverage_std"])
+        )
+        print("avg_interval_width mean: {}, std: {}".format(
+            summary["avg_interval_width_mean"],
+            summary["avg_interval_width_std"])
+        )
+        print("avg_winkler_score mean: {}, std: {}".format(
+            summary["avg_winkler_score_mean"],
+            summary["avg_winkler_score_std"])
+        )
+
+    save_data(os.path.join(config.saving_dir, "summary_results.pkl"), summary_results)
+
+    if config.plotting.plotting:
+        plot_qr_cp_prediction_intervals(log, 
+                                        config.model.target_quantiles, 
+                                        config.plotting.plotting_seq_len,
+                                        os.path.join(config.saving_dir, "plots"))
                     
 
 def run_rnn_quantile_regression(config_path):
@@ -355,10 +388,10 @@ def run_rnn_quantile_regression(config_path):
                 # target_x : (batch, 1, current_feature_dim)
 
                 optimizer.zero_grad()
-                strided_feature = generate_strided_feature_for_quantile_regression(strided_x, 
-                                                                                   strided_residual, 
-                                                                                   strided_y,
-                                                                                   config.data.strided_features)
+                strided_feature = generate_strided_feature(strided_x, 
+                                                            strided_residual, 
+                                                            strided_y,
+                                                            config.data.strided_features)
                 strided_feature = strided_feature.to(device)
                 target_residual = target_residual.to(device)
                 target_x = target_x.to(device)
@@ -385,10 +418,10 @@ def run_rnn_quantile_regression(config_path):
             qr_rnn.eval()
             for strided_x, strided_residual, strided_y, target_x, target_residual, _, _ in tqdm(valid_dataloader):
 
-                strided_feature = generate_strided_feature_for_quantile_regression(strided_x, 
-                                                                                   strided_residual, 
-                                                                                   strided_y,
-                                                                                   config.data.strided_features)
+                strided_feature = generate_strided_feature(strided_x, 
+                                                            strided_residual, 
+                                                            strided_y,
+                                                            config.data.strided_features)
                 strided_feature = strided_feature.to(device)
                 target_residual = target_residual.to(device)
                 target_x = target_x.to(device)
@@ -443,14 +476,12 @@ def run_rnn_quantile_regression(config_path):
         for strided_x, strided_residual, strided_y, target_x, target_residual, target_y, target_predictions in tqdm(test_dataloader):
             
             with torch.no_grad():
-                strided_feature = generate_strided_feature_for_quantile_regression(strided_x, 
-                                                                                   strided_residual, 
-                                                                                   strided_y,
-                                                                                   config.data.strided_features)
+                strided_feature = generate_strided_feature(strided_x, 
+                                                            strided_residual, 
+                                                            strided_y,
+                                                            config.data.strided_features)
                 strided_feature = strided_feature.to(device)
-                target_residual = target_residual.to(device)
                 target_x = target_x.to(device)
-                target_y = target_y.to(device)
 
                 if config.model.use_current_feature:
                     # (batch_size, 2*len(target_quantiles))
@@ -490,8 +521,8 @@ def run_rnn_quantile_regression(config_path):
                                                                tuple_confidence_pair, 
                                                                normalized_params=None)
                 
-                evaluation_results[tuple_confidence_pair]["upper_interval"].extend(hi)
-                evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lo)
+                evaluation_results[tuple_confidence_pair]["upper_interval"].extend(hi.tolist())
+                evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lo.tolist())
                 evaluation_results[tuple_confidence_pair]["coverage"].extend(this_coverage)
                 evaluation_results[tuple_confidence_pair]["interval_width"].extend(this_interval_width)
                 evaluation_results[tuple_confidence_pair]["winkler_score"].extend(this_winkler_score)
@@ -504,13 +535,17 @@ def run_rnn_quantile_regression(config_path):
         
         for confidence_pair in config.model.target_quantiles:
             tuple_confidence_pair = tuple(confidence_pair)
+            target_alpha = max(tuple_confidence_pair) - min(tuple_confidence_pair)
             avg_coverage = np.mean(evaluation_results[tuple_confidence_pair]["coverage"])
+            avg_delta_coverage = avg_coverage - target_alpha
             avg_interval_width = np.mean(evaluation_results[tuple_confidence_pair]["interval_width"])
             avg_winkler_score = np.mean(evaluation_results[tuple_confidence_pair]["winkler_score"])
-            print("avg coverage: {}".format(np.mean(evaluation_results[tuple_confidence_pair]["coverage"])))
-            print("avg interval width: {}".format(np.mean(evaluation_results[tuple_confidence_pair]["interval_width"])))
-            print("avg winkler score: {}".format(np.mean(evaluation_results[tuple_confidence_pair]["winkler_score"])))
+            print("avg coverage: {}".format(avg_coverage))
+            print("avg delta coverage: {}".format(avg_delta_coverage))
+            print("avg interval width: {}".format(avg_interval_width))
+            print("avg winkler score: {}".format(avg_winkler_score))
             evaluation_results[tuple_confidence_pair]["avg_coverage"] = avg_coverage
+            evaluation_results[tuple_confidence_pair]["avg_delta_coverage"] = avg_delta_coverage
             evaluation_results[tuple_confidence_pair]["avg_interval_width"] = avg_interval_width
             evaluation_results[tuple_confidence_pair]["avg_winkler_score"] = avg_winkler_score
 
@@ -521,24 +556,34 @@ def run_rnn_quantile_regression(config_path):
         torch.save(best_model, os.path.join(config.saving_dir, key + '_model.pt'))
         save_data(os.path.join(config.saving_dir, "log.pkl"), log)
 
+    summary_results = summarize_evaluation_results(log, config.model.target_quantiles)
 
-def _compute_average_delta_coverage(coverage_dict):
+    for tuple_confidence_pair, summary in summary_results.items():
+        print("Summary for confidence pair {}".format(tuple_confidence_pair))
+        print("avg_coverage mean: {}, std: {}".format(
+            summary["avg_coverage_mean"],
+            summary["avg_coverage_std"])
+        )
+        print("avg_delta_coverage mean: {}, std: {}".format(
+            summary["avg_delta_coverage_mean"],
+            summary["avg_delta_coverage_std"])
+        )
+        print("avg_interval_width mean: {}, std: {}".format(
+            summary["avg_interval_width_mean"],
+            summary["avg_interval_width_std"])
+        )
+        print("avg_winkler_score mean: {}, std: {}".format(
+            summary["avg_winkler_score_mean"],
+            summary["avg_winkler_score_std"])
+        )
 
-    avg_delta_coverages = []
+    save_data(os.path.join(config.saving_dir, "summary_results.pkl"), summary_results)
 
-    for cp, coverages in coverage_dict.items():
-        target_coverage = cp[0] - cp[1]
-        delta_coverage = np.mean(coverages) - target_coverage
-        avg_delta_coverages.append(delta_coverage)
+    if config.plotting.plotting:
+        plot_qr_cp_prediction_intervals(log, 
+                                        config.model.target_quantiles, 
+                                        config.plotting.plotting_seq_len,
+                                        os.path.join(config.saving_dir, "plots"))
 
-    return np.mean(avg_delta_coverages)
 
 
-def _compute_average_interval_width(interval_width_dict):
-
-    avg_interval_width = []
-
-    for cp, interval_widths in interval_width_dict.items():
-        avg_interval_width.append(np.mean(interval_widths))
-
-    return np.mean(avg_interval_width)

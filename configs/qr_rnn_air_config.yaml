@@ -28,5 +28,11 @@ training:
   epochs: 1
   early_stop: 2
 
+
+plotting:
+  plotting: True
+  plotting_seq_len: 200
+
+
 saving_dir: "C:/Users/jayao/Desktop/run_test_rnn/"
 
