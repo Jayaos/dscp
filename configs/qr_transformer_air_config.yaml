@@ -13,7 +13,7 @@ data:
 
 model:
   dim_model: 64
-  num_head: 4
+  num_heads: 4
   num_layers: 4
   dropout: 0.
   use_current_feature: True

@@ -12,7 +12,7 @@ from dscp.data import ConformalPredictionData
 from utils.utils import load_data, save_data, read_setup, flatten, generate_strided_feature
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, summarize_evaluation_results
 from utils.plotting import plot_cp_prediction_intervals
-from torch.utils.data import DataLoader, ConcatDataset
+from torch.utils.data import DataLoader, ConcatDataset, Subset
 
 
 def run_transformer_local_cp(config_path):
@@ -62,9 +62,9 @@ def run_transformer_local_cp(config_path):
         # model init
         transformer_predictor = TransformerPredictor(dim_feature, 
                                                      config.model.dim_model, 
-                                                     config.model.num_head,
+                                                     config.model.num_heads,
                                                      config.model.dim_model * 4, 
-                                                     config.model.num_layer,
+                                                     config.model.num_layers,
                                                      config.model.prediction_step, 
                                                      config.model.dropout)
         transformer_predictor.to(device)
@@ -150,6 +150,9 @@ def run_transformer_local_cp(config_path):
 
         # NOTE: test_dataloader batch size must be 1 in the current setup
         tv_dataset = ConcatDataset([train_dataset, valid_dataset])
+        if len(tv_dataset) > config.model.calibration_size:
+            start_idx = len(tv_dataset) - config.model.calibration_size
+            tv_dataset = Subset(tv_dataset, range(start_idx, len(tv_dataset)))
         tv_dataloader = DataLoader(tv_dataset, batch_size=config.training.batch_size, shuffle=False)
 
         with torch.no_grad():
@@ -157,10 +160,6 @@ def run_transformer_local_cp(config_path):
                                                                            tv_dataloader,
                                                                            config.data.strided_features,
                                                                            device)
-
-        if len(tv_repr) > config.model.calibration_size:
-            tv_repr = tv_repr[-config.model.calibration_size:]
-            tv_residual = tv_residual[-config.model.calibration_size:]
 
         past_test_repr = []
         past_test_residual = []
@@ -252,8 +251,12 @@ def run_transformer_local_cp(config_path):
                     evaluation_results[tuple_confidence_pair]["train_residuals_mu"] = residuals_noramlized_mu
                     evaluation_results[tuple_confidence_pair]["train_residuals_std"] = residuals_noramlized_std
 
-            past_test_repr.append(query_repr.detach().cpu())
-            past_test_residual.append(strided_residual[:, -1].detach().cpu().reshape(-1, 1))
+            if device == "cpu":
+                past_test_repr.append(query_repr.detach().cpu())
+                past_test_residual.append(strided_residual[:, -1].detach().cpu().reshape(-1, 1))
+            else:
+                past_test_repr.append(query_repr.detach())
+                past_test_residual.append(strided_residual[:, -1].reshape(-1, 1))       
 
             if len(past_test_repr) > config.model.calibration_size:
                 past_test_repr = past_test_repr[-config.model.calibration_size:]
@@ -307,9 +310,9 @@ def run_transformer_local_cp(config_path):
 
     if config.plotting.plotting:
         plot_cp_prediction_intervals(log,
-                                        config.model.target_quantiles,
-                                        config.plotting.plotting_seq_len,
-                                        os.path.join(config.saving_dir, "plots"))
+                                     config.model.target_quantiles,
+                                     config.plotting.plotting_seq_len,
+                                     os.path.join(config.saving_dir, "plots"))
 
 
 def run_rnn_local_cp(config_path):
@@ -360,7 +363,7 @@ def run_rnn_local_cp(config_path):
         rnn_predictor = RNNPredictor(config.model.rnn_type,
                                      dim_feature,
                                      config.model.dim_model,
-                                     config.model.num_layer,
+                                     config.model.num_layers,
                                      config.model.prediction_step,
                                      config.model.dropout)
         rnn_predictor.to(device)
@@ -446,6 +449,9 @@ def run_rnn_local_cp(config_path):
 
         # NOTE: test_dataloader batch size must be 1 in the current setup
         tv_dataset = ConcatDataset([train_dataset, valid_dataset])
+        if len(tv_dataset) > config.model.calibration_size:
+            start_idx = len(tv_dataset) - config.model.calibration_size
+            tv_dataset = Subset(tv_dataset, range(start_idx, len(tv_dataset)))
         tv_dataloader = DataLoader(tv_dataset, batch_size=config.training.batch_size, shuffle=False)
 
         with torch.no_grad():
@@ -453,10 +459,6 @@ def run_rnn_local_cp(config_path):
                                                                    tv_dataloader,
                                                                    config.data.strided_features,
                                                                    device)
-
-        if len(tv_repr) > config.model.calibration_size:
-            tv_repr = tv_repr[-config.model.calibration_size:]
-            tv_residual = tv_residual[-config.model.calibration_size:]
 
         past_test_repr = []
         past_test_residual = []
@@ -606,4 +608,3 @@ def run_rnn_local_cp(config_path):
                                         config.model.target_quantiles,
                                         config.plotting.plotting_seq_len,
                                         os.path.join(config.saving_dir, "plots"))
-

@@ -80,3 +80,46 @@ def compute_loss_rnn_predictor(rnn_predictor, x, target):
     errors = target - output[:, -1, :]  # (batch_size, prediction_step)
 
     return (errors**2).mean()
+
+
+def compute_loss_iqn_transformer(model, x, target, num_taus):
+    """
+    Compute sampled quantile loss for an IQN Transformer.
+
+    :param x: input, (batch_size, window_size, feature_dim)
+    :param target: target_residual, (batch_size, 1)
+    :param num_taus: number of quantile fractions to sample per instance
+    """
+    device = x.device
+    target = target.to(device)
+    causal_mask = torch.nn.Transformer.generate_square_subsequent_mask(x.shape[1]).to(device)
+    quantile_values, taus = model(
+        x,
+        num_taus=num_taus,
+        src_mask=causal_mask,
+        src_key_padding_mask=None,
+    )
+
+    errors = target - quantile_values
+    loss_tensor = torch.max((taus - 1.0) * errors, taus * errors)
+    return loss_tensor.mean()
+
+
+def compute_loss_iqn_rnn(model, x, target, num_taus):
+    """
+    Compute sampled quantile loss for an IQN RNN.
+
+    :param x: input, (batch_size, window_size, feature_dim)
+    :param target: target_residual, (batch_size, 1)
+    :param num_taus: number of quantile fractions to sample per instance
+    """
+    device = x.device
+    target = target.to(device)
+    quantile_values, taus = model(
+        x,
+        num_taus=num_taus,
+    )
+
+    errors = target - quantile_values
+    loss_tensor = torch.max((taus - 1.0) * errors, taus * errors)
+    return loss_tensor.mean()

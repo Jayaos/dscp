@@ -14,7 +14,7 @@ from utils.plotting import plot_cp_prediction_intervals
 from torch.utils.data import DataLoader
 
 
-def run_transformer_quantile_regression(config_path):
+def run_transformer_quantile_regression_cp(config_path):
 
     config = OmegaConf.load(config_path)
     os.makedirs(config.saving_dir, exist_ok=True)
@@ -62,7 +62,7 @@ def run_transformer_quantile_regression(config_path):
             # utilizing up to x_{t-1} and x_t to predict r_t
             qr_transformer = QuantileRegressionTransformer(dim_feature, 
                                                     config.model.dim_model, 
-                                                    config.model.num_head,
+                                                    config.model.num_heads,
                                                     config.model.dim_model*4, 
                                                     config.model.num_layers, 
                                                     config.model.target_quantiles,
@@ -73,7 +73,7 @@ def run_transformer_quantile_regression(config_path):
             # utilizing up to x_{t-1} to predict r_t
             qr_transformer = QuantileRegressionTransformer(dim_feature, 
                                                     config.model.dim_model, 
-                                                    config.model.num_head,
+                                                    config.model.num_heads,
                                                     config.model.dim_model*4, 
                                                     config.model.num_layers, 
                                                     config.model.target_quantiles,
@@ -302,7 +302,7 @@ def run_transformer_quantile_regression(config_path):
                                         os.path.join(config.saving_dir, "plots"))
                     
 
-def run_rnn_quantile_regression(config_path):
+def run_rnn_quantile_regression_cp(config_path):
 
     config = OmegaConf.load(config_path)
     os.makedirs(config.saving_dir, exist_ok=True)
