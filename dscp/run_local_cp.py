@@ -550,8 +550,12 @@ def run_rnn_local_cp(config_path):
                     evaluation_results[tuple_confidence_pair]["train_residuals_mu"] = residuals_noramlized_mu
                     evaluation_results[tuple_confidence_pair]["train_residuals_std"] = residuals_noramlized_std
 
-            past_test_repr.append(query_repr.detach().cpu())
-            past_test_residual.append(strided_residual[:, -1].detach().cpu().reshape(-1, 1))
+            if device == "cpu":
+                past_test_repr.append(query_repr.detach().cpu())
+                past_test_residual.append(strided_residual[:, -1].detach().cpu().reshape(-1, 1))
+            else:
+                past_test_repr.append(query_repr.detach())
+                past_test_residual.append(strided_residual[:, -1].reshape(-1, 1))       
 
             if len(past_test_repr) > config.model.calibration_size:
                 past_test_repr = past_test_repr[-config.model.calibration_size:]
