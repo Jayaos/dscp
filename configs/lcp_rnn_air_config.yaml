@@ -28,11 +28,11 @@ model:
 training:
   batch_size: 32
   learning_rate: 0.0001
-  epochs: 2
+  epochs: 1
   early_stop: 3
 
 plotting:
   plotting: True
 
 
-saving_dir: "./results/run_test_lcp_transformer/"
+saving_dir: "./results/run_test_lcp_rnn/"
