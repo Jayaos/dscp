@@ -2,7 +2,7 @@ device: 0
 
 
 data:
-  data_path: "C:/Users/jayao/Desktop/python_projects/DSCP/data/air-10/chronos/chronos_air-10_data.pkl"
+  data_path: "./data/air-10/chronos/chronos_air-10_data.pkl"
   train_ratio: 0.7
   valid_ratio: 0.15
   normalize: True
@@ -36,4 +36,4 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "C:/Users/jayao/Desktop/run_test_iqn_transformer/"
+saving_dir: "./results/run_test_iqn_transformer/"

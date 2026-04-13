@@ -34,5 +34,5 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./run_test_rnn/"
+saving_dir: "./results/run_test_rnn/"
 
