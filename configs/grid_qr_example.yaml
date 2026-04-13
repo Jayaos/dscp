@@ -1,0 +1,7 @@
+grid:
+  model.dim_model: [32, 64]
+  model.num_layers: [2, 4]
+  model.window_size: [48, 100]
+  model.use_current_feature: [true, false]
+  data.strided_features: ["xr", "xry"]
+  training.learning_rate: [0.0003, 0.001]
