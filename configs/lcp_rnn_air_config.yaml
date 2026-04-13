@@ -10,6 +10,7 @@ data:
 
 
 model:
+  rnn_type: "lstm"
   dim_model: 128
   num_layers: 4
   dropout: 0.
