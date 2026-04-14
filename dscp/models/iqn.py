@@ -42,7 +42,7 @@ class ImplicitQuantileNetwork(torch.nn.Module):
         taus: (B, N) or (N,)
 
     Output:
-        quantile_values: (B, N) when output_dim == 1, else (B, N, output_dim)
+        quantile_values: (B, N)
         taus: (B, N)
     """
 
@@ -50,14 +50,12 @@ class ImplicitQuantileNetwork(torch.nn.Module):
         self,
         input_dim: int,
         hidden_dim: Optional[int] = None,
-        output_dim: int = 1,
         n_cos_embedding: int = 64,
         dropout: float = 0.1,
     ):
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim or input_dim
-        self.output_dim = output_dim
 
         if self.hidden_dim == input_dim:
             self.input_projection = torch.nn.Identity()
@@ -72,7 +70,7 @@ class ImplicitQuantileNetwork(torch.nn.Module):
             torch.nn.Linear(self.hidden_dim, self.hidden_dim),
             torch.nn.Softplus(),
             torch.nn.Dropout(dropout),
-            torch.nn.Linear(self.hidden_dim, output_dim),
+            torch.nn.Linear(self.hidden_dim, 1),
         )
 
     def forward(
@@ -101,10 +99,7 @@ class ImplicitQuantileNetwork(torch.nn.Module):
 
         embedded_taus = self.quantile_embedding(taus)
         conditioned_hidden = hidden_repr.unsqueeze(1) * (1.0 + embedded_taus)
-        quantile_values = self.output_layer(conditioned_hidden)
-
-        if self.output_dim == 1:
-            quantile_values = quantile_values.squeeze(-1)
+        quantile_values = self.output_layer(conditioned_hidden).squeeze(-1)
 
         return quantile_values, taus
 
@@ -113,9 +108,27 @@ class ImplicitQuantileNetwork(torch.nn.Module):
         self,
         hidden_repr: torch.Tensor,
         quantiles: torch.Tensor,
+        sampling_num: int = 1000,
     ) -> torch.Tensor:
-        quantile_values, _ = self(hidden_repr, taus=quantiles)
-        return quantile_values
+        batch_size = hidden_repr.shape[0]
+        quantiles = self._prepare_taus(
+            taus=quantiles,
+            batch_size=batch_size,
+            device=hidden_repr.device,
+            dtype=hidden_repr.dtype,
+        )
+
+        if sampling_num < 1:
+            raise ValueError("sampling_num must be a positive integer.")
+
+        sampled_values, _ = self(hidden_repr, taus=None, num_taus=sampling_num)
+        return torch.stack(
+            [
+                torch.quantile(sampled_values[i], q=quantiles[i], dim=0)
+                for i in range(batch_size)
+            ],
+            dim=0,
+        )
 
     @staticmethod
     def sample_taus(

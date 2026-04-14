@@ -14,7 +14,7 @@ class IQNTransformer(torch.nn.Module):
         src: (batch_size, window_size, dim_feature)
 
     Output:
-        quantile_values: (batch_size, num_taus) if output_dim == 1
+        quantile_values: (batch_size, num_taus)
         taus: (batch_size, num_taus)
     """
 
@@ -27,7 +27,6 @@ class IQNTransformer(torch.nn.Module):
         num_layers: int,
         current_feature_dim: int = 0,
         iqn_hidden_dim: Optional[int] = None,
-        output_dim: int = 1,
         n_cos_embedding: int = 64,
         dropout: float = 0.1,
         batch_first: bool = True,
@@ -56,7 +55,6 @@ class IQNTransformer(torch.nn.Module):
         self.iqn = ImplicitQuantileNetwork(
             input_dim=dim_model + current_feature_dim,
             hidden_dim=iqn_hidden_dim,
-            output_dim=output_dim,
             n_cos_embedding=n_cos_embedding,
             dropout=dropout,
         )
@@ -115,6 +113,7 @@ class IQNTransformer(torch.nn.Module):
         self,
         src: torch.Tensor,
         quantiles: torch.Tensor,
+        sampling_num: int = 1000,
         current_feature: Optional[torch.Tensor] = None,
         src_key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
@@ -128,18 +127,24 @@ class IQNTransformer(torch.nn.Module):
             src_key_padding_mask=src_key_padding_mask,
             current_feature=current_feature,
         )
-        return self.iqn.predict_quantiles(hidden_repr, quantiles)
+        return self.iqn.predict_quantiles(
+            hidden_repr,
+            quantiles,
+            sampling_num=sampling_num,
+        )
 
     @staticmethod
     def get_predicted_quantile_values(
         model,
         x: torch.Tensor,
         quantiles: torch.Tensor,
+        sampling_num: int = 1000,
         current_feature: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         return model.predict_quantiles(
             src=x,
             quantiles=quantiles,
+            sampling_num=sampling_num,
             current_feature=current_feature,
         )
 

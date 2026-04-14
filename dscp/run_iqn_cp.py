@@ -66,7 +66,6 @@ def run_transformer_iqn_cp(config_path):
             num_layers=config.model.num_layers,
             current_feature_dim=dim_x if config.model.use_current_feature else 0,
             iqn_hidden_dim= config.model.iqn_hidden_dim,
-            output_dim=1,
             n_cos_embedding=config.model.cos_emb_dim,
             dropout=config.model.dropout,
         )
@@ -348,7 +347,6 @@ def run_rnn_iqn_cp(config_path):
             num_layers=config.model.num_layers,
             current_feature_dim=dim_x if config.model.use_current_feature else 0,
             iqn_hidden_dim=config.model.iqn_hidden_dim,
-            output_dim=1,
             n_cos_embedding=config.model.cos_emb_dim,
             dropout=config.model.dropout,
         )
