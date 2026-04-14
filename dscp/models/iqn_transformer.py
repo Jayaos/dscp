@@ -25,6 +25,7 @@ class IQNTransformer(torch.nn.Module):
         num_head: int,
         dim_ff: int,
         num_layers: int,
+        current_feature_dim: int = 0,
         iqn_hidden_dim: Optional[int] = None,
         output_dim: int = 1,
         n_cos_embedding: int = 64,
@@ -53,7 +54,7 @@ class IQNTransformer(torch.nn.Module):
 
         self.input_linear = torch.nn.Linear(dim_feature, dim_model)
         self.iqn = ImplicitQuantileNetwork(
-            input_dim=dim_model,
+            input_dim=dim_model + current_feature_dim,
             hidden_dim=iqn_hidden_dim,
             output_dim=output_dim,
             n_cos_embedding=n_cos_embedding,
@@ -63,6 +64,7 @@ class IQNTransformer(torch.nn.Module):
     def forward(
         self,
         src: torch.Tensor,
+        current_feature: Optional[torch.Tensor] = None,
         taus: Optional[torch.Tensor] = None,
         num_taus: int = 1,
         src_mask: Optional[torch.Tensor] = None,
@@ -73,6 +75,7 @@ class IQNTransformer(torch.nn.Module):
             src=src,
             src_mask=src_mask,
             src_key_padding_mask=src_key_padding_mask,
+            current_feature=current_feature,
         )
         quantile_values, taus = self.iqn(
             hidden_repr=hidden_repr,
@@ -89,6 +92,7 @@ class IQNTransformer(torch.nn.Module):
         src: torch.Tensor,
         src_mask: Optional[torch.Tensor] = None,
         src_key_padding_mask: Optional[torch.Tensor] = None,
+        current_feature: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         src_emb = self.input_linear(src)
         src_emb = src_emb * math.sqrt(self.dim_model)
@@ -98,6 +102,11 @@ class IQNTransformer(torch.nn.Module):
             mask=src_mask,
             src_key_padding_mask=src_key_padding_mask,
         )
+        if current_feature is not None:
+            hidden_states = torch.cat(
+                [hidden_states, current_feature.repeat(1, hidden_states.shape[1], 1)],
+                dim=-1,
+            )
 
         return hidden_states[:, -1, :] # output the representation of the last timestep
 
@@ -106,6 +115,7 @@ class IQNTransformer(torch.nn.Module):
         self,
         src: torch.Tensor,
         quantiles: torch.Tensor,
+        current_feature: Optional[torch.Tensor] = None,
         src_key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         causal_mask = torch.nn.Transformer.generate_square_subsequent_mask(
@@ -116,6 +126,7 @@ class IQNTransformer(torch.nn.Module):
             src=src,
             src_mask=causal_mask,
             src_key_padding_mask=src_key_padding_mask,
+            current_feature=current_feature,
         )
         return self.iqn.predict_quantiles(hidden_repr, quantiles)
 
@@ -124,10 +135,12 @@ class IQNTransformer(torch.nn.Module):
         model,
         x: torch.Tensor,
         quantiles: torch.Tensor,
+        current_feature: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         return model.predict_quantiles(
             src=x,
             quantiles=quantiles,
+            current_feature=current_feature,
         )
 
 

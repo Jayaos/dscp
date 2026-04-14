@@ -82,7 +82,7 @@ def compute_loss_rnn_predictor(rnn_predictor, x, target):
     return (errors**2).mean()
 
 
-def compute_loss_iqn_transformer(model, x, target, num_taus):
+def compute_loss_iqn_transformer(model, x, target, num_taus, current_feature=None):
     """
     Compute sampled quantile loss for an IQN Transformer.
 
@@ -95,6 +95,7 @@ def compute_loss_iqn_transformer(model, x, target, num_taus):
     causal_mask = torch.nn.Transformer.generate_square_subsequent_mask(x.shape[1]).to(device)
     quantile_values, taus = model(
         x,
+        current_feature=current_feature,
         num_taus=num_taus,
         src_mask=causal_mask,
         src_key_padding_mask=None,
@@ -105,7 +106,7 @@ def compute_loss_iqn_transformer(model, x, target, num_taus):
     return loss_tensor.mean()
 
 
-def compute_loss_iqn_rnn(model, x, target, num_taus):
+def compute_loss_iqn_rnn(model, x, target, num_taus, current_feature=None):
     """
     Compute sampled quantile loss for an IQN RNN.
 
@@ -117,6 +118,7 @@ def compute_loss_iqn_rnn(model, x, target, num_taus):
     target = target.to(device)
     quantile_values, taus = model(
         x,
+        current_feature=current_feature,
         num_taus=num_taus,
     )
 

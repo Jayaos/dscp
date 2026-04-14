@@ -64,6 +64,7 @@ def run_transformer_iqn_cp(config_path):
             num_head=config.model.num_heads,
             dim_ff=config.model.dim_model * 4,
             num_layers=config.model.num_layers,
+            current_feature_dim=dim_x if config.model.use_current_feature else 0,
             iqn_hidden_dim= config.model.iqn_hidden_dim,
             output_dim=1,
             n_cos_embedding=config.model.cos_emb_dim,
@@ -92,12 +93,22 @@ def run_transformer_iqn_cp(config_path):
                                                            config.data.strided_features)
                 strided_feature = strided_feature.to(device)
                 target_residual = target_residual.to(device)
-                loss = compute_loss_iqn_transformer(
-                    iqn_transformer,
-                    strided_feature,
-                    target_residual,
-                    config.model.num_taus,
-                )
+                target_x = target_x.to(device)
+                if use_current_feature:
+                    loss = compute_loss_iqn_transformer(
+                        iqn_transformer,
+                        strided_feature,
+                        target_residual,
+                        config.model.num_taus,
+                        target_x,
+                    )
+                else:
+                    loss = compute_loss_iqn_transformer(
+                        iqn_transformer,
+                        strided_feature,
+                        target_residual,
+                        config.model.num_taus,
+                    )
                 loss.backward()
                 optimizer.step()
                 loss_sum += loss.item()
@@ -116,13 +127,23 @@ def run_transformer_iqn_cp(config_path):
                                                            config.data.strided_features)
                 strided_feature = strided_feature.to(device)
                 target_residual = target_residual.to(device)
+                target_x = target_x.to(device)
                 with torch.no_grad():
-                    loss = compute_loss_iqn_transformer(
-                        iqn_transformer,
-                        strided_feature,
-                        target_residual,
-                        config.model.num_taus,
-                    )
+                    if use_current_feature:
+                        loss = compute_loss_iqn_transformer(
+                            iqn_transformer,
+                            strided_feature,
+                            target_residual,
+                            config.model.num_taus,
+                            target_x,
+                        )
+                    else:
+                        loss = compute_loss_iqn_transformer(
+                            iqn_transformer,
+                            strided_feature,
+                            target_residual,
+                            config.model.num_taus,
+                        )
                 loss_sum += loss.item()
 
             epoch_valid_loss = loss_sum / len(valid_dataloader)
@@ -165,11 +186,20 @@ def run_transformer_iqn_cp(config_path):
                                                            strided_y,
                                                            config.data.strided_features)
                 strided_feature = strided_feature.to(device)
-                pred_quantile_values = iqn_transformer.get_predicted_quantile_values(
-                    iqn_transformer,
-                    strided_feature,
-                    quantiles,
-                )
+                target_x = target_x.to(device)
+                if use_current_feature:
+                    pred_quantile_values = iqn_transformer.get_predicted_quantile_values(
+                        iqn_transformer,
+                        strided_feature,
+                        quantiles,
+                        target_x,
+                    )
+                else:
+                    pred_quantile_values = iqn_transformer.get_predicted_quantile_values(
+                        iqn_transformer,
+                        strided_feature,
+                        quantiles,
+                    )
 
             if config.device != "cpu":
                 pred_quantile_values = pred_quantile_values.cpu().detach()
@@ -316,6 +346,7 @@ def run_rnn_iqn_cp(config_path):
             dim_feature=dim_feature,
             dim_model=config.model.dim_model,
             num_layers=config.model.num_layers,
+            current_feature_dim=dim_x if config.model.use_current_feature else 0,
             iqn_hidden_dim=config.model.iqn_hidden_dim,
             output_dim=1,
             n_cos_embedding=config.model.cos_emb_dim,
@@ -344,12 +375,22 @@ def run_rnn_iqn_cp(config_path):
                                                            config.data.strided_features)
                 strided_feature = strided_feature.to(device)
                 target_residual = target_residual.to(device)
-                loss = compute_loss_iqn_rnn(
-                    iqn_rnn,
-                    strided_feature,
-                    target_residual,
-                    config.model.num_taus,
-                )
+                target_x = target_x.to(device)
+                if use_current_feature:
+                    loss = compute_loss_iqn_rnn(
+                        iqn_rnn,
+                        strided_feature,
+                        target_residual,
+                        config.model.num_taus,
+                        target_x,
+                    )
+                else:
+                    loss = compute_loss_iqn_rnn(
+                        iqn_rnn,
+                        strided_feature,
+                        target_residual,
+                        config.model.num_taus,
+                    )
                 loss.backward()
                 optimizer.step()
                 loss_sum += loss.item()
@@ -368,13 +409,23 @@ def run_rnn_iqn_cp(config_path):
                                                            config.data.strided_features)
                 strided_feature = strided_feature.to(device)
                 target_residual = target_residual.to(device)
+                target_x = target_x.to(device)
                 with torch.no_grad():
-                    loss = compute_loss_iqn_rnn(
-                        iqn_rnn,
-                        strided_feature,
-                        target_residual,
-                        config.model.num_taus,
-                    )
+                    if use_current_feature:
+                        loss = compute_loss_iqn_rnn(
+                            iqn_rnn,
+                            strided_feature,
+                            target_residual,
+                            config.model.num_taus,
+                            target_x,
+                        )
+                    else:
+                        loss = compute_loss_iqn_rnn(
+                            iqn_rnn,
+                            strided_feature,
+                            target_residual,
+                            config.model.num_taus,
+                        )
                 loss_sum += loss.item()
 
             epoch_valid_loss = loss_sum / len(valid_dataloader)
@@ -417,11 +468,20 @@ def run_rnn_iqn_cp(config_path):
                                                            strided_y,
                                                            config.data.strided_features)
                 strided_feature = strided_feature.to(device)
-                pred_quantile_values = iqn_rnn.get_predicted_quantile_values(
-                    iqn_rnn,
-                    strided_feature,
-                    quantiles,
-                )
+                target_x = target_x.to(device)
+                if use_current_feature:
+                    pred_quantile_values = iqn_rnn.get_predicted_quantile_values(
+                        iqn_rnn,
+                        strided_feature,
+                        quantiles,
+                        target_x,
+                    )
+                else:
+                    pred_quantile_values = iqn_rnn.get_predicted_quantile_values(
+                        iqn_rnn,
+                        strided_feature,
+                        quantiles,
+                    )
 
             if config.device != "cpu":
                 pred_quantile_values = pred_quantile_values.cpu().detach()

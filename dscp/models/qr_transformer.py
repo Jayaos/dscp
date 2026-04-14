@@ -19,7 +19,7 @@ class QuantileRegressionTransformer(torch.nn.Module):
                  target_quantiles: list,
                  prediction_step: int,
                  dropout: float = 0.1,
-                 current_feature_dim: int=0,
+                 current_feature_dim: int = 0,
                  batch_first: bool=True):
         super(QuantileRegressionTransformer, self).__init__()
         self.dim_model = dim_model

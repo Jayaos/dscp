@@ -15,6 +15,7 @@ model:
   dim_model: 64
   num_layers: 4
   dropout: 0.
+  use_current_feature: False
   iqn_hidden_dim: 64
   cos_emb_dim: 64
   num_taus: 64
