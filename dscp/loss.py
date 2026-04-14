@@ -54,7 +54,7 @@ def compute_loss_quantile_regression_rnn(model, x, target, target_quantiles, cur
     return loss_tensor.mean()
 
 
-def compute_loss_transformer_predictor(transformer_predictor, x, target):
+def compute_loss_transformer_predictor(transformer_predictor, x, target, current_feature=None):
     """
     compute prediction loss for quantile transformer
     :param x: input, (batch_size, window_size, feature_dim)
@@ -64,19 +64,22 @@ def compute_loss_transformer_predictor(transformer_predictor, x, target):
     device = x.device
     causal_mask = torch.nn.Transformer.generate_square_subsequent_mask(x.shape[1]).to(device)
 
-    output = transformer_predictor(x, src_mask=causal_mask, src_key_padding_mask=None) # (batch_size, window_size, prediction_step)
+    output = transformer_predictor(x,
+                                   src_mask=causal_mask,
+                                   src_key_padding_mask=None,
+                                   current_feature=current_feature) # (batch_size, window_size, prediction_step)
     errors = target - output[:, -1, :] # (batch_size, prediction_step)
 
     return (errors**2).mean()
 
 
-def compute_loss_rnn_predictor(rnn_predictor, x, target):
+def compute_loss_rnn_predictor(rnn_predictor, x, target, current_feature=None):
     """
     compute prediction loss for RNN predictor
     :param x: input, (batch_size, window_size, feature_dim)
     :param target: target_residual, (batch_size, prediction_step)
     """
-    output = rnn_predictor(x)  # (batch_size, window_size, prediction_step)
+    output = rnn_predictor(x, current_feature=current_feature)  # (batch_size, window_size, prediction_step)
     errors = target - output[:, -1, :]  # (batch_size, prediction_step)
 
     return (errors**2).mean()

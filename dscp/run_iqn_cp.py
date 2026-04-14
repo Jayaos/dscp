@@ -94,7 +94,7 @@ def run_transformer_iqn_cp(config_path):
                 strided_feature = strided_feature.to(device)
                 target_residual = target_residual.to(device)
                 target_x = target_x.to(device)
-                if use_current_feature:
+                if config.model.use_current_feature:
                     loss = compute_loss_iqn_transformer(
                         iqn_transformer,
                         strided_feature,
@@ -129,7 +129,7 @@ def run_transformer_iqn_cp(config_path):
                 target_residual = target_residual.to(device)
                 target_x = target_x.to(device)
                 with torch.no_grad():
-                    if use_current_feature:
+                    if config.model.use_current_feature:
                         loss = compute_loss_iqn_transformer(
                             iqn_transformer,
                             strided_feature,
@@ -187,7 +187,7 @@ def run_transformer_iqn_cp(config_path):
                                                            config.data.strided_features)
                 strided_feature = strided_feature.to(device)
                 target_x = target_x.to(device)
-                if use_current_feature:
+                if config.model.use_current_feature:
                     pred_quantile_values = iqn_transformer.get_predicted_quantile_values(
                         iqn_transformer,
                         strided_feature,
@@ -376,7 +376,7 @@ def run_rnn_iqn_cp(config_path):
                 strided_feature = strided_feature.to(device)
                 target_residual = target_residual.to(device)
                 target_x = target_x.to(device)
-                if use_current_feature:
+                if config.model.use_current_feature:
                     loss = compute_loss_iqn_rnn(
                         iqn_rnn,
                         strided_feature,
@@ -411,7 +411,7 @@ def run_rnn_iqn_cp(config_path):
                 target_residual = target_residual.to(device)
                 target_x = target_x.to(device)
                 with torch.no_grad():
-                    if use_current_feature:
+                    if config.model.use_current_feature:
                         loss = compute_loss_iqn_rnn(
                             iqn_rnn,
                             strided_feature,
@@ -469,7 +469,7 @@ def run_rnn_iqn_cp(config_path):
                                                            config.data.strided_features)
                 strided_feature = strided_feature.to(device)
                 target_x = target_x.to(device)
-                if use_current_feature:
+                if config.model.use_current_feature:
                     pred_quantile_values = iqn_rnn.get_predicted_quantile_values(
                         iqn_rnn,
                         strided_feature,

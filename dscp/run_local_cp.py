@@ -66,7 +66,8 @@ def run_transformer_local_cp(config_path):
                                                      config.model.dim_model * 4, 
                                                      config.model.num_layers,
                                                      config.model.prediction_step, 
-                                                     config.model.dropout)
+                                                     current_feature_dim=dim_x if config.model.use_current_feature else 0,
+                                                     dropout=config.model.dropout)
         transformer_predictor.to(device)
         optimizer = torch.optim.AdamW(transformer_predictor.parameters(), 
                                       lr=config.training.learning_rate) # TODO: params for adamW?
@@ -87,9 +88,16 @@ def run_transformer_local_cp(config_path):
                                                            config.data.strided_features)
                 strided_feature = strided_feature.to(device)
                 target_residual = target_residual.to(device)
-                loss = compute_loss_transformer_predictor(transformer_predictor, 
-                                                          strided_feature, 
-                                                          target_residual)
+                target_x = target_x.to(device)
+                if config.model.use_current_feature:
+                    loss = compute_loss_transformer_predictor(transformer_predictor, 
+                                                              strided_feature, 
+                                                              target_residual,
+                                                              target_x)
+                else:
+                    loss = compute_loss_transformer_predictor(transformer_predictor, 
+                                                              strided_feature, 
+                                                              target_residual)
                 loss.backward()
                 optimizer.step()
                 loss_sum += loss.item()
@@ -109,10 +117,17 @@ def run_transformer_local_cp(config_path):
 
                 strided_feature = strided_feature.to(device)
                 target_residual = target_residual.to(device)
+                target_x = target_x.to(device)
                 with torch.no_grad():
-                    loss = compute_loss_transformer_predictor(transformer_predictor, 
-                                                              strided_feature, 
-                                                              target_residual)
+                    if config.model.use_current_feature:
+                        loss = compute_loss_transformer_predictor(transformer_predictor, 
+                                                                  strided_feature, 
+                                                                  target_residual,
+                                                                  target_x)
+                    else:
+                        loss = compute_loss_transformer_predictor(transformer_predictor, 
+                                                                  strided_feature, 
+                                                                  target_residual)
                 loss_sum += loss.item()
 
             epoch_valid_loss = loss_sum/len(valid_dataloader)
@@ -159,7 +174,8 @@ def run_transformer_local_cp(config_path):
             tv_repr, tv_residual = transformer_predictor.encode_dataloader(transformer_predictor,
                                                                            tv_dataloader,
                                                                            config.data.strided_features,
-                                                                           device)
+                                                                           device,
+                                                                           use_current_feature=config.model.use_current_feature)
 
         past_test_repr = []
         past_test_residual = []
@@ -176,7 +192,10 @@ def run_transformer_local_cp(config_path):
                                                            strided_y,
                                                            config.data.strided_features)
                 strided_feature = strided_feature.to(device)
-                o = transformer_predictor.encode(transformer_predictor, strided_feature)
+                target_x = target_x.to(device)
+                o = transformer_predictor.encode(transformer_predictor,
+                                                 strided_feature,
+                                                 current_feature=target_x if config.model.use_current_feature else None)
                 query_repr = o[:, -1, :] # representation of the last timestep, (query_size, dim_model)
 
             tv_idx = max((config.model.calibration_size - test_data_count), 0)
@@ -365,7 +384,8 @@ def run_rnn_local_cp(config_path):
                                      config.model.dim_model,
                                      config.model.num_layers,
                                      config.model.prediction_step,
-                                     config.model.dropout)
+                                     current_feature_dim=dim_x if config.model.use_current_feature else 0,
+                                     dropout=config.model.dropout)
         rnn_predictor.to(device)
         optimizer = torch.optim.AdamW(rnn_predictor.parameters(),
                                       lr=config.training.learning_rate) # TODO: params for adamW?
@@ -386,9 +406,16 @@ def run_rnn_local_cp(config_path):
                                                            config.data.strided_features)
                 strided_feature = strided_feature.to(device)
                 target_residual = target_residual.to(device)
-                loss = compute_loss_rnn_predictor(rnn_predictor,
-                                                  strided_feature,
-                                                  target_residual)
+                target_x = target_x.to(device)
+                if config.model.use_current_feature:
+                    loss = compute_loss_rnn_predictor(rnn_predictor,
+                                                      strided_feature,
+                                                      target_residual,
+                                                      target_x)
+                else:
+                    loss = compute_loss_rnn_predictor(rnn_predictor,
+                                                      strided_feature,
+                                                      target_residual)
                 loss.backward()
                 optimizer.step()
                 loss_sum += loss.item()
@@ -408,10 +435,17 @@ def run_rnn_local_cp(config_path):
 
                 strided_feature = strided_feature.to(device)
                 target_residual = target_residual.to(device)
+                target_x = target_x.to(device)
                 with torch.no_grad():
-                    loss = compute_loss_rnn_predictor(rnn_predictor,
-                                                      strided_feature,
-                                                      target_residual)
+                    if config.model.use_current_feature:
+                        loss = compute_loss_rnn_predictor(rnn_predictor,
+                                                          strided_feature,
+                                                          target_residual,
+                                                          target_x)
+                    else:
+                        loss = compute_loss_rnn_predictor(rnn_predictor,
+                                                          strided_feature,
+                                                          target_residual)
                 loss_sum += loss.item()
 
             epoch_valid_loss = loss_sum/len(valid_dataloader)
@@ -458,7 +492,8 @@ def run_rnn_local_cp(config_path):
             tv_repr, tv_residual = rnn_predictor.encode_dataloader(rnn_predictor,
                                                                    tv_dataloader,
                                                                    config.data.strided_features,
-                                                                   device)
+                                                                   device,
+                                                                   use_current_feature=config.model.use_current_feature)
 
         past_test_repr = []
         past_test_residual = []
@@ -475,7 +510,10 @@ def run_rnn_local_cp(config_path):
                                                            strided_y,
                                                            config.data.strided_features)
                 strided_feature = strided_feature.to(device)
-                o = rnn_predictor.encode(rnn_predictor, strided_feature)
+                target_x = target_x.to(device)
+                o = rnn_predictor.encode(rnn_predictor,
+                                         strided_feature,
+                                         current_feature=target_x if config.model.use_current_feature else None)
                 query_repr = o[:, -1, :] # representation of the last timestep, (query_size, dim_model)
 
             tv_idx = max((config.model.calibration_size - test_data_count), 0)

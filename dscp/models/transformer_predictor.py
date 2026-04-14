@@ -15,6 +15,7 @@ class TransformerPredictor(torch.nn.Module):
                  dim_ff: int, 
                  num_layer: int, 
                  prediction_step: int,
+                 current_feature_dim: int = 0,
                  dropout: float = 0.1, 
                  batch_first: bool=True):
         super(TransformerPredictor, self).__init__()
@@ -27,14 +28,16 @@ class TransformerPredictor(torch.nn.Module):
 
         # this will work as embedding layer for features
         self.input_linear = torch.nn.Linear(dim_feature, dim_model)
-        self.output_linear = torch.nn.Linear(dim_model, prediction_step) # no activation
+        self.output_linear = torch.nn.Linear(dim_model + current_feature_dim, prediction_step) # no activation
 
-    def forward(self, src, src_mask, src_key_padding_mask, return_repr=False):
+    def forward(self, src, src_mask, src_key_padding_mask, current_feature=None, return_repr=False):
 
         src_emb = self.input_linear(src)
         src_emb = src_emb * math.sqrt(self.dim_model)
         src_emb = self.positional_encoding(src_emb)
         outputs = self.encoder(src_emb, mask=src_mask, src_key_padding_mask=src_key_padding_mask)
+        if current_feature is not None:
+            outputs = torch.cat([outputs, current_feature.repeat(1, outputs.shape[1], 1)], dim=-1)
 
         if return_repr:
             return self.output_linear(outputs), outputs
@@ -42,18 +45,21 @@ class TransformerPredictor(torch.nn.Module):
             return self.output_linear(outputs)
     
     @staticmethod
-    def encode(model, x):
+    def encode(model, x, current_feature=None):
 
         device = x.device
         causal_mask = torch.nn.Transformer.generate_square_subsequent_mask(x.shape[1]).to(device)
         x_emb = model.input_linear(x)
         x_emb = x_emb * math.sqrt(model.dim_model)
         x_emb = model.positional_encoding(x_emb)
+        outputs = model.encoder(x_emb, mask=causal_mask, src_key_padding_mask=None) # (B, T, D)
+        if current_feature is not None:
+            outputs = torch.cat([outputs, current_feature.repeat(1, outputs.shape[1], 1)], dim=-1)
 
-        return model.encoder(x_emb, mask=causal_mask, src_key_padding_mask=None) # (B, T, D)
+        return outputs
     
     @staticmethod
-    def encode_dataloader(model, dataloader, strided_features, device):
+    def encode_dataloader(model, dataloader, strided_features, device, use_current_feature=False):
 
         repr_list = []
         residual_list = []
@@ -66,12 +72,10 @@ class TransformerPredictor(torch.nn.Module):
                                                         strided_features)
 
             strided_feature = strided_feature.to(device)
-            causal_mask = torch.nn.Transformer.generate_square_subsequent_mask(strided_feature.shape[1]).to(device)
-
-            x_emb = model.input_linear(strided_feature)
-            x_emb = x_emb * math.sqrt(model.dim_model)
-            x_emb = model.positional_encoding(x_emb)
-            repr = model.encoder(x_emb, mask=causal_mask, src_key_padding_mask=None) # (B, T, D)
+            target_x = target_x.to(device)
+            repr = model.encode(model,
+                                strided_feature,
+                                current_feature=target_x if use_current_feature else None)
 
             repr_list.append(repr[:,-1,:])
             residual_list.append(strided_residual[:,-1])
