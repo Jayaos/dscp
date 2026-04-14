@@ -1,4 +1,5 @@
 import torch
+from utils.utils import get_sorted_unique_quantiles
 
 
 def compute_loss_quantile_regression_transformer(model, x, target, target_quantiles, current_feature=None):
@@ -6,13 +7,17 @@ def compute_loss_quantile_regression_transformer(model, x, target, target_quanti
     compute quantile loss for quantile regression Transformer
     :param x: input, (batch_size, window_size, feature_dim)
     :param target: target_residual, (batch_size, 1)
-    :param target_quantiles: list of target quantiles, [(0.975, 0.025), ...]
+    :param target_quantiles: list of interval quantile pairs, [(0.975, 0.025), ...]
     :param current_feature: Optional, (batch_size, 1, current_feature_dim)
     """
     device = x.device
 
     target = target.unsqueeze(-1) # (batch_size, 1, 1)
-    target_quantiles = torch.tensor(target_quantiles, dtype=torch.float32, device=device).flatten() # (2*len(target_quantiles))
+    target_quantiles = torch.tensor(
+        get_sorted_unique_quantiles(target_quantiles),
+        dtype=torch.float32,
+        device=device,
+    )
     causal_mask = torch.nn.Transformer.generate_square_subsequent_mask(x.shape[1]).to(device)
 
     if current_feature != None:
@@ -22,8 +27,8 @@ def compute_loss_quantile_regression_transformer(model, x, target, target_quanti
         # (batch_size, window_size, len(target_quantiles))
         output = model(x, src_mask=causal_mask, src_key_padding_mask=None) 
         
-    errors = target - output[:, -1, :].unsqueeze(1) # (batch_size, 1, len(target_quantiles))
-    loss_tensor = torch.max((target_quantiles - 1) * errors, target_quantiles * errors) # (batch_size, 1, len(target_quantiles))
+    errors = target - output[:, -1, :].unsqueeze(1) # (batch_size, 1, num_quantiles)
+    loss_tensor = torch.max((target_quantiles - 1) * errors, target_quantiles * errors) # (batch_size, 1, num_quantiles)
 
     return loss_tensor.mean()
 
@@ -33,13 +38,17 @@ def compute_loss_quantile_regression_rnn(model, x, target, target_quantiles, cur
     compute quantile loss for quantile regression RNN
     :param x: input, (batch_size, window_size, feature_dim)
     :param target: target_residual, (batch_size, 1)
-    :param target_quantiles: list of target quantiles, [(0.975, 0.025), ...]
+    :param target_quantiles: list of interval quantile pairs, [(0.975, 0.025), ...]
     :param current_feature: Optional, (batch_size, 1, current_feature_dim)
     """
     device = x.device
 
     target = target.unsqueeze(-1) # (batch_size, 1, 1)
-    target_quantiles = torch.tensor(target_quantiles, dtype=torch.float32, device=device).flatten() # (2*len(target_quantiles))
+    target_quantiles = torch.tensor(
+        get_sorted_unique_quantiles(target_quantiles),
+        dtype=torch.float32,
+        device=device,
+    )
     
     if current_feature != None:
         # (batch_size, window_size, len(target_quantiles))
@@ -48,8 +57,8 @@ def compute_loss_quantile_regression_rnn(model, x, target, target_quantiles, cur
         # (batch_size, window_size, len(target_quantiles))
         output = model(x)
         
-    errors = target - output[:, -1, :].unsqueeze(1) # (batch_size, 1, len(target_quantiles))
-    loss_tensor = torch.max((target_quantiles - 1) * errors, target_quantiles * errors) # (batch_size, 1, len(target_quantiles))
+    errors = target - output[:, -1, :].unsqueeze(1) # (batch_size, 1, num_quantiles)
+    loss_tensor = torch.max((target_quantiles - 1) * errors, target_quantiles * errors) # (batch_size, 1, num_quantiles)
 
     return loss_tensor.mean()
 

@@ -54,6 +54,39 @@ def flatten_and_sort(pairs):
     return sorted(x for pair in pairs for x in pair)
 
 
+def get_sorted_unique_quantiles(target_quantiles):
+    """
+    Return the sorted unique quantile levels referenced by interval pairs.
+
+    Args:
+        target_quantiles (list[list[float]]): e.g. [[0.95, 0.05], [0.9, 0.1]]
+
+    Returns:
+        list[float]: e.g. [0.05, 0.1, 0.9, 0.95]
+    """
+    return sorted({float(x) for pair in target_quantiles for x in pair})
+
+
+def get_interval_quantile_indices(target_quantiles):
+    """
+    Map each configured interval pair to indices in the sorted unique quantile list.
+
+    Args:
+        target_quantiles (list[list[float]]): e.g. [[0.95, 0.05], [0.9, 0.1]]
+
+    Returns:
+        tuple[list[float], dict[tuple[float, float], tuple[int, int]]]:
+            sorted_quantiles and a map from interval pair to (upper_idx, lower_idx)
+    """
+    sorted_quantiles = get_sorted_unique_quantiles(target_quantiles)
+    index_map = {q: idx for idx, q in enumerate(sorted_quantiles)}
+    pair_to_indices = {
+        tuple(pair): (index_map[max(pair)], index_map[min(pair)])
+        for pair in target_quantiles
+    }
+    return sorted_quantiles, pair_to_indices
+
+
 def to_strided_residual(residual_sequence, window_len, pred_horizon=1):
     """
     residual_sequence: 1D array of length T

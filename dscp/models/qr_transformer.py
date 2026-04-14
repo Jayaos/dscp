@@ -1,5 +1,7 @@
 import torch
 import math
+import torch.nn.functional as F
+from utils.utils import get_sorted_unique_quantiles
 
 
 class QuantileRegressionTransformer(torch.nn.Module):
@@ -24,6 +26,9 @@ class QuantileRegressionTransformer(torch.nn.Module):
         super(QuantileRegressionTransformer, self).__init__()
         self.dim_model = dim_model
         self.target_quantiles = target_quantiles
+        self.sorted_quantiles = get_sorted_unique_quantiles(target_quantiles)
+        self.num_quantiles = len(self.sorted_quantiles)
+        self.prediction_step = prediction_step
         self.positional_encoding = PositionalEncoding(dim_model, dropout, batch_first=batch_first)
 
         encoder_Layer = torch.nn.TransformerEncoderLayer(d_model=dim_model, nhead=num_head, dim_feedforward=dim_ff, 
@@ -33,10 +38,14 @@ class QuantileRegressionTransformer(torch.nn.Module):
         # this will work as embedding layer for features
         self.input_linear = torch.nn.Linear(dim_feature, dim_model)
         if current_feature_dim == 0:
-            self.output_linear = torch.nn.Linear(dim_model, 2*len(target_quantiles)*prediction_step) # no activation
+            head_input_dim = dim_model
         else:
-            self.output_linear = torch.nn.Linear(dim_model+current_feature_dim, 
-                                                 2*len(target_quantiles)*prediction_step) # no activation
+            head_input_dim = dim_model + current_feature_dim
+
+        self.base_head = torch.nn.Linear(head_input_dim, prediction_step)
+        self.increment_head = torch.nn.Linear(
+            head_input_dim, prediction_step * max(self.num_quantiles - 1, 0)
+        )
 
     def forward(self, src, src_mask, src_key_padding_mask, current_feature=None):
 
@@ -51,7 +60,16 @@ class QuantileRegressionTransformer(torch.nn.Module):
             # (batch_size, window_len, model_dim+current_feature_dim)
             h = torch.cat([h, current_feature.repeat(1, T, 1)], dim=-1)
 
-        return self.output_linear(h)
+        base = self.base_head(h).unsqueeze(-1)
+
+        if self.num_quantiles == 1:
+            quantiles = base
+        else:
+            increments = F.softplus(self.increment_head(h))
+            increments = increments.view(B, T, self.prediction_step, self.num_quantiles - 1)
+            quantiles = torch.cat([base, base + torch.cumsum(increments, dim=-1)], dim=-1)
+
+        return quantiles.reshape(B, T, self.prediction_step * self.num_quantiles)
     
     @staticmethod
     def get_predicted_quantile_values(model, x, current_feature=None):
@@ -66,7 +84,7 @@ class QuantileRegressionTransformer(torch.nn.Module):
             # (batch_size, window_size, len(target_quantiles))
             out = model(x, src_mask=causal_mask, src_key_padding_mask=None) 
             
-        return out[:, -1, :] # (batch_size, 2*len(target_quantiles))
+        return out[:, -1, :] # (batch_size, prediction_step * num_quantiles)
         
 
 class PositionalEncoding(torch.nn.Module):

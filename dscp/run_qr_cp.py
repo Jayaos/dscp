@@ -8,7 +8,7 @@ from dscp.models.qr_transformer import QuantileRegressionTransformer
 from dscp.models.qr_rnn import QuantileRegressionRNN
 from dscp.loss import compute_loss_quantile_regression_transformer, compute_loss_quantile_regression_rnn
 from dscp.data import ConformalPredictionData
-from utils.utils import load_data, save_data, read_setup, generate_strided_feature
+from utils.utils import load_data, save_data, read_setup, generate_strided_feature, get_interval_quantile_indices
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, summarize_evaluation_results
 from utils.plotting import plot_cp_prediction_intervals
 from torch.utils.data import DataLoader
@@ -18,6 +18,7 @@ def run_transformer_quantile_regression_cp(config_path):
 
     config = OmegaConf.load(config_path)
     os.makedirs(config.saving_dir, exist_ok=True)
+    _, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
 
     # load data
     data = load_data(config.data.data_path) # load predictor results here
@@ -197,22 +198,23 @@ def run_transformer_quantile_regression_cp(config_path):
                 target_x = target_x.to(device)
 
                 if config.model.use_current_feature:
-                    # (batch_size, 2*len(target_quantiles))
+                    # (batch_size, num_unique_quantiles)
                     pred_quantile_values = qr_transformer.get_predicted_quantile_values(qr_transformer, 
                                                                                         strided_feature, 
                                                                                         target_x)
                 else:
-                    # (batch_size, 2*len(target_quantiles))
+                    # (batch_size, num_unique_quantiles)
                     pred_quantile_values = qr_transformer.get_predicted_quantile_values(qr_transformer, 
                                                                                         strided_feature)
                     
             if config.device != "cpu":
                 pred_quantile_values = pred_quantile_values.cpu().detach()
 
-            for j, confidence_pair in enumerate(config.model.target_quantiles):
+            for confidence_pair in config.model.target_quantiles:
                 tuple_confidence_pair = tuple(confidence_pair)
-                hi = pred_quantile_values[:, 2*j+0] # (batch_size,)
-                lo = pred_quantile_values[:, 2*j+1] # (batch_size,)
+                hi_idx, lo_idx = pair_to_indices[tuple_confidence_pair]
+                hi = pred_quantile_values[:, hi_idx] # (batch_size,)
+                lo = pred_quantile_values[:, lo_idx] # (batch_size,)
                 this_coverage = compute_coverage(hi, lo, target_residual)
 
                 if config.data.normalize:
@@ -306,6 +308,7 @@ def run_rnn_quantile_regression_cp(config_path):
 
     config = OmegaConf.load(config_path)
     os.makedirs(config.saving_dir, exist_ok=True)
+    _, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
 
     # load data
     data = load_data(config.data.data_path) # load predictor results here
@@ -483,19 +486,20 @@ def run_rnn_quantile_regression_cp(config_path):
                 target_x = target_x.to(device)
 
                 if config.model.use_current_feature:
-                    # (batch_size, 2*len(target_quantiles))
+                    # (batch_size, num_unique_quantiles)
                     pred_quantile_values = qr_rnn.get_predicted_quantile_values(qr_rnn, strided_feature, target_x)
                 else:
-                    # (batch_size, 2*len(target_quantiles))
+                    # (batch_size, num_unique_quantiles)
                     pred_quantile_values = qr_rnn.get_predicted_quantile_values(qr_rnn, strided_feature)
 
             if config.device != "cpu":
                 pred_quantile_values = pred_quantile_values.cpu().detach()
 
-            for j, confidence_pair in enumerate(config.model.target_quantiles):
+            for confidence_pair in config.model.target_quantiles:
                 tuple_confidence_pair = tuple(confidence_pair)
-                hi = pred_quantile_values[:, 2*j+0] # (batch_size,)
-                lo = pred_quantile_values[:, 2*j+1] # (batch_size,)
+                hi_idx, lo_idx = pair_to_indices[tuple_confidence_pair]
+                hi = pred_quantile_values[:, hi_idx] # (batch_size,)
+                lo = pred_quantile_values[:, lo_idx] # (batch_size,)
                 this_coverage = compute_coverage(hi, lo, target_residual)
 
                 if config.data.normalize:
