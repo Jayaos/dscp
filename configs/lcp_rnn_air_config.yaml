@@ -33,6 +33,6 @@ training:
 
 plotting:
   plotting: True
-
+  plotting_seq_len: 200
 
 saving_dir: "./results/run_test_lcp_rnn/"

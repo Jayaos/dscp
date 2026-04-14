@@ -8,7 +8,7 @@ from dscp.models.iqn_transformer import IQNTransformer
 from dscp.models.iqn_rnn import IQNRNN
 from dscp.data import ConformalPredictionData
 from dscp.loss import compute_loss_iqn_transformer, compute_loss_iqn_rnn
-from utils.utils import load_data, save_data, read_setup, generate_strided_feature, flatten
+from utils.utils import load_data, save_data, read_setup, generate_strided_feature, get_interval_quantile_indices
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, summarize_evaluation_results
 from utils.plotting import plot_cp_prediction_intervals
 from torch.utils.data import DataLoader
@@ -29,7 +29,7 @@ def run_transformer_iqn_cp(config_path):
                                              config.data.valid_ratio,
                                              normalize=config.data.normalize)
     device = config.device
-    target_quantiles = flatten(config.model.target_quantiles)
+    sorted_quantiles, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
     log = dict()
 
     print("Experiment setup")
@@ -176,7 +176,7 @@ def run_transformer_iqn_cp(config_path):
             residuals_noramlized_std = cpd.data[key]["train_residuals_std"]
 
         iqn_transformer.eval()
-        quantiles = torch.tensor(target_quantiles, dtype=torch.float32, device=device)
+        quantiles = torch.tensor(sorted_quantiles, dtype=torch.float32, device=device)
         for strided_x, strided_residual, strided_y, target_x, target_residual, target_y, target_predictions in tqdm(test_dataloader):
 
             with torch.no_grad():
@@ -203,10 +203,11 @@ def run_transformer_iqn_cp(config_path):
             if config.device != "cpu":
                 pred_quantile_values = pred_quantile_values.cpu().detach()
 
-            for j, confidence_pair in enumerate(config.model.target_quantiles):
+            for confidence_pair in config.model.target_quantiles:
                 tuple_confidence_pair = tuple(confidence_pair)
-                hi = pred_quantile_values[:, 2 * j + 0]
-                lo = pred_quantile_values[:, 2 * j + 1]
+                hi_idx, lo_idx = pair_to_indices[tuple_confidence_pair]
+                hi = pred_quantile_values[:, hi_idx]
+                lo = pred_quantile_values[:, lo_idx]
                 this_coverage = compute_coverage(hi, lo, target_residual)
 
                 if config.data.normalize:
@@ -311,7 +312,7 @@ def run_rnn_iqn_cp(config_path):
                                              config.data.valid_ratio,
                                              normalize=config.data.normalize)
     device = config.device
-    target_quantiles = flatten(config.model.target_quantiles)
+    sorted_quantiles, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
     log = dict()
 
     print("Experiment setup")
@@ -457,7 +458,7 @@ def run_rnn_iqn_cp(config_path):
             residuals_noramlized_std = cpd.data[key]["train_residuals_std"]
 
         iqn_rnn.eval()
-        quantiles = torch.tensor(target_quantiles, dtype=torch.float32, device=device)
+        quantiles = torch.tensor(sorted_quantiles, dtype=torch.float32, device=device)
         for strided_x, strided_residual, strided_y, target_x, target_residual, target_y, target_predictions in tqdm(test_dataloader):
 
             with torch.no_grad():
@@ -484,10 +485,11 @@ def run_rnn_iqn_cp(config_path):
             if config.device != "cpu":
                 pred_quantile_values = pred_quantile_values.cpu().detach()
 
-            for j, confidence_pair in enumerate(config.model.target_quantiles):
+            for confidence_pair in config.model.target_quantiles:
                 tuple_confidence_pair = tuple(confidence_pair)
-                hi = pred_quantile_values[:, 2 * j + 0]
-                lo = pred_quantile_values[:, 2 * j + 1]
+                hi_idx, lo_idx = pair_to_indices[tuple_confidence_pair]
+                hi = pred_quantile_values[:, hi_idx]
+                lo = pred_quantile_values[:, lo_idx]
                 this_coverage = compute_coverage(hi, lo, target_residual)
 
                 if config.data.normalize:

@@ -9,7 +9,7 @@ from dscp.models.rnn_predictor import RNNPredictor
 from dscp.models.local_cp import LocalConformalPrediction
 from dscp.loss import compute_loss_transformer_predictor, compute_loss_rnn_predictor
 from dscp.data import ConformalPredictionData
-from utils.utils import load_data, save_data, read_setup, flatten, generate_strided_feature
+from utils.utils import load_data, save_data, read_setup, generate_strided_feature, get_interval_quantile_indices
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, summarize_evaluation_results
 from utils.plotting import plot_cp_prediction_intervals
 from torch.utils.data import DataLoader, ConcatDataset, Subset
@@ -30,7 +30,7 @@ def run_transformer_local_cp(config_path):
                               config.data.valid_ratio, 
                               config.data.normalize)
     device = config.device
-    target_quantiles = flatten(config.model.target_quantiles)
+    sorted_quantiles, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
     log = dict()
 
     print("Experiment setup")
@@ -224,7 +224,7 @@ def run_transformer_local_cp(config_path):
             
             # (len(target_quantiles), query_size)
             pred_quantile_values = local_cp.approximate_quantile(query_repr, 
-                                                                 target_quantiles,
+                                                                 sorted_quantiles,
                                                                  config.model.sampling_num)
             
             if config.device != "cpu":
@@ -232,8 +232,9 @@ def run_transformer_local_cp(config_path):
 
             for j, confidence_pair in enumerate(config.model.target_quantiles):
                 tuple_confidence_pair = tuple(confidence_pair)
-                hi = pred_quantile_values[2*j+0, :] 
-                lo = pred_quantile_values[2*j+1, :] 
+                hi_idx, lo_idx = pair_to_indices[tuple_confidence_pair]
+                hi = pred_quantile_values[hi_idx, :]
+                lo = pred_quantile_values[lo_idx, :]
                 this_coverage = compute_coverage(hi, lo, target_residual)
 
                 if config.data.normalize:
@@ -349,7 +350,7 @@ def run_rnn_local_cp(config_path):
                               config.data.valid_ratio,
                               config.data.normalize)
     device = config.device
-    target_quantiles = flatten(config.model.target_quantiles)
+    sorted_quantiles, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
     log = dict()
 
     print("Experiment setup")
@@ -542,7 +543,7 @@ def run_rnn_local_cp(config_path):
 
             # (len(target_quantiles), query_size)
             pred_quantile_values = local_cp.approximate_quantile(query_repr,
-                                                                 target_quantiles,
+                                                                 sorted_quantiles,
                                                                  config.model.sampling_num)
 
             if config.device != "cpu":
@@ -550,8 +551,9 @@ def run_rnn_local_cp(config_path):
 
             for j, confidence_pair in enumerate(config.model.target_quantiles):
                 tuple_confidence_pair = tuple(confidence_pair)
-                hi = pred_quantile_values[2*j+0, :]
-                lo = pred_quantile_values[2*j+1, :]
+                hi_idx, lo_idx = pair_to_indices[tuple_confidence_pair]
+                hi = pred_quantile_values[hi_idx, :]
+                lo = pred_quantile_values[lo_idx, :]
                 this_coverage = compute_coverage(hi, lo, target_residual)
 
                 if config.data.normalize:

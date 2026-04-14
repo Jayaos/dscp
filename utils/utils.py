@@ -28,32 +28,6 @@ def read_setup(data_path):
     return base_predictor, data_type
 
 
-def flatten(pairs):
-    """
-    Flatten a list of numeric pairs and return a sorted list.
-    
-    Args:
-        pairs (list[list[float]]): e.g. [[0.95, 0.05], [0.965, 0.035]]
-    
-    Returns:
-        list[float]: sorted flattened list
-    """
-    return [x for pair in pairs for x in pair]
-
-
-def flatten_and_sort(pairs):
-    """
-    Flatten a list of numeric pairs and return a sorted list.
-    
-    Args:
-        pairs (list[list[float]]): e.g. [[0.95, 0.05], [0.965, 0.035]]
-    
-    Returns:
-        list[float]: sorted flattened list
-    """
-    return sorted(x for pair in pairs for x in pair)
-
-
 def get_sorted_unique_quantiles(target_quantiles):
     """
     Return the sorted unique quantile levels referenced by interval pairs.
