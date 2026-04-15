@@ -223,6 +223,7 @@ def main():
 
     trials = []
     for trial_index, (trial_config, grid_values) in enumerate(iter_grid_configs(base_config, grid), start=1):
+        print(f"[iqn_cp] starting trial {trial_index} with grid_values={grid_values}", flush=True)
         set_global_seed(args.seed + trial_index)
         sequence_results = {
             sequence_key: _run_single_trial(trial_config, cpd.dataset[sequence_key], cpd.data[sequence_key])

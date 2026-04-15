@@ -1,11 +1,11 @@
 grid:
   model.dim_model: [32, 64]
-  mode.num_heads: [2, 4]
-  model.num_layers: [2, 4]
-  model.window_size: [100, 200]
-  model.use_current_feature: [True, False]
-  data.strided_features: ["xr", "xry"]
-  training.learning_rate: [0.0001, 0.001]
+  #mode.num_heads: [2, 4]
+  #model.num_layers: [2, 4]
+  #model.window_size: [100, 200]
+  #model.use_current_feature: [True, False]
+  #data.strided_features: ["xr", "xry"]
+  #training.learning_rate: [0.0001, 0.001]
 
 
 tuning:
