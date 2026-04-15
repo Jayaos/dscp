@@ -2,17 +2,17 @@ device: 0
 
 
 data:
-  data_path: "./data/air-10/chronos/chronos_air-10_data.pkl"
-  train_ratio: 0.7
-  valid_ratio: 0.15
+  data_path: "./data/air-10_prediction/chronos/chronos_air-10_data.pkl"
+  train_ratio: 0.6
+  valid_ratio: 0.2
   normalize: True
-  strided_features: "xry"
+  strided_features: "xr"
 
 
 model:
   rnn_type: "lstm"
-  dim_model: 128
-  num_layers: 4
+  dim_model: 32
+  num_layers: 1
   dropout: 0.
   use_current_feature: True
   target_quantiles:

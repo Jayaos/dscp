@@ -1,5 +1,5 @@
 grid:
-  model.dim_model: [32, 64]
+  model.dim_model: [16, 32]
   #model.num_layers: [2, 4]
   #model.window_size: [48, 100]
   #model.calibration_size: [100, 500]
