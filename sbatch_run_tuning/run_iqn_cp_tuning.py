@@ -40,7 +40,6 @@ def _build_model(config, dim_feature: int, dim_x: int):
             num_layers=config.model.num_layers,
             current_feature_dim=current_feature_dim,
             iqn_hidden_dim=config.model.iqn_hidden_dim,
-            output_dim=1,
             n_cos_embedding=config.model.cos_emb_dim,
             dropout=config.model.dropout,
         )
@@ -55,7 +54,6 @@ def _build_model(config, dim_feature: int, dim_x: int):
             num_layers=config.model.num_layers,
             current_feature_dim=current_feature_dim,
             iqn_hidden_dim=config.model.iqn_hidden_dim,
-            output_dim=1,
             n_cos_embedding=config.model.cos_emb_dim,
             dropout=config.model.dropout,
         )
