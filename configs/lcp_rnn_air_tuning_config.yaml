@@ -12,3 +12,4 @@ grid:
 
 tuning:
   num_sequences: 2
+  delta_threshold: -0.01

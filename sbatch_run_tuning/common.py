@@ -140,6 +140,12 @@ def resolve_num_sequences(tuning_cfg) -> int:
     return num_sequences
 
 
+def resolve_delta_threshold(tuning_cfg) -> float:
+    if tuning_cfg is None:
+        tuning_cfg = {}
+    return float(tuning_cfg.get("delta_threshold", 0.0))
+
+
 def choose_sequence_keys(
     dataset: dict,
     sequence_key: Optional[str],
@@ -201,7 +207,7 @@ def resolve_device(raw_device):
 
 
 def summarize_evaluation_results(
-    evaluation_results: dict, target_quantiles: list
+    evaluation_results: dict, target_quantiles: list, delta_threshold: float = 0.0
 ) -> Tuple[Dict, float, bool]:
     pair_summaries = {}
     winkler_scores = []
@@ -225,7 +231,7 @@ def summarize_evaluation_results(
         }
 
         winkler_scores.append(avg_winkler_score)
-        all_positive = all_positive and (avg_delta_coverage > 0)
+        all_positive = all_positive and (avg_delta_coverage > delta_threshold)
 
     selection_score = float(np.mean(winkler_scores))
     return pair_summaries, selection_score, all_positive

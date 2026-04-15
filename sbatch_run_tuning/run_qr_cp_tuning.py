@@ -20,6 +20,7 @@ from sbatch_run_tuning.common import (
     load_grid,
     parse_args,
     plain_config,
+    resolve_delta_threshold,
     resolve_device,
     resolve_num_sequences,
     set_global_seed,
@@ -67,6 +68,7 @@ def _build_model(config, dim_feature: int, dim_x: int):
 def _run_single_trial(config, sequence_item, sequence_data):
     device = resolve_device(config.device)
     _, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
+    delta_threshold = float(config.tuning.get("delta_threshold", 0.0))
 
     train_dataset = sequence_item["train_dataset"]
     valid_dataset = sequence_item["valid_dataset"]
@@ -204,6 +206,7 @@ def _run_single_trial(config, sequence_item, sequence_data):
     pair_metrics, selection_score, positive_delta_coverage = summarize_evaluation_results(
         evaluation_results,
         config.model.target_quantiles,
+        delta_threshold=delta_threshold,
     )
 
     return {
@@ -236,6 +239,8 @@ def main():
         normalize=base_config.data.normalize,
     )
     num_sequences = resolve_num_sequences(tuning_cfg)
+    delta_threshold = resolve_delta_threshold(tuning_cfg)
+    base_config.tuning = dict(tuning_cfg)
     sequence_keys = choose_sequence_keys(cpd.dataset, args.sequence_key, args.sequence_index, num_sequences)
 
     trials = []
@@ -267,6 +272,7 @@ def main():
         "grid_config_path": str(args.grid_config.resolve()),
         "sequence_keys": sequence_keys,
         "num_sequences": len(sequence_keys),
+        "delta_threshold": delta_threshold,
         "num_trials": len(trials),
         "num_positive_delta_coverage_trials": len(positive_trials),
         "top_k": args.top_k,
