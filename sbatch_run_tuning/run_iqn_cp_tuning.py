@@ -175,7 +175,12 @@ def _run_single_trial(config, sequence_item, sequence_data):
             ).to(device)
             target_x = target_x.to(device)
             if use_current_feature:
-                pred_quantile_values = model.get_predicted_quantile_values(model, strided_feature, quantiles, target_x)
+                pred_quantile_values = model.get_predicted_quantile_values(
+                    model,
+                    strided_feature,
+                    quantiles,
+                    current_feature=target_x,
+                )
             else:
                 pred_quantile_values = model.get_predicted_quantile_values(model, strided_feature, quantiles)
 

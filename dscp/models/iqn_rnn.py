@@ -93,8 +93,8 @@ class IQNRNN(torch.nn.Module):
         self,
         src: torch.Tensor,
         quantiles: torch.Tensor,
-        sampling_num: int = 1000,
         current_feature: Optional[torch.Tensor] = None,
+        sampling_num: int = 1000,
     ) -> torch.Tensor:
         hidden_repr = self.encode(src, current_feature=current_feature)
         return self.iqn.predict_quantiles(
@@ -108,12 +108,12 @@ class IQNRNN(torch.nn.Module):
         model,
         x: torch.Tensor,
         quantiles: torch.Tensor,
-        sampling_num: int = 1000,
         current_feature: Optional[torch.Tensor] = None,
+        sampling_num: int = 1000,
     ) -> torch.Tensor:
         return model.predict_quantiles(
             src=x,
             quantiles=quantiles,
-            sampling_num=sampling_num,
             current_feature=current_feature,
+            sampling_num=sampling_num,
         )

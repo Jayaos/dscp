@@ -191,7 +191,7 @@ def run_transformer_iqn_cp(config_path):
                         iqn_transformer,
                         strided_feature,
                         quantiles,
-                        target_x,
+                        current_feature=target_x,
                     )
                 else:
                     pred_quantile_values = iqn_transformer.get_predicted_quantile_values(
@@ -473,7 +473,7 @@ def run_rnn_iqn_cp(config_path):
                         iqn_rnn,
                         strided_feature,
                         quantiles,
-                        target_x,
+                        current_feature=target_x,
                     )
                 else:
                     pred_quantile_values = iqn_rnn.get_predicted_quantile_values(

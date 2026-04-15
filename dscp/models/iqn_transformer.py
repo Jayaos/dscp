@@ -113,8 +113,8 @@ class IQNTransformer(torch.nn.Module):
         self,
         src: torch.Tensor,
         quantiles: torch.Tensor,
-        sampling_num: int = 1000,
         current_feature: Optional[torch.Tensor] = None,
+        sampling_num: int = 1000,
         src_key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         causal_mask = torch.nn.Transformer.generate_square_subsequent_mask(
@@ -138,14 +138,14 @@ class IQNTransformer(torch.nn.Module):
         model,
         x: torch.Tensor,
         quantiles: torch.Tensor,
-        sampling_num: int = 1000,
         current_feature: Optional[torch.Tensor] = None,
+        sampling_num: int = 1000,
     ) -> torch.Tensor:
         return model.predict_quantiles(
             src=x,
             quantiles=quantiles,
-            sampling_num=sampling_num,
             current_feature=current_feature,
+            sampling_num=sampling_num,
         )
 
 
