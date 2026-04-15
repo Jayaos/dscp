@@ -69,7 +69,7 @@ def parse_args(method_name: str) -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_grid(grid_path: Path) -> dict:
+def load_grid(grid_path: Path) -> Tuple[dict, dict]:
     grid_cfg = OmegaConf.load(grid_path)
     grid = OmegaConf.to_container(grid_cfg.get("grid", {}), resolve=True)
     if not isinstance(grid, dict) or len(grid) == 0:
@@ -80,7 +80,13 @@ def load_grid(grid_path: Path) -> dict:
         if not isinstance(values, list) or len(values) == 0:
             raise ValueError(f"Grid entry `{dotted_key}` must map to a non-empty list.")
         normalized_grid[dotted_key] = values
-    return normalized_grid
+    tuning_cfg = OmegaConf.to_container(grid_cfg.get("tuning", {}), resolve=True)
+    if tuning_cfg is None:
+        tuning_cfg = {}
+    if not isinstance(tuning_cfg, dict):
+        raise ValueError("Grid config `tuning:` section must be a mapping when provided.")
+
+    return normalized_grid, tuning_cfg
 
 
 def iter_grid_configs(base_config, grid: dict):
@@ -125,8 +131,9 @@ def choose_sequence_key(dataset: dict, sequence_key: Optional[str], sequence_ind
     return keys[sequence_index]
 
 
-def resolve_num_sequences(config) -> int:
-    tuning_cfg = config.get("tuning", {})
+def resolve_num_sequences(tuning_cfg) -> int:
+    if tuning_cfg is None:
+        tuning_cfg = {}
     num_sequences = int(tuning_cfg.get("num_sequences", 1))
     if num_sequences <= 0:
         raise ValueError("tuning.num_sequences must be a positive integer.")

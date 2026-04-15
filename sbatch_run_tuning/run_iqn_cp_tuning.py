@@ -225,7 +225,7 @@ def main():
     save_dir.mkdir(parents=True, exist_ok=True)
 
     base_config = OmegaConf.load(args.base_config)
-    grid = load_grid(args.grid_config)
+    grid, tuning_cfg = load_grid(args.grid_config)
 
     data = load_data(base_config.data.data_path)
     cpd = ConformalPredictionData(data)
@@ -236,7 +236,7 @@ def main():
         base_config.data.valid_ratio,
         normalize=base_config.data.normalize,
     )
-    num_sequences = resolve_num_sequences(base_config)
+    num_sequences = resolve_num_sequences(tuning_cfg)
     sequence_keys = choose_sequence_keys(cpd.dataset, args.sequence_key, args.sequence_index, num_sequences)
 
     trials = []
