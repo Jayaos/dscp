@@ -1,6 +1,5 @@
 grid:
   model.dim_model: [32, 64]
-  mode.num_heads: [2, 4]
   model.num_layers: [2, 4]
   model.window_size: [100, 200]
   model.use_current_feature: [True, False]
