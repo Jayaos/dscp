@@ -23,7 +23,7 @@ model:
 
 
 training:
-  batch_size: 64
+  batch_size: 32
   learning_rate: 0.001
   epochs: 50
   early_stop: 3
@@ -34,5 +34,5 @@ plotting:
   plotting_seq_len: 200
   
 
-saving_dir: "./results/qr_transformer_chronos_air-10/"
+saving_dir: "./results/qr_transformer_chronos_air/"
 
