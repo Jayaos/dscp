@@ -1,13 +1,13 @@
 grid:
   model.dim_model: [16, 32]
-  #model.num_layers: [2, 4]
-  #model.window_size: [48, 100]
-  #model.calibration_size: [100, 500]
-  #model.similarity_fn: ["dot_product", "cos_similarity"]
-  #model.temperature: [0.3, 1.0, 3.0]
-  #model.sampling_num: [500, 1000]
-  #data.strided_features: ["xr", "xry"]
-  #training.learning_rate: [0.0001, 0.0003]
+  model.num_layers: [2, 4]
+  model.window_size: [100, 200]
+  model.use_current_feature: [True, False]
+  model.calibration_size: [100, 500]
+  model.similarity_fn: ["dot_product", "cos_similarity"]
+  model.temperature: [0.1, 0.2]
+  data.strided_features: ["xr", "xry"]
+  training.learning_rate: [0.0001, 0.001]
 
 
 tuning:

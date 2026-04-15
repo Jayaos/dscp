@@ -2,22 +2,22 @@ device: 0
 
 
 data:
-  data_path: "./data/air-10/chronos/chronos_air-10_data.pkl"
-  train_ratio: 0.7
-  valid_ratio: 0.15
+  data_path: "./data/air-10_prediction/chronos/chronos_air-10_data.pkl"
+  train_ratio: 0.6
+  valid_ratio: 0.2
   normalize: True
-  shifted_concatenation: False
   strided_features: "xr"
 
 
 model:
-  dim_model: 64
-  num_heads: 4
-  num_layers: 4
+  shared_dim: &shared_dim 64
+  dim_model: *shared_dim
+  num_heads: 2
+  num_layers: 2
   dropout: 0.
   use_current_feature: False
-  iqn_hidden_dim: 64
-  cos_emb_dim: 64
+  iqn_hidden_dim: *shared_dim
+  cos_emb_dim: *shared_dim
   num_taus: 64
   target_quantiles:
     - [0.95, 0.05]
@@ -28,8 +28,8 @@ model:
 training:
   batch_size: 64
   learning_rate: 0.001
-  epochs: 1
-  early_stop: 2
+  epochs: 50
+  early_stop: 3
 
 
 plotting:

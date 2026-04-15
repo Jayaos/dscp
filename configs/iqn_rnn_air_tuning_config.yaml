@@ -1,10 +1,11 @@
 grid:
-  model.dim_model: [32, 64]
-  #model.num_layers: [2, 4]
-  #model.num_taus: [32, 64]
-  #model.window_size: [48, 100]
-  #data.strided_features: ["xr", "xry"]
-  #training.learning_rate: [0.0003, 0.001]
+  model.shared_dim: [16, 32]
+  model.num_layers: [2, 4]
+  model.use_current_feature: [True, False]
+  model.num_taus: [32, 64]
+  model.window_size: [100, 200, 500]
+  data.strided_features: ["xr", "xry"]
+  training.learning_rate: [0.0001, 0.001]
 
 
 tuning:
