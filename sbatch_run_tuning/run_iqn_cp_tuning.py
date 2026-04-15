@@ -24,16 +24,20 @@ from sbatch_run_tuning.common import (
     write_trial_artifacts,
 )
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score
-from utils.utils import flatten, generate_strided_feature, load_data
+from utils.utils import generate_strided_feature, get_interval_quantile_indices, load_data
 
 
-def _build_model(config, dim_feature: int):
+def _build_model(config, dim_feature: int, dim_x: int):
+    use_current_feature = bool(config.model.use_current_feature)
+    current_feature_dim = dim_x if use_current_feature else 0
+
     if "rnn_type" in config.model:
         model = IQNRNN(
             rnn_type=config.model.rnn_type,
             dim_feature=dim_feature,
             dim_model=config.model.dim_model,
             num_layers=config.model.num_layers,
+            current_feature_dim=current_feature_dim,
             iqn_hidden_dim=config.model.iqn_hidden_dim,
             output_dim=1,
             n_cos_embedding=config.model.cos_emb_dim,
@@ -48,6 +52,7 @@ def _build_model(config, dim_feature: int):
             num_head=config.model.num_heads,
             dim_ff=config.model.dim_model * 4,
             num_layers=config.model.num_layers,
+            current_feature_dim=current_feature_dim,
             iqn_hidden_dim=config.model.iqn_hidden_dim,
             output_dim=1,
             n_cos_embedding=config.model.cos_emb_dim,
@@ -55,12 +60,12 @@ def _build_model(config, dim_feature: int):
         )
         train_loss_fn = compute_loss_iqn_transformer
         model_type = "transformer"
-    return model, train_loss_fn, model_type
+    return model, train_loss_fn, model_type, use_current_feature
 
 
 def _run_single_trial(config, sequence_item, sequence_data):
     device = resolve_device(config.device)
-    target_quantiles = flatten(config.model.target_quantiles)
+    sorted_quantiles, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
 
     train_dataset = sequence_item["train_dataset"]
     valid_dataset = sequence_item["valid_dataset"]
@@ -80,7 +85,7 @@ def _run_single_trial(config, sequence_item, sequence_data):
     else:
         raise ValueError("wrong strided features specified")
 
-    model, loss_fn, model_type = _build_model(config, dim_feature)
+    model, loss_fn, model_type, use_current_feature = _build_model(config, dim_feature, dim_x)
     model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.training.learning_rate)
 
@@ -93,7 +98,7 @@ def _run_single_trial(config, sequence_item, sequence_data):
     for epoch_idx in range(config.training.epochs):
         model.train()
         loss_sum = 0.0
-        for strided_x, strided_residual, strided_y, _, target_residual, _, _ in train_dataloader:
+        for strided_x, strided_residual, strided_y, target_x, target_residual, _, _ in train_dataloader:
             optimizer.zero_grad()
             strided_feature = generate_strided_feature(
                 strided_x,
@@ -102,7 +107,11 @@ def _run_single_trial(config, sequence_item, sequence_data):
                 config.data.strided_features,
             ).to(device)
             target_residual = target_residual.to(device)
-            loss = loss_fn(model, strided_feature, target_residual, config.model.num_taus)
+            target_x = target_x.to(device)
+            if use_current_feature:
+                loss = loss_fn(model, strided_feature, target_residual, config.model.num_taus, target_x)
+            else:
+                loss = loss_fn(model, strided_feature, target_residual, config.model.num_taus)
             loss.backward()
             optimizer.step()
             loss_sum += loss.item()
@@ -112,7 +121,7 @@ def _run_single_trial(config, sequence_item, sequence_data):
 
         model.eval()
         loss_sum = 0.0
-        for strided_x, strided_residual, strided_y, _, target_residual, _, _ in valid_dataloader:
+        for strided_x, strided_residual, strided_y, target_x, target_residual, _, _ in valid_dataloader:
             strided_feature = generate_strided_feature(
                 strided_x,
                 strided_residual,
@@ -120,8 +129,12 @@ def _run_single_trial(config, sequence_item, sequence_data):
                 config.data.strided_features,
             ).to(device)
             target_residual = target_residual.to(device)
+            target_x = target_x.to(device)
             with torch.no_grad():
-                loss = loss_fn(model, strided_feature, target_residual, config.model.num_taus)
+                if use_current_feature:
+                    loss = loss_fn(model, strided_feature, target_residual, config.model.num_taus, target_x)
+                else:
+                    loss = loss_fn(model, strided_feature, target_residual, config.model.num_taus)
             loss_sum += loss.item()
 
         epoch_valid_loss = loss_sum / len(valid_dataloader)
@@ -136,7 +149,7 @@ def _run_single_trial(config, sequence_item, sequence_data):
             break
 
     model.load_state_dict(best_model)
-    quantiles = torch.tensor(target_quantiles, dtype=torch.float32, device=device)
+    quantiles = torch.tensor(sorted_quantiles, dtype=torch.float32, device=device)
 
     evaluation_results = {
         tuple(confidence_pair): {
@@ -152,7 +165,7 @@ def _run_single_trial(config, sequence_item, sequence_data):
         residual_std = sequence_data["train_residuals_std"]
 
     model.eval()
-    for strided_x, strided_residual, strided_y, _, target_residual, target_y, target_predictions in test_dataloader:
+    for strided_x, strided_residual, strided_y, target_x, target_residual, target_y, target_predictions in test_dataloader:
         with torch.no_grad():
             strided_feature = generate_strided_feature(
                 strided_x,
@@ -160,15 +173,20 @@ def _run_single_trial(config, sequence_item, sequence_data):
                 strided_y,
                 config.data.strided_features,
             ).to(device)
-            pred_quantile_values = model.get_predicted_quantile_values(model, strided_feature, quantiles)
+            target_x = target_x.to(device)
+            if use_current_feature:
+                pred_quantile_values = model.get_predicted_quantile_values(model, strided_feature, quantiles, target_x)
+            else:
+                pred_quantile_values = model.get_predicted_quantile_values(model, strided_feature, quantiles)
 
         if device.type != "cpu":
             pred_quantile_values = pred_quantile_values.cpu().detach()
 
-        for j, confidence_pair in enumerate(config.model.target_quantiles):
+        for confidence_pair in config.model.target_quantiles:
             pair_key = tuple(confidence_pair)
-            hi = pred_quantile_values[:, 2 * j + 0]
-            lo = pred_quantile_values[:, 2 * j + 1]
+            hi_idx, lo_idx = pair_to_indices[pair_key]
+            hi = pred_quantile_values[:, hi_idx]
+            lo = pred_quantile_values[:, lo_idx]
             evaluation_results[pair_key]["coverage"].extend(compute_coverage(hi, lo, target_residual))
             evaluation_results[pair_key]["interval_width"].extend(
                 compute_interval_width(hi, lo, normalized_std=residual_std if config.data.normalize else None)

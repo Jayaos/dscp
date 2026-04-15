@@ -27,7 +27,7 @@ from sbatch_run_tuning.common import (
     write_trial_artifacts,
 )
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score
-from utils.utils import generate_strided_feature, load_data
+from utils.utils import generate_strided_feature, get_interval_quantile_indices, load_data
 
 
 def _build_model(config, dim_feature: int, dim_x: int):
@@ -66,6 +66,7 @@ def _build_model(config, dim_feature: int, dim_x: int):
 
 def _run_single_trial(config, sequence_item, sequence_data):
     device = resolve_device(config.device)
+    _, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
 
     train_dataset = sequence_item["train_dataset"]
     valid_dataset = sequence_item["valid_dataset"]
@@ -180,10 +181,11 @@ def _run_single_trial(config, sequence_item, sequence_data):
         if device.type != "cpu":
             pred_quantile_values = pred_quantile_values.cpu().detach()
 
-        for j, confidence_pair in enumerate(config.model.target_quantiles):
+        for confidence_pair in config.model.target_quantiles:
             pair_key = tuple(confidence_pair)
-            hi = pred_quantile_values[:, 2 * j + 0]
-            lo = pred_quantile_values[:, 2 * j + 1]
+            hi_idx, lo_idx = pair_to_indices[pair_key]
+            hi = pred_quantile_values[:, hi_idx]
+            lo = pred_quantile_values[:, lo_idx]
             evaluation_results[pair_key]["coverage"].extend(compute_coverage(hi, lo, target_residual))
             evaluation_results[pair_key]["interval_width"].extend(
                 compute_interval_width(hi, lo, normalized_std=residual_std if config.data.normalize else None)
