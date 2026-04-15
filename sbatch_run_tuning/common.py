@@ -2,6 +2,7 @@ import argparse
 import itertools
 import random
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -105,7 +106,7 @@ def _set_dotted_key(cfg, dotted_key: str, value):
     node[parts[-1]] = value
 
 
-def choose_sequence_key(dataset: dict, sequence_key: str | None, sequence_index: int) -> str:
+def choose_sequence_key(dataset: dict, sequence_key: Optional[str], sequence_index: int) -> str:
     keys = sorted(dataset.keys())
     if not keys:
         raise ValueError("No sequence keys were found in the prepared dataset.")
@@ -134,10 +135,10 @@ def resolve_num_sequences(config) -> int:
 
 def choose_sequence_keys(
     dataset: dict,
-    sequence_key: str | None,
+    sequence_key: Optional[str],
     sequence_index: int,
     num_sequences: int,
-) -> list[str]:
+) -> List[str]:
     keys = sorted(dataset.keys())
     if not keys:
         raise ValueError("No sequence keys were found in the prepared dataset.")
@@ -192,7 +193,9 @@ def resolve_device(raw_device):
     return torch.device("cpu")
 
 
-def summarize_evaluation_results(evaluation_results: dict, target_quantiles: list) -> tuple[dict, float, bool]:
+def summarize_evaluation_results(
+    evaluation_results: dict, target_quantiles: list
+) -> Tuple[Dict, float, bool]:
     pair_summaries = {}
     winkler_scores = []
     all_positive = True
