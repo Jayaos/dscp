@@ -21,7 +21,7 @@ model:
   window_size: 100
   calibration_size: 100
   similarity_fn: "dot_product"
-  temperature: 1
+  temperature: 0.1
   sampling_num: 1000
 
 
