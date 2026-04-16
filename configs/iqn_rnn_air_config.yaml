@@ -6,14 +6,14 @@ data:
   train_ratio: 0.6
   valid_ratio: 0.2
   normalize: True
-  strided_features: "xr"
+  strided_features: "xry"
 
 
 model:
   rnn_type: "lstm"
-  shared_dim: &shared_dim 64
+  shared_dim: &shared_dim 16
   dim_model: *shared_dim
-  num_layers: 4
+  num_layers: 2
   dropout: 0.
   use_current_feature: False
   iqn_hidden_dim: *shared_dim
@@ -37,4 +37,4 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/run_test_iqn_rnn/"
+saving_dir: "./results/iqn_rnn_chronos_air/"

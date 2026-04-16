@@ -6,11 +6,11 @@ data:
   train_ratio: 0.6
   valid_ratio: 0.2
   normalize: True
-  strided_features: "xr"
+  strided_features: "xry"
 
 
 model:
-  shared_dim: &shared_dim 64
+  shared_dim: &shared_dim 32
   dim_model: *shared_dim
   num_heads: 2
   num_layers: 2
@@ -37,4 +37,4 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/run_test_iqn_transformer/"
+saving_dir: "./results/run_iqn_transformer_chronos_air/"
