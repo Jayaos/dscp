@@ -14,7 +14,7 @@ model:
   dim_model: 32
   num_layers: 2
   dropout: 0.
-  use_current_feature: True
+  use_current_feature: False
   target_quantiles:
     - [0.05, 0.95]
   prediction_step: 1
