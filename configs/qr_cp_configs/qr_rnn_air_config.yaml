@@ -33,5 +33,5 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/qr_rnn_chronos_air-10/"
+saving_dir: "./results/qr_rnn_chronos_air/"
 
