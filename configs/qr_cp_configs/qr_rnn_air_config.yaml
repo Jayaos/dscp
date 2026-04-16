@@ -12,7 +12,7 @@ data:
 model:
   rnn_type: "lstm"
   dim_model: 32
-  num_layers: 1
+  num_layers: 2
   dropout: 0.
   use_current_feature: True
   target_quantiles:
