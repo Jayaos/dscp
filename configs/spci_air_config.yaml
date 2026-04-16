@@ -1,8 +1,8 @@
 data:
-  data_path: "C:/Users/jayao/Desktop/lr_toy_data.pkl"
+  data_path: "./data/air-10_prediction/chronos/chronos_air-10_data.pkl"
   train_ratio: 0.6
   valid_ratio: 0.2
-  normalize: False
+  normalize: True
 
 
 model:
@@ -15,5 +15,5 @@ model:
   window_size: 100
 
 
-saving_dir: "C:/Users/jayao/Desktop/spci_test/"
+saving_dir: "./results/qr_spci_chronos_air/"
 

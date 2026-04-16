@@ -87,8 +87,8 @@ def compute_winkler_score(upper_interval, lower_interval, y, preds, confidence_p
         penalty = upper_fail_penalty + lower_fail_penalty
 
     else:
-        upper_interval_value =  upper_interval
-        lower_interval_value =  lower_interval
+        upper_interval_value =  upper_interval + preds
+        lower_interval_value =  lower_interval + preds
         interval_width = upper_interval_value - lower_interval_value
 
         # binary, 1 if y is larger than upper_interval_value and 0 if y is smaller than upper_interval_value
