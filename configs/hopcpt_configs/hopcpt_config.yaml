@@ -6,7 +6,6 @@ data:
   train_ratio: 0.35
   valid_ratio: 0.35
   normalize: False
-  memory_features: "xy"
 
 
 model:
@@ -14,6 +13,9 @@ model:
   dim_hopfield_hidden: 2
   beta: 1
   memory_size: 300
+  y_lags: 1
+  target_quantiles:
+    - [0.05, 0.95]
   prediction_step: 1
   alpha: 0.1
   sampling_num: 1000
@@ -24,6 +26,11 @@ training:
   learning_rate: 0.01
   epochs: 2000
   validation_epochs: 5
+
+
+plotting:
+  plotting: True
+  plotting_seq_len: 200
 
 saving_dir: "C:/Users/jayao/Desktop/run_test/"
 

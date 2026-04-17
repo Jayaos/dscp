@@ -121,6 +121,37 @@ def to_strided_feature(feature_sequence, window_len, pred_horizon=1, return_targ
         return sw
 
 
+def build_hopcpt_context_features(x, y, predictions, y_lags):
+    """
+    Build HopCPT context rows Z_t = [Y_{t-k}, ..., Y_{t-1}, X_t, yhat_t].
+
+    Returns rows for t = y_lags, ..., T-1, so arrays that should align with
+    these contexts must be shifted by y_lags before striding.
+    """
+    if y_lags <= 0:
+        raise ValueError("y_lags must be a positive integer.")
+
+    x = np.asarray(x)
+    if x.ndim == 1:
+        x = x.reshape(-1, 1)
+
+    y = np.asarray(y)
+    if y.ndim == 1:
+        y = y.reshape(-1, 1)
+
+    predictions = np.asarray(predictions)
+    if predictions.ndim == 1:
+        predictions = predictions.reshape(-1, 1)
+
+    if not (x.shape[0] == y.shape[0] == predictions.shape[0]):
+        raise ValueError("x, y, and predictions must have the same time length.")
+    if x.shape[0] <= y_lags:
+        raise ValueError("Sequence too short for the requested y_lags.")
+
+    y_lag_features = [y[y_lags - lag: -lag] for lag in range(y_lags, 0, -1)]
+    return np.concatenate([*y_lag_features, x[y_lags:], predictions[y_lags:]], axis=-1)
+
+
 def chronological_split(arrays, train_ratio=0.7, valid_ratio=0.15):
     """
     Chronological split along `axis` 0: train | valid | test (leftover).
@@ -300,61 +331,32 @@ def generate_strided_feature(strided_x, strided_residual, strided_y, features_us
     return strided_feature
 
 
-def generate_feature_hopcpt_training(train_x, train_y, features_used):
+def generate_feature_hopcpt_training(train_context):
     """
-    :param strided_x: strided x for memory context, (1, memory_len, dim)
-    :param strided_y: strided y for memory context, (1, memory_len, 1)
+    :param train_context: HopCPT context rows, (memory_len, dim)
     """
-    if isinstance(train_x, np.ndarray):
-        train_x = torch.from_numpy(train_x).to(torch.float32)
+    if isinstance(train_context, np.ndarray):
+        train_context = torch.from_numpy(train_context).to(torch.float32)
 
-    if isinstance(train_y, np.ndarray):
-        train_y = torch.from_numpy(train_y).to(torch.float32)
+    if train_context.ndim == 2:
+        train_context = train_context.unsqueeze(0)
 
-    if train_x.ndim == 2:
-        train_x.unsqueeze_(0)
-
-    if train_y.ndim == 2:
-        train_y.unsqueeze_(0)
-
-    if features_used == "xy":
-        memory_feature = torch.cat([train_x, train_y], dim=-1)
-
-    elif features_used == "x":
-        memory_feature = train_x
-
-    return memory_feature # (1, memory_len, dim)
+    return train_context # (1, memory_len, dim)
 
 
-def generate_feature_hopcpt_test(strided_x, strided_y, target_x, target_predictions, features_used):
+def generate_feature_hopcpt_test(strided_context, target_context):
     """
-    :param strided_x: strided x for memory context, (batch_size, memory_len, dim) or (memory_len, dim)
-    :param strided_y: strided y for memory context, (batch_size, memory_len, 1) or (memory_len, dim)
-    :param target_x: target x for query context, (batch_size, 1, dim) or (1, dim)
-    :param target_predictions: target \hat{y} for query context, (batch_size, 1, 1)  or (1, 1)
+    :param strided_context: memory contexts, (batch_size, memory_len, dim) or (memory_len, dim)
+    :param target_context: query context, (batch_size, 1, dim) or (1, dim)
     """
 
-    if strided_x.ndim == 2:
-        strided_x.unsqueeze_(0)
+    if strided_context.ndim == 2:
+        strided_context = strided_context.unsqueeze(0)
 
-    if strided_y.ndim == 2:
-        strided_y.unsqueeze_(0)
+    if target_context.ndim == 2:
+        target_context = target_context.unsqueeze(0)
 
-    if target_x.ndim == 2:
-        target_x.unsqueeze_(0)
-
-    if target_predictions.ndim == 2:
-        target_predictions.unsqueeze_(0)
-
-    if features_used == "xy":
-        memory_feature = torch.cat([strided_x, strided_y], dim=-1)
-        query_feature = torch.cat([target_x, target_predictions], dim=-1)
-
-    elif features_used == "x":
-        memory_feature = strided_x
-        query_feature = target_x
-
-    return memory_feature, query_feature
+    return strided_context, target_context
 
 
 def estimate_quantile_values(weights: torch.Tensor, 

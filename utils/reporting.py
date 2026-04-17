@@ -54,7 +54,7 @@ def compute_winkler_score(upper_interval, lower_interval, y, preds, confidence_p
         pass
     
     if isinstance(confidence_pair, tuple):
-        alpha = 1 - (confidence_pair[0] - confidence_pair[1])
+        alpha = 1 - (max(confidence_pair) - min(confidence_pair))
     else:
         alpha = confidence_pair
 

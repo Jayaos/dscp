@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from torch.utils.data import Dataset
 from utils.utils import to_strided_feature, to_strided_residual, chronological_split_fixed_test
+from utils.utils import build_hopcpt_context_features
 from utils.utils import normalize_array_with_params, compute_mean_std
 
 
@@ -139,6 +140,7 @@ class ConformalPredictionData:
     def prepare_hopcpt_datasets(self, 
                                 memory_size, 
                                 prediction_steps, 
+                                y_lags,
                                 train_ratio, 
                                 valid_ratio, 
                                 normalize=False,
@@ -185,27 +187,32 @@ class ConformalPredictionData:
             valid_x = heldout_x[train_size:train_size+valid_size]
             train_y = heldout_y[:train_size]
             valid_y = heldout_y[train_size:train_size+valid_size]
-            train_residual = heldout_residuals[:train_size]
+            train_residual = heldout_residuals[y_lags:train_size]
             valid_residual = heldout_residuals[train_size:train_size+valid_size]
 
+            heldout_context = build_hopcpt_context_features(heldout_x,
+                                                            heldout_y,
+                                                            heldout_predictions,
+                                                            y_lags)
+            heldout_context_residuals = heldout_residuals[y_lags:]
+            heldout_target_y = np.asarray(item["heldout_y"])[y_lags:]
+            heldout_target_predictions = np.asarray(item["heldout_predictions"])[y_lags:]
 
-            strided_x, target_x = to_strided_feature(heldout_x, 
-                                                    memory_size, 
-                                                    prediction_steps,
-                                                    return_target=True) # (seq_len-window_len, window_len, dim)
-            valid_strided_x = strided_x[-(test_size+valid_size):-test_size]
-            valid_target_x = target_x[-(test_size+valid_size):-test_size]
-            test_strided_x = strided_x[-test_size:]
-            test_target_x = target_x[-test_size:]
+            if train_size <= y_lags:
+                raise ValueError("train split must contain more observations than y_lags.")
+            train_context = heldout_context[:train_size-y_lags]
 
-            strided_y, _ = to_strided_residual(heldout_y, 
-                                           memory_size, 
-                                           prediction_steps) # (seq_len-window_len, window_len, dim)
-            valid_strided_y = strided_y[-(test_size+valid_size):-test_size]
-            test_strided_y = strided_y[-test_size:]
+            strided_context, target_context = to_strided_feature(heldout_context,
+                                                                 memory_size,
+                                                                 prediction_steps,
+                                                                 return_target=True)
+            valid_strided_context = strided_context[-(test_size+valid_size):-test_size]
+            valid_target_context = target_context[-(test_size+valid_size):-test_size]
+            test_strided_context = strided_context[-test_size:]
+            test_target_context = target_context[-test_size:]
 
             # for unnormalized target_y
-            _, target_y = to_strided_residual(item["heldout_y"], 
+            _, target_y = to_strided_residual(heldout_target_y,
                                               memory_size, 
                                               prediction_steps)
             valid_target_y = target_y[-(test_size+valid_size):-test_size]
@@ -213,7 +220,7 @@ class ConformalPredictionData:
 
             # residuals are not used for training only used to compute value therefore no normalization needed
 
-            strided_residual, target_residual = to_strided_residual(heldout_residuals, 
+            strided_residual, target_residual = to_strided_residual(heldout_context_residuals,
                                                                     memory_size, 
                                                                     prediction_steps)
             valid_strided_residual = strided_residual[-(test_size+valid_size):-test_size]
@@ -221,9 +228,9 @@ class ConformalPredictionData:
             test_strided_residual = strided_residual[-test_size:]
             test_target_residual = target_residual[-test_size:]
             
-            _, target_predictions = to_strided_residual(heldout_predictions, 
-                                                    memory_size, 
-                                                    prediction_steps)
+            _, target_predictions = to_strided_residual(heldout_target_predictions,
+                                                        memory_size,
+                                                        prediction_steps)
             valid_target_predictions = target_predictions[-(test_size+valid_size):-test_size]
             test_target_predictions = target_predictions[-test_size:]
             
@@ -232,22 +239,22 @@ class ConformalPredictionData:
                                        "heldout_valid_x" : valid_x,
                                        "heldout_train_y" : train_y,
                                        "heldout_valid_y" : valid_y,
+                                       "heldout_train_context" : train_context,
                                        "heldout_train_residual" : train_residual,
                                        "heldout_valid_residual" : valid_residual,
-                                       "valid_strided_x" : valid_strided_x,
-                                       "valid_target_x" : valid_target_x,
+                                       "valid_strided_context" : valid_strided_context,
+                                       "valid_target_context" : valid_target_context,
                                        "valid_strided_residual" : valid_strided_residual, 
-                                       "valid_strided_y" : valid_strided_y,
                                        "valid_target_residual" : valid_target_residual,
                                        "valid_target_y" : valid_target_y,
                                        "valid_target_predictions" : valid_target_predictions,
-                                       "test_strided_x" : test_strided_x,
-                                       "test_target_x" : test_target_x,
+                                       "test_strided_context" : test_strided_context,
+                                       "test_target_context" : test_target_context,
                                        "test_strided_residual" : test_strided_residual, 
-                                       "test_strided_y" : test_strided_y,
                                        "test_target_residual" : test_target_residual,
                                        "test_target_y" : test_target_y,
                                        "test_target_predictions" : test_target_predictions,
+                                       "heldout_context" : heldout_context,
                                        "heldout_x_normalized" : heldout_x,
                                        "heldout_train_x_mu" : train_x_mu,
                                        "heldout_train_x_std" : train_x_std,
@@ -260,34 +267,32 @@ class ConformalPredictionData:
                                        "heldout_valid_x" : valid_x,
                                        "heldout_train_y" : train_y,
                                        "heldout_valid_y" : valid_y,
+                                       "heldout_train_context" : train_context,
                                        "heldout_train_residual" : train_residual,
                                        "heldout_valid_residual" : valid_residual,
-                                       "valid_strided_x" : valid_strided_x,
-                                       "valid_target_x" : valid_target_x,
+                                       "valid_strided_context" : valid_strided_context,
+                                       "valid_target_context" : valid_target_context,
                                        "valid_strided_residual" : valid_strided_residual, 
-                                       "valid_strided_y" : valid_strided_y,
                                        "valid_target_residual" : valid_target_residual,
                                        "valid_target_y" : valid_target_y,
                                        "valid_target_predictions" : valid_target_predictions,
-                                       "test_strided_x" : test_strided_x,
-                                       "test_target_x" : test_target_x,
+                                       "test_strided_context" : test_strided_context,
+                                       "test_target_context" : test_target_context,
                                        "test_strided_residual" : test_strided_residual, 
-                                       "test_strided_y" : test_strided_y,
                                        "test_target_residual" : test_target_residual,
                                        "test_target_y" : test_target_y,
                                        "test_target_predictions" : test_target_predictions,
+                                       "heldout_context" : heldout_context,
                                        "heldout_residuals" : heldout_residuals})
 
-            self.dataset[key] = {"valid_dataset" : HopCPTTestDataset(valid_strided_x,
-                                                                    valid_strided_y,
-                                                                    valid_target_x,
+            self.dataset[key] = {"valid_dataset" : HopCPTTestDataset(valid_strided_context,
+                                                                    valid_target_context,
                                                                     valid_target_predictions,
                                                                     valid_strided_residual,
                                                                     valid_target_residual,
                                                                     valid_target_y),
-                                 "test_dataset" : HopCPTTestDataset(test_strided_x,
-                                                                    test_strided_y,
-                                                                    test_target_x,
+                                 "test_dataset" : HopCPTTestDataset(test_strided_context,
+                                                                    test_target_context,
                                                                     test_target_predictions,
                                                                     test_strided_residual,
                                                                     test_target_residual,
@@ -297,6 +302,7 @@ class ConformalPredictionData:
     def prepare_hopcpt_datasets_max_memory(self, 
                                            max_memory_size, 
                                            prediction_steps, 
+                                           y_lags,
                                            train_ratio, 
                                            valid_ratio, 
                                            normalize=False,
@@ -343,16 +349,33 @@ class ConformalPredictionData:
             valid_x = heldout_x[train_size:train_size+valid_size]
             train_y = heldout_y[:train_size]
             valid_y = heldout_y[train_size:train_size+valid_size]
-            train_residual = heldout_residuals[:train_size]
+            train_residual = heldout_residuals[y_lags:train_size]
             valid_residual = heldout_residuals[train_size:train_size+valid_size]
+
+            heldout_context = build_hopcpt_context_features(heldout_x,
+                                                            heldout_y,
+                                                            heldout_predictions,
+                                                            y_lags)
+            heldout_context_residuals = heldout_residuals[y_lags:]
+            heldout_target_y = np.asarray(item["heldout_y"])[y_lags:]
+            heldout_target_predictions = np.asarray(item["heldout_predictions"])[y_lags:]
+
+            if train_size <= y_lags:
+                raise ValueError("train split must contain more observations than y_lags.")
+            train_context = heldout_context[:train_size-y_lags]
 
             if normalize:
                 self.data[key].update({"heldout_train_x" : train_x,
                                        "heldout_valid_x" : valid_x,
                                        "heldout_train_y" : train_y,
                                        "heldout_valid_y" : valid_y,
+                                       "heldout_train_context" : train_context,
                                        "heldout_train_residual" : train_residual,
                                        "heldout_valid_residual" : valid_residual,
+                                       "heldout_context" : heldout_context,
+                                       "heldout_context_residuals" : heldout_context_residuals,
+                                       "heldout_target_y" : heldout_target_y,
+                                       "heldout_target_predictions" : heldout_target_predictions,
                                        "heldout_x_normalized" : heldout_x,
                                        "heldout_train_x_mu" : train_x_mu,
                                        "heldout_train_x_std" : train_x_std,
@@ -361,6 +384,7 @@ class ConformalPredictionData:
                                        "heldout_train_y_mu" : train_y_mu,
                                        "heldout_train_y_std" : train_y_std,
                                        "heldout_predictions" : heldout_predictions,
+                                       "y_lags" : y_lags,
                                        "train_size" : train_size,
                                        "valid_size" : valid_size,
                                        "test_size" : test_size,
@@ -372,10 +396,16 @@ class ConformalPredictionData:
                                        "heldout_valid_x" : valid_x,
                                        "heldout_train_y" : train_y,
                                        "heldout_valid_y" : valid_y,
+                                       "heldout_train_context" : train_context,
                                        "heldout_train_residual" : train_residual,
                                        "heldout_valid_residual" : valid_residual,
+                                       "heldout_context" : heldout_context,
+                                       "heldout_context_residuals" : heldout_context_residuals,
+                                       "heldout_target_y" : heldout_target_y,
+                                       "heldout_target_predictions" : heldout_target_predictions,
                                        "heldout_residuals" : heldout_residuals,
                                        "heldout_predictions" : heldout_predictions,
+                                       "y_lags" : y_lags,
                                        "train_size" : train_size,
                                        "valid_size" : valid_size,
                                        "test_size" : test_size,
@@ -388,101 +418,57 @@ def initialize_valid_dataloader(data, train_size, valid_size, prediction_steps, 
     """
     initialize dataloader, which is a generator
     """
-    if normalize:
-        heldout_x = data["heldout_x_normalized"]
-        heldout_y = data["heldout_y_normalized"]
-    else:
-        heldout_x = data["heldout_x"]
-        heldout_y = data["heldout_y"]
-    heldout_residuals = data["heldout_residuals"]
-    heldout_predictions = data["heldout_predictions"]
+    del normalize
+    y_lags = data["y_lags"]
+    start_idx = train_size - y_lags
+    end_idx = train_size + valid_size - y_lags
 
-    valid_x_generator = prefix_gen(heldout_x[:train_size+valid_size], 
-                                   train_size, 
-                                   prediction_steps, 
-                                   max_memory=max_memory_size)
-    
-    valid_y_generator = prefix_gen(heldout_y[:train_size+valid_size], 
-                train_size, 
-                prediction_steps, 
-                max_memory=max_memory_size)
-
-    # unnormalized target_y generator
-    if normalize:
-        # if normalize=True, use heldout_y that is unnormalized y
-        valid_target_y_generator = prefix_gen(data["heldout_y"][:train_size+valid_size], 
-                                              train_size, 
-                                              prediction_steps, 
-                                              max_memory=max_memory_size)
-    else:
-        # if normalize=False, heldout_y is unnormalized y
-        valid_target_y_generator = prefix_gen(heldout_y[:train_size+valid_size], 
-                                              train_size, 
-                                              prediction_steps, 
-                                              max_memory=max_memory_size)
-    # residuals are not used for training only used to compute value therefore no normalization needed
-    valid_residual_generator = prefix_gen(heldout_residuals[:train_size+valid_size], 
-                                          train_size, 
-                                          prediction_steps, 
+    valid_context_generator = prefix_gen(data["heldout_context"][:end_idx],
+                                         start_idx,
+                                         prediction_steps,
+                                         max_memory=max_memory_size)
+    valid_target_y_generator = prefix_gen(data["heldout_target_y"][:end_idx],
+                                          start_idx,
+                                          prediction_steps,
                                           max_memory=max_memory_size)
-
-    valid_prediction_generator = prefix_gen(heldout_predictions[:train_size+valid_size], 
-                                            train_size, 
-                                            prediction_steps, 
+    valid_residual_generator = prefix_gen(data["heldout_context_residuals"][:end_idx],
+                                          start_idx,
+                                          prediction_steps,
+                                          max_memory=max_memory_size)
+    valid_prediction_generator = prefix_gen(data["heldout_target_predictions"][:end_idx],
+                                            start_idx,
+                                            prediction_steps,
                                             max_memory=max_memory_size)
     
-    return (valid_x_generator, valid_y_generator, valid_target_y_generator, valid_residual_generator, valid_prediction_generator)
+    return (valid_context_generator, valid_target_y_generator, valid_residual_generator, valid_prediction_generator)
 
 
 def initialize_test_dataloader(data, train_size, valid_size, prediction_steps, max_memory_size, normalize):
     """
     initialize dataloader, which is a generator
     """
-    if normalize:
-        heldout_x = data["heldout_x_normalized"]
-        heldout_y = data["heldout_y_normalized"]
-    else:
-        heldout_x = data["heldout_x"]
-        heldout_y = data["heldout_y"]
-    heldout_residuals = data["heldout_residuals"]
-    heldout_predictions = data["heldout_predictions"]
+    del normalize
+    y_lags = data["y_lags"]
+    start_idx = train_size + valid_size - y_lags
     
-    test_x_generator = prefix_gen(heldout_x, 
-                train_size+valid_size, 
-                prediction_steps, 
-                max_memory=max_memory_size)
-
-    test_y_generator = prefix_gen(heldout_y, 
-                train_size+valid_size, 
-                prediction_steps, 
-                max_memory=max_memory_size)
-
-    # unnormalized target_y generator
-    if normalize:
-        # if normalize=True, use heldout_y that is unnormalized y
-        test_target_y_generator = prefix_gen(data["heldout_y"], 
-                                             train_size+valid_size, 
-                                             prediction_steps, 
-                                             max_memory=max_memory_size)
-    else:
-        # if normalize=False, heldout_y is unnormalized y
-        test_target_y_generator = prefix_gen(heldout_y, 
-                                             train_size+valid_size, 
-                                             prediction_steps, 
-                                             max_memory=max_memory_size)
-        
-    # residuals are not used for training only used to compute value therefore no normalization needed
-    test_residual_generator = prefix_gen(heldout_residuals, 
-                                         train_size+valid_size, 
-                                         prediction_steps, 
+    test_context_generator = prefix_gen(data["heldout_context"],
+                                        start_idx,
+                                        prediction_steps,
+                                        max_memory=max_memory_size)
+    test_target_y_generator = prefix_gen(data["heldout_target_y"],
+                                         start_idx,
+                                         prediction_steps,
                                          max_memory=max_memory_size)
-
-    test_prediction_generator = prefix_gen(heldout_predictions, 
-                                           train_size+valid_size, 
-                                           prediction_steps, 
+    test_residual_generator = prefix_gen(data["heldout_context_residuals"],
+                                         start_idx,
+                                         prediction_steps,
+                                         max_memory=max_memory_size)
+    test_prediction_generator = prefix_gen(data["heldout_target_predictions"],
+                                           start_idx,
+                                           prediction_steps,
                                            max_memory=max_memory_size)
     
-    return (test_x_generator, test_y_generator, test_target_y_generator, test_residual_generator, test_prediction_generator)
+    return (test_context_generator, test_target_y_generator, test_residual_generator, test_prediction_generator)
 
                 
 
@@ -545,10 +531,9 @@ class HopCPTTestDataset(Dataset):
     Dataset class for conditional CDF approximation for HopCPT
     """
 
-    def __init__(self, strided_x, strided_y, target_x, target_predictions, strided_residual, target_residual, target_y):
-        self.strided_x = torch.from_numpy(strided_x.copy()).to(torch.float32)
-        self.strided_y = torch.from_numpy(strided_y.copy()).to(torch.float32)
-        self.target_x = torch.from_numpy(target_x.copy()).to(torch.float32)
+    def __init__(self, strided_context, target_context, target_predictions, strided_residual, target_residual, target_y):
+        self.strided_context = torch.from_numpy(strided_context.copy()).to(torch.float32)
+        self.target_context = torch.from_numpy(target_context.copy()).to(torch.float32)
         self.target_predictions = torch.from_numpy(target_predictions.copy()).to(torch.float32)
         self.strided_residual = torch.from_numpy(strided_residual.copy()).to(torch.float32)
         self.target_residual = torch.from_numpy(target_residual.copy()).to(torch.float32)
@@ -558,6 +543,6 @@ class HopCPTTestDataset(Dataset):
         return len(self.target_residual)
 
     def __getitem__(self,idx):
-        return self.strided_x[idx], self.strided_y[idx], self.target_x[idx], self.target_predictions[idx], \
+        return self.strided_context[idx], self.target_context[idx], self.target_predictions[idx], \
             self.strided_residual[idx], self.target_residual[idx], self.target_y[idx]
 
