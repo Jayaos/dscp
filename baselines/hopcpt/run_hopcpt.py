@@ -52,8 +52,12 @@ def run_hopcpt(config_path):
         test_size = data["test_size"]
         valid_dataloader_size = data["valid_dataloader_size"]
         test_dataloader_size = data["test_dataloader_size"]
+        train_memory_size = data["heldout_train_context"].shape[0]
 
         dim_feature = data["heldout_context"].shape[-1]
+
+        print("configured max memory size for {}: {}".format(key, config.model.memory_size))
+        print("training memory size for {}: {}".format(key, train_memory_size))
 
         # model initialization
         hopfield_net = HopfieldNet(dim_feature, 
@@ -77,6 +81,7 @@ def run_hopcpt(config_path):
             hopfield_net.train()
             optimizer.zero_grad()
             memory_feature = generate_feature_hopcpt_training(data["heldout_train_context"])
+            print("training memory size at epoch {}: {}".format(i+1, memory_feature.shape[1]))
             memory_feature = memory_feature.to(device) # (1, memeory_length, feature_dim)
             memory_residual = torch.from_numpy(data["heldout_train_residual"]).to(torch.float32).to(device)
             loss = compute_hopfield_net_loss(hopfield_net, 
@@ -111,6 +116,7 @@ def run_hopcpt(config_path):
                     
                     memory_feature, query_feature = generate_feature_hopcpt_test(strided_context,
                                                                                  target_context)
+                    print("validation memory_feature shape: {}".format(memory_feature.shape))
                     memory_feature = memory_feature.to(device) # (batch_size, memeory_length, feature_dim)
                     query_feature = query_feature.to(device) # (batch_size, 1, feature_dim)
                     # (batch_size, 1, 1, memory_length)
@@ -180,6 +186,7 @@ def run_hopcpt(config_path):
             with torch.no_grad():
                 memory_feature, query_feature = generate_feature_hopcpt_test(strided_context,
                                                                              target_context)
+                print("test memory_feature shape: {}".format(memory_feature.shape))
                 memory_feature = memory_feature.to(device) # (batch_size, memeory_length, feature_dim)
                 query_feature = query_feature.to(device) # (batch_size, 1, feature_dim)
                 # (batch_size, 1, 1, memory_length)
@@ -209,6 +216,13 @@ def run_hopcpt(config_path):
                 evaluation_results[tuple_confidence_pair]["winkler_score"].extend(this_winkler_score)
                 evaluation_results[tuple_confidence_pair]["target_y"].extend(target_y.flatten().tolist())
                 evaluation_results[tuple_confidence_pair]["target_predictions"].extend(target_predictions.flatten().tolist())
+
+        print("test memory size for {}: first={}, last={}, min={}, max={}".format(
+            key,
+            test_memory_sizes[0],
+            test_memory_sizes[-1],
+            min(test_memory_sizes),
+            max(test_memory_sizes)))
 
         for confidence_pair in target_quantiles:
             tuple_confidence_pair = tuple(confidence_pair)

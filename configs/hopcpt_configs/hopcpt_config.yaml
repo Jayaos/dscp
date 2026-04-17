@@ -9,10 +9,10 @@ data:
 
 
 model:
-  dim_context_encoding: 2
-  dim_hopfield_hidden: 2
+  dim_context_encoding: 3
+  dim_hopfield_hidden: 3
   beta: 1
-  memory_size: 300
+  memory_size: 250
   y_lags: 1
   target_quantiles:
     - [0.05, 0.95]
@@ -22,7 +22,6 @@ model:
 
 
 training:
-  batch_size: 16
   learning_rate: 0.01
   epochs: 2000
   validation_epochs: 5
