@@ -209,7 +209,7 @@ class LSTMPredictor:
             mse_list.append(mse.item())
             mae_list.append(mae.item())
 
-            self.predictions[key] = series_predictions
+            self.predictions[key] = series_predictions.cpu()
 
         self.average_mse = np.mean(mse_list)
         self.average_mae = np.mean(mae_list)
