@@ -1,7 +1,7 @@
 device: 0
 
 parallel:
-  enabled: False
+  enabled: Ture
   # Use one worker process per GPU. Each worker runs independent sequences
   # assigned to that GPU sequentially.
   devices: [0, 1]
