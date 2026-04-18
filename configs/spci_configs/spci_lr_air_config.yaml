@@ -1,5 +1,5 @@
 data:
-  data_path: "./data/air-10_prediction/lstm/lstm_air-10_data.pkl"
+  data_path: "./data/air-10_prediction/lr/lr_air-10_data.pkl"
   train_ratio: 0.6
   valid_ratio: 0.2
   normalize: True
@@ -15,4 +15,4 @@ model:
   window_size: 100
 
 
-saving_dir: "./results/qr_spci_lstm_air/"
+saving_dir: "./results/spci_lr_air/"

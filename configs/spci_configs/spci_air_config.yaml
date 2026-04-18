@@ -15,5 +15,5 @@ model:
   window_size: 100
 
 
-saving_dir: "./results/qr_spci_chronos_air/"
+saving_dir: "./results/spci_chronos_air/"
 
