@@ -17,8 +17,9 @@ model:
   dim_context_encoding: auto
   dim_hopfield_hidden: auto
   use_temporal_encoding: False
-  # HopCPT trains MSE on |epsilon|, but conformal selection uses signed epsilons by default.
-  use_absolute_residual: False
+  # Original HopCPT trains MSE on |epsilon|, but conformal selection uses signed epsilons by default.
+  predict_absolute_residual: True
+  conformal_absolute_residual: False
   beta: 1
   memory_size: 250
   y_lags: 1

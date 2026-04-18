@@ -1,7 +1,7 @@
 import torch
 
 
-def compute_hopfield_net_loss(hopfield_net, memory_feature, memory_value):
+def compute_hopfield_net_loss(hopfield_net, memory_feature, memory_value, absolute_residual=True):
     """
     MSE loss in hopcpt paper
 
@@ -18,9 +18,10 @@ def compute_hopfield_net_loss(hopfield_net, memory_feature, memory_value):
     # memory feature is used for query feature as well to compute the loss
     association_mask = get_association_mask(memory_feature)
     preds = hopfield_net(memory_feature, memory_value, association_mask=association_mask) # (batch_size, memory_length, 1)
-    preds = preds.abs()
-    e_abs = memory_value.abs() # memory value is used as target value to compute loss
-    loss = torch.nn.functional.mse_loss(preds, e_abs, reduction="none").sum()
+    if absolute_residual:
+        preds = preds.abs()
+        memory_value = memory_value.abs()
+    loss = torch.nn.functional.mse_loss(preds, memory_value, reduction="none").sum()
 
     return loss
 

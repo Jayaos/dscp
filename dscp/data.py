@@ -142,15 +142,22 @@ class ConformalPredictionData:
                                 train_ratio, 
                                 valid_ratio, 
                                 normalize=False,
-                                use_absolute_residual=True):
+                                predict_absolute_residual=True,
+                                conformal_absolute_residual=False):
 
         for key, item in self.data.items():
             
             # compute residuals
-            heldout_residuals = (item["heldout_y"] - item["heldout_predictions"]).flatten()
-            if use_absolute_residual:
-                heldout_residuals = np.abs(heldout_residuals)
-            self.data[key].update({"heldout_residuals" : heldout_residuals})
+            heldout_signed_residuals = (item["heldout_y"] - item["heldout_predictions"]).flatten()
+            heldout_train_residuals = heldout_signed_residuals
+            heldout_conformal_residuals = heldout_signed_residuals
+            if predict_absolute_residual:
+                heldout_train_residuals = np.abs(heldout_train_residuals)
+            if conformal_absolute_residual:
+                heldout_conformal_residuals = np.abs(heldout_conformal_residuals)
+            self.data[key].update({"heldout_residuals" : heldout_conformal_residuals,
+                                   "heldout_signed_residuals" : heldout_signed_residuals,
+                                   "heldout_train_residuals" : heldout_train_residuals})
             
             heldout_size = len(item["heldout_y"])
             train_size = int(np.floor(heldout_size*train_ratio))
@@ -177,7 +184,8 @@ class ConformalPredictionData:
 
             else:
                 heldout_x = item["heldout_x"]
-                heldout_residuals = item["heldout_residuals"]
+                heldout_train_residuals = item["heldout_train_residuals"]
+                heldout_conformal_residuals = item["heldout_residuals"]
                 heldout_y = item["heldout_y"]
                 heldout_predictions = item["heldout_predictions"]
 
@@ -185,14 +193,14 @@ class ConformalPredictionData:
             valid_x = heldout_x[train_size:train_size+valid_size]
             train_y = heldout_y[:train_size]
             valid_y = heldout_y[train_size:train_size+valid_size]
-            train_residual = heldout_residuals[y_lags:train_size]
-            valid_residual = heldout_residuals[train_size:train_size+valid_size]
+            train_residual = heldout_train_residuals[y_lags:train_size]
+            valid_residual = heldout_conformal_residuals[train_size:train_size+valid_size]
 
             heldout_context = build_hopcpt_context_features(heldout_x,
                                                             heldout_y,
                                                             heldout_predictions,
                                                             y_lags)
-            heldout_context_residuals = heldout_residuals[y_lags:]
+            heldout_context_residuals = heldout_conformal_residuals[y_lags:]
             heldout_target_y = np.asarray(item["heldout_y"])[y_lags:]
             heldout_target_predictions = np.asarray(item["heldout_predictions"])[y_lags:]
 
@@ -215,7 +223,9 @@ class ConformalPredictionData:
                                        "heldout_x_normalized" : heldout_x,
                                        "heldout_train_x_mu" : train_x_mu,
                                        "heldout_train_x_std" : train_x_std,
-                                       "heldout_residuals" : heldout_residuals,
+                                       "heldout_residuals" : heldout_conformal_residuals,
+                                       "heldout_signed_residuals" : heldout_signed_residuals,
+                                       "heldout_train_residuals" : heldout_train_residuals,
                                        "heldout_y_normalized" : heldout_y,
                                        "heldout_train_y_mu" : train_y_mu,
                                        "heldout_train_y_std" : train_y_std,
@@ -239,7 +249,9 @@ class ConformalPredictionData:
                                        "heldout_context_residuals" : heldout_context_residuals,
                                        "heldout_target_y" : heldout_target_y,
                                        "heldout_target_predictions" : heldout_target_predictions,
-                                       "heldout_residuals" : heldout_residuals,
+                                       "heldout_residuals" : heldout_conformal_residuals,
+                                       "heldout_signed_residuals" : heldout_signed_residuals,
+                                       "heldout_train_residuals" : heldout_train_residuals,
                                        "heldout_predictions" : heldout_predictions,
                                        "y_lags" : y_lags,
                                        "train_size" : train_size,

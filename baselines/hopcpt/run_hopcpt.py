@@ -54,6 +54,12 @@ def _run_hopcpt_sequence(key, data, config, device):
     target_quantiles = config.model.target_quantiles
     selection_confidence_pair = tuple(target_quantiles[0]) # this is used for validation
     selection_target_coverage = max(selection_confidence_pair) - min(selection_confidence_pair)
+    predict_absolute_residual = OmegaConf.select(
+        config, "model.predict_absolute_residual",
+        default=OmegaConf.select(config, "model.use_absolute_residual", default=True))
+    conformal_absolute_residual = OmegaConf.select(
+        config, "model.conformal_absolute_residual",
+        default=OmegaConf.select(config, "model.use_absolute_residual", default=False))
 
     train_size = data["train_size"]
     valid_size = data["valid_size"]
@@ -99,7 +105,8 @@ def _run_hopcpt_sequence(key, data, config, device):
         memory_residual = torch.from_numpy(data["heldout_train_residual"]).to(torch.float32).to(device)
         loss = compute_hopfield_net_loss(hopfield_net,
                                          memory_feature,
-                                         memory_residual)
+                                         memory_residual,
+                                         predict_absolute_residual)
         loss.backward()
         optimizer.step()
         train_loss.append(loss.item())
@@ -138,7 +145,7 @@ def _run_hopcpt_sequence(key, data, config, device):
                                                      strided_residual,
                                                      selection_confidence_pair,
                                                      config.model.sampling_num,
-                                                     config.model.use_absolute_residual)
+                                                     conformal_absolute_residual)
                 this_coverage = compute_coverage(hi, lo, target_residual)
                 this_interval_width = compute_interval_width(hi, lo, normalized_std=None)
                 this_coverages.extend(this_coverage)
@@ -205,7 +212,7 @@ def _run_hopcpt_sequence(key, data, config, device):
                                                        strided_residual,
                                                        tuple_confidence_pair,
                                                        config.model.sampling_num,
-                                                       config.model.use_absolute_residual)
+                                                       conformal_absolute_residual)
             this_coverage = compute_coverage(hi, lo, target_residual)
             this_interval_width = compute_interval_width(hi, lo, normalized_std=None)
             this_winkler_score = compute_winkler_score(hi, lo,
@@ -272,13 +279,20 @@ def run_hopcpt(config_path):
     data = load_data(config.data.data_path) # load predictor results here
     base_predictor, data_type = read_setup(config.data.data_path)
     cpd = ConformalPredictionData(data)
+    predict_absolute_residual = OmegaConf.select(
+        config, "model.predict_absolute_residual",
+        default=OmegaConf.select(config, "model.use_absolute_residual", default=True))
+    conformal_absolute_residual = OmegaConf.select(
+        config, "model.conformal_absolute_residual",
+        default=OmegaConf.select(config, "model.use_absolute_residual", default=False))
 
     cpd.prepare_hopcpt_datasets(config.model.prediction_step,
                                 config.model.y_lags,
                                 config.data.train_ratio,
                                 config.data.valid_ratio,
                                 config.data.normalize,
-                                config.model.use_absolute_residual)
+                                predict_absolute_residual,
+                                conformal_absolute_residual)
 
     device = config.device
     target_quantiles = config.model.target_quantiles
