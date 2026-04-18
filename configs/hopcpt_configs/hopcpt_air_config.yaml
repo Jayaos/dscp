@@ -7,7 +7,7 @@ parallel:
   devices: [0, 1]
 
 data:
-  data_path: "C:/Users/jayao/Desktop/python_projects/DSCP/data/air-10_prediction/chronos/chronos_air-10_data.pkl"
+  data_path: "./data/air-10_prediction/chronos/chronos_air-10_data.pkl"
   train_ratio: 0.6
   valid_ratio: 0.2
   normalize: False
@@ -18,7 +18,7 @@ model:
   dim_hopfield_hidden: auto
   use_temporal_encoding: False
   # HopCPT trains MSE on |epsilon|, but conformal selection uses signed epsilons by default.
-  use_absolute_residual: True
+  use_absolute_residual: False
   beta: 1
   memory_size: 8000
   y_lags: 1
@@ -32,7 +32,7 @@ model:
 training:
   # training batch size one entire sequence
   learning_rate: 0.01
-  epochs: 3000
+  epochs: 1000
   validation_epochs: 5
 
 
@@ -40,4 +40,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "C:/Users/jayao/Desktop/hopcpt_run/"
+saving_dir: "./results/hopcpt_chronos_air/"
