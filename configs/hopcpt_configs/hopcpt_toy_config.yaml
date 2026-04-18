@@ -16,11 +16,11 @@ data:
 model:
   dim_context_encoding: auto
   dim_hopfield_hidden: auto
-  use_temporal_encoding: True
+  use_temporal_encoding: False
   # HopCPT trains MSE on |epsilon|, but conformal selection uses signed epsilons by default.
   use_absolute_residual: False
   beta: 1
-  memory_size: 8000
+  memory_size: 250
   y_lags: 1
   target_quantiles:
     - [0.05, 0.95]
