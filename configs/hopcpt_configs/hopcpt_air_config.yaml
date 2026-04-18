@@ -1,7 +1,7 @@
 device: 0
 
 parallel:
-  enabled: Ture
+  enabled: False
   # Use one worker process per GPU. Each worker runs independent sequences
   # assigned to that GPU sequentially.
   devices: [0, 1]
@@ -16,7 +16,7 @@ data:
 model:
   dim_context_encoding: auto
   dim_hopfield_hidden: auto
-  use_temporal_encoding: True
+  use_temporal_encoding: False
   # Original HopCPT trains MSE on |epsilon|, but conformal selection uses signed epsilons by default.
   predict_absolute_residual: True
   conformal_absolute_residual: False
@@ -33,8 +33,8 @@ model:
 training:
   # training batch size one entire sequence
   learning_rate: 0.01
-  epochs: 20
-  validation_epochs: 1
+  epochs: 500
+  validation_epochs: 5
 
 
 plotting:
