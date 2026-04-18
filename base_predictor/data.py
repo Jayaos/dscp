@@ -28,9 +28,33 @@ class BasePredictorData:
 
     def _load_toy_data(self, data_dir):
 
-        raw_data = pd.read_csv(data_dir)
-        data = {"toy_data" : {"x" : np.array(raw_data["X"], dtype=np.float32),
-                              "y" : np.array(raw_data["Y"], dtype=np.float32)}}
+        data_path = Path(data_dir)
+        if data_path.is_dir():
+            csv_paths = sorted(data_path.glob("*.csv"))
+            if not csv_paths:
+                raise FileNotFoundError(f"No toy CSV files found in {data_path}.")
+        else:
+            csv_paths = [data_path]
+
+        data = {}
+        for csv_path in csv_paths:
+            raw_data = pd.read_csv(csv_path)
+            if "Y" not in raw_data:
+                raise ValueError(f"Toy CSV must contain a 'Y' column: {csv_path}")
+
+            if "X" in raw_data:
+                x = raw_data.loc[:, raw_data.columns.str.startswith("X")]
+            else:
+                # HopCPT toy files use an unnamed index column, Y, then feature columns.
+                x = raw_data.iloc[:, 2:]
+
+            if x.shape[1] == 0:
+                raise ValueError(f"Toy CSV must contain at least one feature column: {csv_path}")
+
+            data[csv_path.stem] = {
+                "x": x.to_numpy(dtype=np.float32),
+                "y": raw_data["Y"].to_numpy(dtype=np.float32),
+            }
         
         self.data = data
 

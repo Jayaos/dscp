@@ -14,10 +14,7 @@ def default_data_dir(data_type: str) -> Path:
         return REPO_ROOT / "data" / "nsdb_2018-2020"
 
     if data_type == "toy":
-        raise ValueError(
-            "No default toy dataset was found in this repo. "
-            "Please provide --data-dir pointing to a toy CSV file."
-        )
+        return REPO_ROOT / "example"
 
     raise ValueError(f"Unsupported data type: {data_type}")
 
