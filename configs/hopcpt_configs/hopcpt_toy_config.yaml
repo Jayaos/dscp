@@ -1,0 +1,43 @@
+device: 0
+
+parallel:
+  enabled: False
+  # Use one worker process per GPU. Each worker runs independent sequences
+  # assigned to that GPU sequentially.
+  devices: [0, 1]
+
+data:
+  data_path: "./data/toy_prediction/ridge_toy_data.pkl"
+  train_ratio: 0.25
+  valid_ratio: 0.25
+  normalize: False
+
+
+model:
+  dim_context_encoding: auto
+  dim_hopfield_hidden: auto
+  use_temporal_encoding: True
+  # HopCPT trains MSE on |epsilon|, but conformal selection uses signed epsilons by default.
+  use_absolute_residual: False
+  beta: 1
+  memory_size: 8000
+  y_lags: 1
+  target_quantiles:
+    - [0.05, 0.95]
+  prediction_step: 1
+  alpha: 0.1
+  sampling_num: 1000
+
+
+training:
+  # training batch size one entire sequence
+  learning_rate: 0.01
+  epochs: 20
+  validation_epochs: 1
+
+
+plotting:
+  plotting: True
+  plotting_seq_len: 200
+
+saving_dir: "./results/hopcpt_toy/"
