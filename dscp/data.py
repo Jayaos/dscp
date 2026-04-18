@@ -136,183 +136,19 @@ class ConformalPredictionData:
                                                                             test_split[5],
                                                                             test_split[6])}
 
-
     def prepare_hopcpt_datasets(self, 
-                                memory_size, 
                                 prediction_steps, 
                                 y_lags,
                                 train_ratio, 
                                 valid_ratio, 
                                 normalize=False,
-                                absolute_residual=True):
+                                use_absolute_residual=True):
 
         for key, item in self.data.items():
             
             # compute residuals
             heldout_residuals = (item["heldout_y"] - item["heldout_predictions"]).flatten()
-            if absolute_residual:
-                heldout_residuals = np.abs(heldout_residuals)
-            self.data[key].update({"heldout_residuals" : heldout_residuals})
-            
-            heldout_size = len(item["heldout_y"])
-            train_size = int(np.floor(heldout_size*train_ratio))
-            valid_size = int(np.ceil(heldout_size*valid_ratio))
-            test_size = heldout_size - (train_size+valid_size)
-
-            if normalize:
-                # normalize variables that will be used for sequence model prediction
-                # NOTE: normalize should be conducted only with training set
-                heldout_size = len(item["heldout_y"])
-                train_size = int(np.floor(heldout_size*train_ratio))
-
-                train_x_mu, train_x_std = compute_mean_std(item["heldout_x"][:train_size])
-                heldout_x = normalize_array_with_params(item["heldout_x"], train_x_mu, train_x_std)
-
-                #train_residuals_mu, train_residuals_std = compute_mean_std(item["heldout_residuals"][:train_size])
-                #heldout_residuals = normalize_array_with_params(item["heldout_residuals"], train_residuals_mu, train_residuals_std)
-
-                train_y_mu, train_y_std = compute_mean_std(item["heldout_y"][:train_size])
-                heldout_y = normalize_array_with_params(item["heldout_y"], train_y_mu, train_y_std)
-
-                # use mu and std of y for predicted y since this is going to be used for query
-                heldout_predictions = normalize_array_with_params(item["heldout_predictions"], train_y_mu, train_y_std)
-
-            else:
-                heldout_x = item["heldout_x"]
-                heldout_residuals = item["heldout_residuals"]
-                heldout_y = item["heldout_y"]
-                heldout_predictions = item["heldout_predictions"]
-
-            train_x = heldout_x[:train_size]
-            valid_x = heldout_x[train_size:train_size+valid_size]
-            train_y = heldout_y[:train_size]
-            valid_y = heldout_y[train_size:train_size+valid_size]
-            train_residual = heldout_residuals[y_lags:train_size]
-            valid_residual = heldout_residuals[train_size:train_size+valid_size]
-
-            heldout_context = build_hopcpt_context_features(heldout_x,
-                                                            heldout_y,
-                                                            heldout_predictions,
-                                                            y_lags)
-            heldout_context_residuals = heldout_residuals[y_lags:]
-            heldout_target_y = np.asarray(item["heldout_y"])[y_lags:]
-            heldout_target_predictions = np.asarray(item["heldout_predictions"])[y_lags:]
-
-            if train_size <= y_lags:
-                raise ValueError("train split must contain more observations than y_lags.")
-            train_context = heldout_context[:train_size-y_lags]
-
-            strided_context, target_context = to_strided_feature(heldout_context,
-                                                                 memory_size,
-                                                                 prediction_steps,
-                                                                 return_target=True)
-            valid_strided_context = strided_context[-(test_size+valid_size):-test_size]
-            valid_target_context = target_context[-(test_size+valid_size):-test_size]
-            test_strided_context = strided_context[-test_size:]
-            test_target_context = target_context[-test_size:]
-
-            # for unnormalized target_y
-            _, target_y = to_strided_residual(heldout_target_y,
-                                              memory_size, 
-                                              prediction_steps)
-            valid_target_y = target_y[-(test_size+valid_size):-test_size]
-            test_target_y = target_y[-test_size:]
-
-            # residuals are not used for training only used to compute value therefore no normalization needed
-
-            strided_residual, target_residual = to_strided_residual(heldout_context_residuals,
-                                                                    memory_size, 
-                                                                    prediction_steps)
-            valid_strided_residual = strided_residual[-(test_size+valid_size):-test_size]
-            valid_target_residual = target_residual[-(test_size+valid_size):-test_size]
-            test_strided_residual = strided_residual[-test_size:]
-            test_target_residual = target_residual[-test_size:]
-            
-            _, target_predictions = to_strided_residual(heldout_target_predictions,
-                                                        memory_size,
-                                                        prediction_steps)
-            valid_target_predictions = target_predictions[-(test_size+valid_size):-test_size]
-            test_target_predictions = target_predictions[-test_size:]
-            
-            if normalize:
-                self.data[key].update({"heldout_train_x" : train_x,
-                                       "heldout_valid_x" : valid_x,
-                                       "heldout_train_y" : train_y,
-                                       "heldout_valid_y" : valid_y,
-                                       "heldout_train_context" : train_context,
-                                       "heldout_train_residual" : train_residual,
-                                       "heldout_valid_residual" : valid_residual,
-                                       "valid_strided_context" : valid_strided_context,
-                                       "valid_target_context" : valid_target_context,
-                                       "valid_strided_residual" : valid_strided_residual, 
-                                       "valid_target_residual" : valid_target_residual,
-                                       "valid_target_y" : valid_target_y,
-                                       "valid_target_predictions" : valid_target_predictions,
-                                       "test_strided_context" : test_strided_context,
-                                       "test_target_context" : test_target_context,
-                                       "test_strided_residual" : test_strided_residual, 
-                                       "test_target_residual" : test_target_residual,
-                                       "test_target_y" : test_target_y,
-                                       "test_target_predictions" : test_target_predictions,
-                                       "heldout_context" : heldout_context,
-                                       "heldout_x_normalized" : heldout_x,
-                                       "heldout_train_x_mu" : train_x_mu,
-                                       "heldout_train_x_std" : train_x_std,
-                                       "heldout_residuals" : heldout_residuals,
-                                       "heldout_y_normalized" : heldout_y,
-                                       "heldout_train_y_mu" : train_y_mu,
-                                       "heldout_train_y_std" : train_y_std})
-            else:
-                self.data[key].update({"heldout_train_x" : train_x,
-                                       "heldout_valid_x" : valid_x,
-                                       "heldout_train_y" : train_y,
-                                       "heldout_valid_y" : valid_y,
-                                       "heldout_train_context" : train_context,
-                                       "heldout_train_residual" : train_residual,
-                                       "heldout_valid_residual" : valid_residual,
-                                       "valid_strided_context" : valid_strided_context,
-                                       "valid_target_context" : valid_target_context,
-                                       "valid_strided_residual" : valid_strided_residual, 
-                                       "valid_target_residual" : valid_target_residual,
-                                       "valid_target_y" : valid_target_y,
-                                       "valid_target_predictions" : valid_target_predictions,
-                                       "test_strided_context" : test_strided_context,
-                                       "test_target_context" : test_target_context,
-                                       "test_strided_residual" : test_strided_residual, 
-                                       "test_target_residual" : test_target_residual,
-                                       "test_target_y" : test_target_y,
-                                       "test_target_predictions" : test_target_predictions,
-                                       "heldout_context" : heldout_context,
-                                       "heldout_residuals" : heldout_residuals})
-
-            self.dataset[key] = {"valid_dataset" : HopCPTTestDataset(valid_strided_context,
-                                                                    valid_target_context,
-                                                                    valid_target_predictions,
-                                                                    valid_strided_residual,
-                                                                    valid_target_residual,
-                                                                    valid_target_y),
-                                 "test_dataset" : HopCPTTestDataset(test_strided_context,
-                                                                    test_target_context,
-                                                                    test_target_predictions,
-                                                                    test_strided_residual,
-                                                                    test_target_residual,
-                                                                    test_target_y)}
-            
-
-    def prepare_hopcpt_datasets_max_memory(self, 
-                                           max_memory_size, 
-                                           prediction_steps, 
-                                           y_lags,
-                                           train_ratio, 
-                                           valid_ratio, 
-                                           normalize=False,
-                                           absolute_residual=True):
-
-        for key, item in self.data.items():
-            
-            # compute residuals
-            heldout_residuals = (item["heldout_y"] - item["heldout_predictions"]).flatten()
-            if absolute_residual:
+            if use_absolute_residual:
                 heldout_residuals = np.abs(heldout_residuals)
             self.data[key].update({"heldout_residuals" : heldout_residuals})
             

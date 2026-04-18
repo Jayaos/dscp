@@ -8,7 +8,7 @@ from baselines.hopcpt.model import HopfieldNet
 from baselines.hopcpt.loss import compute_hopfield_net_loss
 from dscp.data import ConformalPredictionData, initialize_valid_dataloader, initialize_test_dataloader
 from utils.utils import load_data, save_data, read_setup
-from utils.utils import generate_feature_hopcpt_training, generate_feature_hopcpt_test, estimate_quantile_values
+from utils.utils import generate_feature_hopcpt_training, generate_feature_hopcpt_test, estimate_hopcpt_residual_interval
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, summarize_evaluation_results
 from utils.plotting import plot_cp_prediction_intervals
 
@@ -23,19 +23,16 @@ def run_hopcpt(config_path):
     base_predictor, data_type = read_setup(config.data.data_path)
     cpd = ConformalPredictionData(data)
 
-    cpd.prepare_hopcpt_datasets_max_memory(config.model.memory_size, 
-                                           config.model.prediction_step, 
-                                           config.model.y_lags,
-                                           config.data.train_ratio, 
-                                           config.data.valid_ratio, 
-                                           config.data.normalize)
+    cpd.prepare_hopcpt_datasets(config.model.prediction_step,
+                                config.model.y_lags,
+                                config.data.train_ratio,
+                                config.data.valid_ratio,
+                                config.data.normalize,
+                                config.model.use_absolute_residual)
 
     device = config.device
-    target_quantiles = OmegaConf.select(config, "model.target_quantiles", default=None)
-    if target_quantiles is None:
-        target_quantiles = [[config.model.alpha / 2, 1 - (config.model.alpha / 2)]]
-    selection_confidence_pair = tuple(target_quantiles[0])
-    selection_target_quantile = max(selection_confidence_pair)
+    target_quantiles = config.model.target_quantiles
+    selection_confidence_pair = tuple(target_quantiles[0]) # this is used for validation
     selection_target_coverage = max(selection_confidence_pair) - min(selection_confidence_pair)
     log = dict()
 
@@ -52,18 +49,21 @@ def run_hopcpt(config_path):
         test_size = data["test_size"]
         valid_dataloader_size = data["valid_dataloader_size"]
         test_dataloader_size = data["test_dataloader_size"]
-        train_memory_size = data["heldout_train_context"].shape[0]
 
         dim_feature = data["heldout_context"].shape[-1]
-
-        print("configured max memory size for {}: {}".format(key, config.model.memory_size))
-        print("training memory size for {}: {}".format(key, train_memory_size))
+        dim_context_encoding = config.model.dim_context_encoding
+        if dim_context_encoding is None or dim_context_encoding == "auto":
+            dim_context_encoding = dim_feature
+        dim_hopfield_hidden = config.model.dim_hopfield_hidden
+        if dim_hopfield_hidden is None or dim_hopfield_hidden == "auto":
+            dim_hopfield_hidden = dim_context_encoding
 
         # model initialization
         hopfield_net = HopfieldNet(dim_feature, 
-                                   config.model.dim_context_encoding, 
-                                   config.model.dim_hopfield_hidden, 
-                                   config.model.beta)
+                                   dim_context_encoding, 
+                                   dim_hopfield_hidden, 
+                                   config.model.beta,
+                                   config.model.use_temporal_encoding)
         hopfield_net.to(device)
         optimizer = torch.optim.AdamW(hopfield_net.parameters(), 
                                       lr=config.training.learning_rate) # TODO: params for adamW?
@@ -81,10 +81,9 @@ def run_hopcpt(config_path):
             hopfield_net.train()
             optimizer.zero_grad()
             memory_feature = generate_feature_hopcpt_training(data["heldout_train_context"])
-            print("training memory size at epoch {}: {}".format(i+1, memory_feature.shape[1]))
-            memory_feature = memory_feature.to(device) # (1, memeory_length, feature_dim)
+            memory_feature = memory_feature.to(device) # (1, memory_length, feature_dim)
             memory_residual = torch.from_numpy(data["heldout_train_residual"]).to(torch.float32).to(device)
-            loss = compute_hopfield_net_loss(hopfield_net, 
+            loss = compute_hopfield_net_loss(hopfield_net,
                                              memory_feature,
                                              memory_residual)
             loss.backward()
@@ -116,19 +115,16 @@ def run_hopcpt(config_path):
                     
                     memory_feature, query_feature = generate_feature_hopcpt_test(strided_context,
                                                                                  target_context)
-                    print("validation memory_feature shape: {}".format(memory_feature.shape))
                     memory_feature = memory_feature.to(device) # (batch_size, memeory_length, feature_dim)
                     query_feature = query_feature.to(device) # (batch_size, 1, feature_dim)
-                    # (batch_size, 1, 1, memory_length)
-                    association_matrix = hopfield_net.obtain_association_matrix(memory_feature, query_feature)
-                    # (1, batch_size)
-                    estimated_quantile_values = estimate_quantile_values(association_matrix,
-                                                                         strided_residual,
-                                                                         selection_target_quantile,
-                                                                         config.model.sampling_num)
-                    
-                    hi = estimated_quantile_values # (batch_size,)
-                    lo = -estimated_quantile_values # (batch_size,)
+                    with torch.no_grad():
+                        # (batch_size, 1, 1, memory_length)
+                        association_matrix = hopfield_net.obtain_association_matrix(memory_feature, query_feature)
+                    lo, hi = estimate_hopcpt_residual_interval(association_matrix,
+                                                         strided_residual,
+                                                         selection_confidence_pair,
+                                                         config.model.sampling_num,
+                                                         config.model.use_absolute_residual)
                     this_coverage = compute_coverage(hi, lo, target_residual)
                     this_interval_width = compute_interval_width(hi, lo, normalized_std=None)
                     this_coverages.extend(this_coverage)
@@ -186,7 +182,6 @@ def run_hopcpt(config_path):
             with torch.no_grad():
                 memory_feature, query_feature = generate_feature_hopcpt_test(strided_context,
                                                                              target_context)
-                print("test memory_feature shape: {}".format(memory_feature.shape))
                 memory_feature = memory_feature.to(device) # (batch_size, memeory_length, feature_dim)
                 query_feature = query_feature.to(device) # (batch_size, 1, feature_dim)
                 # (batch_size, 1, 1, memory_length)
@@ -194,13 +189,11 @@ def run_hopcpt(config_path):
 
             for confidence_pair in target_quantiles:
                 tuple_confidence_pair = tuple(confidence_pair)
-                estimated_quantile_values = estimate_quantile_values(association_matrix,
-                                                                     strided_residual,
-                                                                     max(tuple_confidence_pair),
-                                                                     config.model.sampling_num)
-
-                hi = estimated_quantile_values # (batch_size,)
-                lo = -estimated_quantile_values # (batch_size,)
+                lo, hi = estimate_hopcpt_residual_interval(association_matrix,
+                                                           strided_residual,
+                                                           tuple_confidence_pair,
+                                                           config.model.sampling_num,
+                                                           config.model.use_absolute_residual)
                 this_coverage = compute_coverage(hi, lo, target_residual)
                 this_interval_width = compute_interval_width(hi, lo, normalized_std=None)
                 this_winkler_score = compute_winkler_score(hi, lo,
@@ -216,13 +209,6 @@ def run_hopcpt(config_path):
                 evaluation_results[tuple_confidence_pair]["winkler_score"].extend(this_winkler_score)
                 evaluation_results[tuple_confidence_pair]["target_y"].extend(target_y.flatten().tolist())
                 evaluation_results[tuple_confidence_pair]["target_predictions"].extend(target_predictions.flatten().tolist())
-
-        print("test memory size for {}: first={}, last={}, min={}, max={}".format(
-            key,
-            test_memory_sizes[0],
-            test_memory_sizes[-1],
-            min(test_memory_sizes),
-            max(test_memory_sizes)))
 
         for confidence_pair in target_quantiles:
             tuple_confidence_pair = tuple(confidence_pair)

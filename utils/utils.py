@@ -393,3 +393,23 @@ def estimate_quantile_values(weights: torch.Tensor,
 
     return torch.quantile(empirical, target_quantiles, dim=1) # (len(target_quantiles), query_size)
 
+
+def estimate_hopcpt_residual_interval(association_matrix,
+                                      strided_residual,
+                                      confidence_pair,
+                                      sampling_num,
+                                      absolute_residual=False):
+    if absolute_residual:
+        target_coverage = max(confidence_pair) - min(confidence_pair)
+        estimated_width = estimate_quantile_values(association_matrix,
+                                                   strided_residual,
+                                                   target_coverage,
+                                                   sampling_num)
+        return -estimated_width, estimated_width
+
+    estimated_quantile_values = estimate_quantile_values(
+        association_matrix,
+        strided_residual,
+        [min(confidence_pair), max(confidence_pair)],
+        sampling_num)
+    return estimated_quantile_values[0], estimated_quantile_values[1]

@@ -10,17 +10,17 @@ def compute_hopfield_net_loss(hopfield_net, memory_feature, memory_value):
     """
 
     if memory_value.dim() == 1:
-        memory_value.unsqueeze_(0) 
+        memory_value = memory_value.unsqueeze(0)
 
     if memory_value.dim() == 2:
-        memory_value.unsqueeze_(-1) 
+        memory_value = memory_value.unsqueeze(-1)
 
     # memory feature is used for query feature as well to compute the loss
     association_mask = get_association_mask(memory_feature)
     preds = hopfield_net(memory_feature, memory_value, association_mask=association_mask) # (batch_size, memory_length, 1)
     preds = preds.abs()
     e_abs = memory_value.abs() # memory value is used as target value to compute loss
-    loss = torch.nn.functional.mse_loss(preds, e_abs, reduce=False).sum()
+    loss = torch.nn.functional.mse_loss(preds, e_abs, reduction="none").sum()
 
     return loss
 
@@ -33,7 +33,8 @@ def get_association_mask(memory_feature):
     device = memory_feature.device
 
     batch_size, memory_length, feature_dim = memory_feature.shape
-    mask = torch.eye(memory_length, dtype=torch.bool).unsqueeze(0).to(device) # (1, memory_length, memory_length)
+    mask = torch.eye(memory_length, dtype=torch.bool, device=device)
+    mask = mask.unsqueeze(0).expand(batch_size, -1, -1) # (batch_size, memory_length, memory_length)
 
     return mask
 
@@ -50,14 +51,8 @@ def return_association_matrix(hopfield_net, memory_feature):
     association_mask = get_association_mask(memory_feature)
 
 
-    # temporal encoding t/T
-    t = torch.arange(memory_length, device=device)
-    t = t / memory_length # (memory_length,)
-    t = t.view(1, memory_length, 1) # (1, memory_length, 1)
-    t = t.expand(batch_size, -1, -1) # (batch_size, memory_length, 1)
-
     # encoding
     encoded_k = hopfield_net.context_encoder(memory_feature) # (batch_size, memory_length, dim_context_encoding)
-    encoded_k = torch.cat([encoded_k, t], dim=-1) # (batch_size, memory_length, dim_context_encoding + 1)
+    encoded_k = hopfield_net._append_temporal_encoding(encoded_k, memory_length)
 
     return hopfield_net.hopfield_net.get_association_matrix((encoded_k, encoded_k, v), association_mask=association_mask) # (batch_size, 1, 1, memory_length)
