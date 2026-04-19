@@ -10,16 +10,16 @@ data:
 
 
 model:
+  rnn_type: "lstm"
   dim_model: 32
-  num_heads: 2
-  num_layers: 2
+  num_layers: 1
   dropout: 0.
-  use_current_feature: True
+  use_current_feature: False
   target_quantiles:
     - [0.05, 0.950]
   prediction_step: 1
   window_size: 100
-  calibration_size: 100
+  calibration_size: 500
   similarity_fn: "dot_product"
   temperature: 0.1
   sampling_num: 1000
@@ -27,7 +27,7 @@ model:
 
 training:
   batch_size: 32
-  learning_rate: 0.0001
+  learning_rate: 0.001
   epochs: 50
   early_stop: 3
 
@@ -36,5 +36,4 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/run_test_lcp_transformer/"
-
+saving_dir: "./results/run_test_lcp_rnn/"
