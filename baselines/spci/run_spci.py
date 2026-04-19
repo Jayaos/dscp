@@ -172,9 +172,9 @@ def run_spci_experiment(config_path):
 
     save_data(os.path.join(config.saving_dir, "summary_results.pkl"), summary_results)
 
-    if OmegaConf.select(config, "plotting.plotting", default=False):
-        plot_cp_prediction_intervals(log,
-                                     config.model.target_quantiles,
+    if config.plotting.plotting:
+        plot_cp_prediction_intervals(log, 
+                                     config.model.target_quantiles, 
                                      config.plotting.plotting_seq_len,
                                      os.path.join(config.saving_dir, "plots"))
                     
