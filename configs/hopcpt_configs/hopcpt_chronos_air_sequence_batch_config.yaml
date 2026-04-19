@@ -1,0 +1,49 @@
+device: 0
+
+parallel:
+  enabled: False
+  # Sequence-batch mode trains one shared model, so multi-GPU per-sequence
+  # parallelism from run_hopcpt() is not used.
+  devices: [0, 1]
+
+data:
+  data_path: "./data/air-10_prediction/lr/lr_air-10_data.pkl"
+  train_ratio: 0.25
+  valid_ratio: 0.25
+  normalize: False
+
+
+model:
+  dim_context_encoding: auto
+  dim_hopfield_hidden: auto
+  use_temporal_encoding: False
+  # Original HopCPT trains MSE on |epsilon|, but conformal selection uses signed epsilons by default.
+  predict_absolute_residual: True
+  conformal_absolute_residual: False
+  beta: 1
+  memory_size: 8000
+  y_lags: 1
+  target_quantiles:
+    - [0.05, 0.95]
+  prediction_step: 1
+  alpha: 0.1
+  sampling_num: 1000
+
+
+training:
+  learning_rate: 0.001
+  epochs: 500
+  validation_epochs: 5
+  # Set to "all" for paper-style full-batch training across all sequences,
+  # or an integer such as 4/8/16 for sequence mini-batches.
+  sequence_batch_size: 2
+  shuffle_sequence_batch: True
+  # Keeps gradient scale comparable across different sequence_batch_size values.
+  average_sequence_batch_loss: False
+
+
+plotting:
+  plotting: True
+  plotting_seq_len: 200
+
+saving_dir: "./results/hopcpt_chronos_air_sequence_batch/"
