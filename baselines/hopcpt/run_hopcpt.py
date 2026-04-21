@@ -86,6 +86,7 @@ def _run_hopcpt_sequence(key, data, config, device):
                                   lr=config.training.learning_rate) # TODO: params for adamW?
 
     train_loss = []
+    valid_coverages = []
     valid_delta_coverages = []
     valid_interval_widths = []
     best_interval_width = np.inf
@@ -152,9 +153,14 @@ def _run_hopcpt_sequence(key, data, config, device):
                 this_interval_widths.extend(this_interval_width)
 
             this_delta_coverage = np.mean(this_coverages) - selection_target_coverage
+            valid_coverages.append(np.mean(this_coverages))
             valid_delta_coverages.append(this_delta_coverage)
             this_avg_interval_width = np.mean(this_interval_widths)
             valid_interval_widths.append(this_avg_interval_width)
+            epoch_iter.set_postfix(loss=loss.item(),
+                                   valid_coverage=valid_coverages[-1],
+                                   valid_delta=this_delta_coverage,
+                                   valid_width=this_avg_interval_width)
 
             valid_coverage = this_delta_coverage >= 0
             best_has_valid_coverage = best_delta_coverage >= 0
@@ -246,6 +252,7 @@ def _run_hopcpt_sequence(key, data, config, device):
         evaluation_results[tuple_confidence_pair]["avg_winkler_score"] = avg_winkler_score
 
     sequence_log = {"train_loss" : train_loss,
+                    "valid_coverages" : valid_coverages,
                     "valid_delta_coverages" : valid_delta_coverages,
                     "valid_interval_widths" : valid_interval_widths,
                     "best_epoch" : best_epoch,
@@ -509,6 +516,7 @@ def run_hopcpt_sequence_batch(config_path):
     print("Sequence training batch size: {}".format(sequence_batch_size))
 
     train_loss = []
+    valid_coverages = []
     valid_delta_coverages = []
     valid_interval_widths = []
     best_interval_width = np.inf
@@ -561,9 +569,14 @@ def run_hopcpt_sequence_batch(config_path):
                 this_interval_widths.extend(result["interval_width"])
 
             this_delta_coverage = np.mean(this_coverages) - selection_target_coverage
+            valid_coverages.append(np.mean(this_coverages))
             valid_delta_coverages.append(this_delta_coverage)
             this_avg_interval_width = np.mean(this_interval_widths)
             valid_interval_widths.append(this_avg_interval_width)
+            epoch_iter.set_postfix(loss=epoch_loss,
+                                   valid_coverage=valid_coverages[-1],
+                                   valid_delta=this_delta_coverage,
+                                   valid_width=this_avg_interval_width)
 
             valid_coverage = this_delta_coverage >= 0
             best_has_valid_coverage = best_delta_coverage >= 0
@@ -588,6 +601,7 @@ def run_hopcpt_sequence_batch(config_path):
                                                                   device,
                                                                   hopfield_net)
         log[key] = {"train_loss": train_loss,
+                    "valid_coverages": valid_coverages,
                     "valid_delta_coverages": valid_delta_coverages,
                     "valid_interval_widths": valid_interval_widths,
                     "best_epoch": best_epoch,
