@@ -32,8 +32,8 @@ model:
 
 training:
   learning_rate: 0.001
-  epochs: 1000
-  validation_epochs: 20
+  epochs: 3000
+  validation_epochs: 50
   # Set to "all" for paper-style full-batch training across all sequences,
   # or an integer such as 4/8/16 for sequence mini-batches.
   sequence_batch_size: 2

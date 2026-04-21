@@ -29,7 +29,6 @@ def run_nexcp(config_path):
     data = load_data(config.data.data_path)
     base_predictor, data_type = read_setup(config.data.data_path)
 
-    method = OmegaConf.select(config, "model.method", default="nexcp-ls").lower()
     rho = OmegaConf.select(config, "model.rho", default=0.99)
     calibration_size = OmegaConf.select(config, "model.calibration_size", default=500)
     prediction_step = OmegaConf.select(config, "model.prediction_step", default=1)
@@ -40,7 +39,7 @@ def run_nexcp(config_path):
     log = {}
 
     print("Experiment setup")
-    print("Method: NexCP residual calibration ({})".format(method))
+    print("Method: NexCP")
     print("Base predictor: {}".format(base_predictor))
     print("Data: {}".format(data_type))
     print("{} independent sequences".format(len(data)))
