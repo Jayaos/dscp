@@ -1,0 +1,23 @@
+data:
+  data_path: "./data/toy_prediction/ridge_toy_data.pkl"
+  train_ratio: 0.25
+  valid_ratio: 0.25
+  normalize: False
+
+
+model:
+  # HopCPT-style NexCP: weighted conformal calibration of absolute residuals
+  # around the saved base predictor. Use "cp-ls" for uniform weights.
+  method: "nexcp-ls"
+  rho: 0.99
+  calibration_size: 500
+  target_quantiles:
+    - [0.05, 0.95]
+  prediction_step: 1
+
+
+plotting:
+  plotting: True
+  plotting_seq_len: 200
+
+saving_dir: "./results/nexcp_toy/"
