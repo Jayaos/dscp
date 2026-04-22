@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from baselines.nexcp.model import estimate_residual_interval
+from baselines.nexcp.model import estimate_residual_interval, context_slice
 from utils.utils import load_data, save_data, read_setup
 from utils.reporting import (
     compute_coverage,
@@ -15,25 +15,12 @@ from utils.reporting import (
 from utils.plotting import plot_cp_prediction_intervals
 
 
-def _history_slice(target_idx, calibration_size):
-    if calibration_size is None:
-        return slice(0, target_idx)
-    start_idx = max(0, target_idx - int(calibration_size))
-    return slice(start_idx, target_idx)
-
-
 def run_nexcp(config_path):
     config = OmegaConf.load(config_path)
     os.makedirs(config.saving_dir, exist_ok=True)
 
     data = load_data(config.data.data_path)
     base_predictor, data_type = read_setup(config.data.data_path)
-
-    rho = OmegaConf.select(config, "model.rho", default=0.99)
-    calibration_size = OmegaConf.select(config, "model.calibration_size", default=500)
-    prediction_step = OmegaConf.select(config, "model.prediction_step", default=1)
-    if int(prediction_step) != 1:
-        raise ValueError("NexCP currently supports prediction_step=1.")
 
     target_quantiles = config.model.target_quantiles
     log = {}
@@ -47,17 +34,15 @@ def run_nexcp(config_path):
     for key, item in tqdm(data.items(), desc="repetition over independent sequences"):
         y = np.asarray(item["heldout_y"], dtype=float).reshape(-1)
         predictions = np.asarray(item["heldout_predictions"], dtype=float).reshape(-1)
-
-        if len(y) != len(predictions):
-            raise ValueError("{} has mismatched heldout_y and heldout_predictions lengths.".format(key))
-
-        train_size = int(np.floor(len(y) * config.data.train_ratio))
-        valid_size = int(np.ceil(len(y) * config.data.valid_ratio))
-        test_start = train_size + valid_size
-        if test_start >= len(y):
-            raise ValueError("{} has an empty test split.".format(key))
-
         residuals = y - predictions
+
+        calibration_size = int(np.floor(len(y) * config.data.calibration_ratio))
+
+        if config.model.max_past is None:
+            max_past = calibration_size
+        else:
+            max_past = config.model.max_past
+
         evaluation_results = {
             tuple(confidence_pair): {"coverage": [],
                                      "interval_width": [],
@@ -69,9 +54,9 @@ def run_nexcp(config_path):
             for confidence_pair in target_quantiles
         }
 
-        for target_idx in tqdm(range(test_start, len(y)), desc="{} test points".format(key), leave=False):
-            hist_slice = _history_slice(target_idx, calibration_size)
-            residual_history = residuals[hist_slice]
+        for target_idx in tqdm(range(calibration_size, len(y)), desc="{} test points".format(key), leave=False):
+            context_slice_idx = context_slice(target_idx, max_past)
+            residual_history = residuals[context_slice_idx]
             target_y = torch.tensor([y[target_idx]], dtype=torch.float32)
             target_prediction = torch.tensor([predictions[target_idx]], dtype=torch.float32)
             target_residual = target_y - target_prediction
@@ -82,8 +67,7 @@ def run_nexcp(config_path):
                 alpha = 1.0 - target_coverage
                 lo_value, hi_value = estimate_residual_interval(residual_history,
                                                                 alpha,
-                                                                method,
-                                                                rho)
+                                                                config.model.rho)
                 lo = torch.tensor([lo_value], dtype=torch.float32)
                 hi = torch.tensor([hi_value], dtype=torch.float32)
 
