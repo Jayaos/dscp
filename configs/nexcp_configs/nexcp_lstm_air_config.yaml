@@ -1,5 +1,5 @@
 data:
-  data_path: "./data/air-10_prediction/chronos/chronos_air-10_data.pkl"  
+  data_path: "./data/air-10_prediction/lstm/lstm_air-10_data.pkl"  
   calibration_ratio: 0.8
 
 
@@ -14,4 +14,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/nexcp_chronos_air/"
+saving_dir: "./results/nexcp_lstm_air/"
