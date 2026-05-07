@@ -10,7 +10,7 @@ data:
   data_path: "./data/toy_prediction/ridge_toy_data.pkl"
   train_ratio: 0.25
   valid_ratio: 0.25
-  normalize: False
+  normalize: True
 
 
 model:
