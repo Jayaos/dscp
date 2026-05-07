@@ -50,6 +50,17 @@ def _split_keys_by_device(keys, devices):
     return {device: chunk for device, chunk in chunks.items() if chunk}
 
 
+def _hopcpt_residual_normalization_params(data, normalize):
+    if not normalize:
+        return None
+
+    std = np.asarray(data["heldout_train_y_std"], dtype=float) + 1e-8
+    if std.size == 1:
+        return 0.0, float(std.reshape(-1)[0])
+
+    return np.zeros_like(std), std
+
+
 def _run_hopcpt_sequence(key, data, config, device):
     target_quantiles = config.model.target_quantiles
     selection_confidence_pair = tuple(target_quantiles[0]) # this is used for validation
@@ -66,6 +77,11 @@ def _run_hopcpt_sequence(key, data, config, device):
     test_size = data["test_size"]
     valid_dataloader_size = data["valid_dataloader_size"]
     test_dataloader_size = data["test_dataloader_size"]
+    residual_normalization_params = _hopcpt_residual_normalization_params(data,
+                                                                          config.data.normalize)
+    residual_normalized_std = (residual_normalization_params[1]
+                               if residual_normalization_params is not None
+                               else None)
 
     dim_feature = data["heldout_context"].shape[-1]
     dim_context_encoding = config.model.dim_context_encoding
@@ -148,7 +164,9 @@ def _run_hopcpt_sequence(key, data, config, device):
                                                      config.model.sampling_num,
                                                      conformal_absolute_residual)
                 this_coverage = compute_coverage(hi, lo, target_residual)
-                this_interval_width = compute_interval_width(hi, lo, normalized_std=None)
+                this_interval_width = compute_interval_width(hi,
+                                                             lo,
+                                                             normalized_std=residual_normalized_std)
                 this_coverages.extend(this_coverage)
                 this_interval_widths.extend(this_interval_width)
 
@@ -220,12 +238,14 @@ def _run_hopcpt_sequence(key, data, config, device):
                                                        config.model.sampling_num,
                                                        conformal_absolute_residual)
             this_coverage = compute_coverage(hi, lo, target_residual)
-            this_interval_width = compute_interval_width(hi, lo, normalized_std=None)
+            this_interval_width = compute_interval_width(hi,
+                                                         lo,
+                                                         normalized_std=residual_normalized_std)
             this_winkler_score = compute_winkler_score(hi, lo,
                                                        target_y,
                                                        target_predictions,
                                                        tuple_confidence_pair,
-                                                       normalized_params=None)
+                                                       normalized_params=residual_normalization_params)
 
             evaluation_results[tuple_confidence_pair]["upper_interval"].extend(hi.cpu().detach().tolist())
             evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lo.cpu().detach().tolist())
@@ -234,6 +254,9 @@ def _run_hopcpt_sequence(key, data, config, device):
             evaluation_results[tuple_confidence_pair]["winkler_score"].extend(this_winkler_score)
             evaluation_results[tuple_confidence_pair]["target_y"].extend(target_y.flatten().tolist())
             evaluation_results[tuple_confidence_pair]["target_predictions"].extend(target_predictions.flatten().tolist())
+            if residual_normalization_params is not None:
+                evaluation_results[tuple_confidence_pair]["train_residuals_mu"] = residual_normalization_params[0]
+                evaluation_results[tuple_confidence_pair]["train_residuals_std"] = residual_normalization_params[1]
 
     for confidence_pair in target_quantiles:
         tuple_confidence_pair = tuple(confidence_pair)
@@ -372,6 +395,11 @@ def _collect_hopcpt_split_metrics(hopfield_net,
     conformal_absolute_residual = OmegaConf.select(
         config, "model.conformal_absolute_residual",
         default=OmegaConf.select(config, "model.use_absolute_residual", default=False))
+    residual_normalization_params = _hopcpt_residual_normalization_params(data,
+                                                                          config.data.normalize)
+    residual_normalized_std = (residual_normalization_params[1]
+                               if residual_normalization_params is not None
+                               else None)
 
     split_results = {
         tuple(confidence_pair): {"coverage": [],
@@ -407,7 +435,9 @@ def _collect_hopcpt_split_metrics(hopfield_net,
                                                        config.model.sampling_num,
                                                        conformal_absolute_residual)
             this_coverage = compute_coverage(hi, lo, target_residual)
-            this_interval_width = compute_interval_width(hi, lo, normalized_std=None)
+            this_interval_width = compute_interval_width(hi,
+                                                         lo,
+                                                         normalized_std=residual_normalized_std)
 
             split_results[tuple_confidence_pair]["coverage"].extend(this_coverage)
             split_results[tuple_confidence_pair]["interval_width"].extend(this_interval_width)
@@ -417,12 +447,15 @@ def _collect_hopcpt_split_metrics(hopfield_net,
                                                            target_y,
                                                            target_predictions,
                                                            tuple_confidence_pair,
-                                                           normalized_params=None)
+                                                           normalized_params=residual_normalization_params)
                 split_results[tuple_confidence_pair]["upper_interval"].extend(hi.cpu().detach().tolist())
                 split_results[tuple_confidence_pair]["lower_interval"].extend(lo.cpu().detach().tolist())
                 split_results[tuple_confidence_pair]["winkler_score"].extend(this_winkler_score)
                 split_results[tuple_confidence_pair]["target_y"].extend(target_y.flatten().tolist())
                 split_results[tuple_confidence_pair]["target_predictions"].extend(target_predictions.flatten().tolist())
+                if residual_normalization_params is not None:
+                    split_results[tuple_confidence_pair]["train_residuals_mu"] = residual_normalization_params[0]
+                    split_results[tuple_confidence_pair]["train_residuals_std"] = residual_normalization_params[1]
 
     return split_results
 

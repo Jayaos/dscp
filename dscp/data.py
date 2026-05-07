@@ -289,16 +289,17 @@ def initialize_valid_dataloader(data, train_size, valid_size, prediction_steps, 
     """
     initialize dataloader, which is a generator
     """
-    del normalize
     y_lags = data["y_lags"]
     start_idx = train_size - y_lags
     end_idx = train_size + valid_size - y_lags
+    target_y_key = "raw_heldout_target_y" if normalize else "heldout_target_y"
+    target_predictions_key = "raw_heldout_target_predictions" if normalize else "heldout_target_predictions"
 
     valid_context_generator = prefix_gen(data["heldout_context"][:end_idx],
                                          start_idx,
                                          prediction_steps,
                                          max_memory=max_memory_size)
-    valid_target_y_generator = prefix_gen(data["heldout_target_y"][:end_idx],
+    valid_target_y_generator = prefix_gen(data[target_y_key][:end_idx],
                                           start_idx,
                                           prediction_steps,
                                           max_memory=max_memory_size)
@@ -306,7 +307,7 @@ def initialize_valid_dataloader(data, train_size, valid_size, prediction_steps, 
                                           start_idx,
                                           prediction_steps,
                                           max_memory=max_memory_size)
-    valid_prediction_generator = prefix_gen(data["heldout_target_predictions"][:end_idx],
+    valid_prediction_generator = prefix_gen(data[target_predictions_key][:end_idx],
                                             start_idx,
                                             prediction_steps,
                                             max_memory=max_memory_size)
@@ -318,15 +319,16 @@ def initialize_test_dataloader(data, train_size, valid_size, prediction_steps, m
     """
     initialize dataloader, which is a generator
     """
-    del normalize
     y_lags = data["y_lags"]
     start_idx = train_size + valid_size - y_lags
+    target_y_key = "raw_heldout_target_y" if normalize else "heldout_target_y"
+    target_predictions_key = "raw_heldout_target_predictions" if normalize else "heldout_target_predictions"
     
     test_context_generator = prefix_gen(data["heldout_context"],
                                         start_idx,
                                         prediction_steps,
                                         max_memory=max_memory_size)
-    test_target_y_generator = prefix_gen(data["heldout_target_y"],
+    test_target_y_generator = prefix_gen(data[target_y_key],
                                          start_idx,
                                          prediction_steps,
                                          max_memory=max_memory_size)
@@ -334,7 +336,7 @@ def initialize_test_dataloader(data, train_size, valid_size, prediction_steps, m
                                          start_idx,
                                          prediction_steps,
                                          max_memory=max_memory_size)
-    test_prediction_generator = prefix_gen(data["heldout_target_predictions"],
+    test_prediction_generator = prefix_gen(data[target_predictions_key],
                                            start_idx,
                                            prediction_steps,
                                            max_memory=max_memory_size)
