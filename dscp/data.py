@@ -30,12 +30,11 @@ class ConformalPredictionData:
         """
 
         for key, item in self.data.items():
-            
-            # compute residuals
-            heldout_residuals = (item["heldout_y"] - item["heldout_predictions"]).flatten()
-            self.data[key].update({"heldout_residuals" : heldout_residuals})
+            raw_heldout_y = np.asarray(item["heldout_y"])
+            raw_heldout_predictions = np.asarray(item["heldout_predictions"])
+            raw_heldout_residuals = (raw_heldout_y - raw_heldout_predictions).flatten()
 
-            heldout_size = len(item["heldout_y"])
+            heldout_size = len(raw_heldout_y)
             train_size = int(np.floor(heldout_size*train_ratio))
             valid_size = int(np.ceil(heldout_size*valid_ratio))
             test_size = heldout_size - (train_size+valid_size)
@@ -47,16 +46,24 @@ class ConformalPredictionData:
                 train_x_mu, train_x_std = compute_mean_std(item["heldout_x"][:train_size])
                 heldout_x = normalize_array_with_params(item["heldout_x"], train_x_mu, train_x_std)
 
-                train_residuals_mu, train_residuals_std = compute_mean_std(item["heldout_residuals"][:train_size])
-                heldout_residuals = normalize_array_with_params(item["heldout_residuals"], train_residuals_mu, train_residuals_std)
+                train_y_mu, train_y_std = compute_mean_std(raw_heldout_y[:train_size])
+                heldout_y = normalize_array_with_params(raw_heldout_y, train_y_mu, train_y_std)
+                heldout_predictions = normalize_array_with_params(raw_heldout_predictions, train_y_mu, train_y_std)
 
-                train_y_mu, train_y_std = compute_mean_std(item["heldout_y"][:train_size])
-                heldout_y = normalize_array_with_params(item["heldout_y"], train_y_mu, train_y_std)
+                # Residuals are computed after normalizing y and yhat.  For
+                # metric code that converts residual intervals back to raw y
+                # units, this is equivalent to residual_mu=0, residual_std=y_std.
+                train_residuals_mu = np.zeros_like(train_y_mu)
+                train_residuals_std = train_y_std + 1e-8
 
             else:
                 heldout_x = item["heldout_x"]
-                heldout_residuals = item["heldout_residuals"]
-                heldout_y = item["heldout_y"]
+                heldout_y = raw_heldout_y
+                heldout_predictions = raw_heldout_predictions
+
+            heldout_residuals = (heldout_y - heldout_predictions).flatten()
+            self.data[key].update({"heldout_residuals" : heldout_residuals,
+                                   "raw_heldout_residuals" : raw_heldout_residuals})
 
             strided_x, target_x = to_strided_feature(heldout_x, 
                                                      past_window, 
@@ -69,13 +76,19 @@ class ConformalPredictionData:
             strided_residual, target_residual = to_strided_residual(heldout_residuals, 
                                                                     past_window, 
                                                                     prediction_steps)
-            # target_y does not need to be normalized
-            _, target_y = to_strided_residual(item["heldout_y"], 
+            # Keep target_y/target_predictions in raw units for reporting.
+            _, target_y = to_strided_residual(raw_heldout_y, 
                                               past_window, 
                                               prediction_steps)
-            _, target_predictions = to_strided_residual(item["heldout_predictions"],
+            _, target_predictions = to_strided_residual(raw_heldout_predictions,
                                                         past_window, 
                                                         prediction_steps)
+            _, target_y_normalized = to_strided_residual(heldout_y,
+                                                         past_window,
+                                                         prediction_steps)
+            _, target_predictions_normalized = to_strided_residual(heldout_predictions,
+                                                                   past_window,
+                                                                   prediction_steps)
             
             if normalize:
                 self.data[key].update({"strided_x" : strided_x,
@@ -89,9 +102,13 @@ class ConformalPredictionData:
                                         "train_x_mu" : train_x_mu,
                                         "train_x_std" : train_x_std,
                                         "heldout_residuals" : heldout_residuals,
+                                        "raw_heldout_residuals" : raw_heldout_residuals,
                                         "train_residuals_mu" : train_residuals_mu,
                                         "train_residuals_std" : train_residuals_std,
                                         "heldout_y_normalized" : heldout_y,
+                                        "heldout_predictions_normalized" : heldout_predictions,
+                                        "target_y_normalized" : target_y_normalized,
+                                        "target_predictions_normalized" : target_predictions_normalized,
                                         "train_y_mu" : train_y_mu,
                                         "train_y_std" : train_y_std})
             else:
@@ -102,7 +119,8 @@ class ConformalPredictionData:
                                         "target_residual" : target_residual,
                                         "target_y" : target_y,
                                         "target_predictions" : target_predictions,
-                                        "heldout_residuals" : heldout_residuals})
+                                        "heldout_residuals" : heldout_residuals,
+                                        "raw_heldout_residuals" : raw_heldout_residuals})
             
             train_split, valid_split, test_split = chronological_split_fixed_test([strided_x,
                                                                                    strided_residual,
@@ -146,20 +164,11 @@ class ConformalPredictionData:
                                 conformal_absolute_residual=False):
 
         for key, item in self.data.items():
-            
-            # compute residuals
-            heldout_signed_residuals = (item["heldout_y"] - item["heldout_predictions"]).flatten()
-            heldout_train_residuals = heldout_signed_residuals
-            heldout_conformal_residuals = heldout_signed_residuals
-            if predict_absolute_residual:
-                heldout_train_residuals = np.abs(heldout_train_residuals)
-            if conformal_absolute_residual:
-                heldout_conformal_residuals = np.abs(heldout_conformal_residuals)
-            self.data[key].update({"heldout_residuals" : heldout_conformal_residuals,
-                                   "heldout_signed_residuals" : heldout_signed_residuals,
-                                   "heldout_train_residuals" : heldout_train_residuals})
-            
-            heldout_size = len(item["heldout_y"])
+            raw_heldout_y = np.asarray(item["heldout_y"])
+            raw_heldout_predictions = np.asarray(item["heldout_predictions"])
+            raw_heldout_signed_residuals = (raw_heldout_y - raw_heldout_predictions).flatten()
+
+            heldout_size = len(raw_heldout_y)
             train_size = int(np.floor(heldout_size*train_ratio))
             valid_size = int(np.ceil(heldout_size*valid_ratio))
             test_size = heldout_size - (train_size+valid_size)
@@ -173,9 +182,6 @@ class ConformalPredictionData:
                 train_x_mu, train_x_std = compute_mean_std(item["heldout_x"][:train_size])
                 heldout_x = normalize_array_with_params(item["heldout_x"], train_x_mu, train_x_std)
 
-                #train_residuals_mu, train_residuals_std = compute_mean_std(item["heldout_residuals"][:train_size])
-                #heldout_residuals = normalize_array_with_params(item["heldout_residuals"], train_residuals_mu, train_residuals_std)
-
                 train_y_mu, train_y_std = compute_mean_std(item["heldout_y"][:train_size])
                 heldout_y = normalize_array_with_params(item["heldout_y"], train_y_mu, train_y_std)
 
@@ -184,10 +190,19 @@ class ConformalPredictionData:
 
             else:
                 heldout_x = item["heldout_x"]
-                heldout_train_residuals = item["heldout_train_residuals"]
-                heldout_conformal_residuals = item["heldout_residuals"]
                 heldout_y = item["heldout_y"]
                 heldout_predictions = item["heldout_predictions"]
+
+            # Residuals must be computed in the same scale as the contexts.
+            # When normalize=True, heldout_y and heldout_predictions are both
+            # normalized with train_y_mu/train_y_std, so these residuals are too.
+            heldout_signed_residuals = (heldout_y - heldout_predictions).flatten()
+            heldout_train_residuals = heldout_signed_residuals
+            heldout_conformal_residuals = heldout_signed_residuals
+            if predict_absolute_residual:
+                heldout_train_residuals = np.abs(heldout_train_residuals)
+            if conformal_absolute_residual:
+                heldout_conformal_residuals = np.abs(heldout_conformal_residuals)
 
             train_x = heldout_x[:train_size]
             valid_x = heldout_x[train_size:train_size+valid_size]
@@ -201,8 +216,10 @@ class ConformalPredictionData:
                                                             heldout_predictions,
                                                             y_lags)
             heldout_context_residuals = heldout_conformal_residuals[y_lags:]
-            heldout_target_y = np.asarray(item["heldout_y"])[y_lags:]
-            heldout_target_predictions = np.asarray(item["heldout_predictions"])[y_lags:]
+            heldout_target_y = np.asarray(heldout_y)[y_lags:]
+            heldout_target_predictions = np.asarray(heldout_predictions)[y_lags:]
+            raw_heldout_target_y = raw_heldout_y[y_lags:]
+            raw_heldout_target_predictions = raw_heldout_predictions[y_lags:]
 
             if train_size <= y_lags:
                 raise ValueError("train split must contain more observations than y_lags.")
@@ -220,6 +237,9 @@ class ConformalPredictionData:
                                        "heldout_context_residuals" : heldout_context_residuals,
                                        "heldout_target_y" : heldout_target_y,
                                        "heldout_target_predictions" : heldout_target_predictions,
+                                       "raw_heldout_signed_residuals" : raw_heldout_signed_residuals,
+                                       "raw_heldout_target_y" : raw_heldout_target_y,
+                                       "raw_heldout_target_predictions" : raw_heldout_target_predictions,
                                        "heldout_x_normalized" : heldout_x,
                                        "heldout_train_x_mu" : train_x_mu,
                                        "heldout_train_x_std" : train_x_std,
@@ -249,6 +269,9 @@ class ConformalPredictionData:
                                        "heldout_context_residuals" : heldout_context_residuals,
                                        "heldout_target_y" : heldout_target_y,
                                        "heldout_target_predictions" : heldout_target_predictions,
+                                       "raw_heldout_signed_residuals" : raw_heldout_signed_residuals,
+                                       "raw_heldout_target_y" : raw_heldout_target_y,
+                                       "raw_heldout_target_predictions" : raw_heldout_target_predictions,
                                        "heldout_residuals" : heldout_conformal_residuals,
                                        "heldout_signed_residuals" : heldout_signed_residuals,
                                        "heldout_train_residuals" : heldout_train_residuals,
