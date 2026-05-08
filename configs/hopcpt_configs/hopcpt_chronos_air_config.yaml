@@ -31,14 +31,13 @@ model:
 
 
 training:
-  # training batch size one entire sequence
   learning_rate: 0.001
   epochs: 3000
-  validation_epochs: 10
+  validation_epochs: 100
 
 
 plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/hopcpt_chronos_air/"
+saving_dir: "./results/hopcpt_chronos_air_sequence_batch/"
