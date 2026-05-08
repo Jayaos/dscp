@@ -1,0 +1,18 @@
+data:
+  data_path: "./data/air-10_prediction/lstm/lstm_air-10_data.pkl"
+  train_ratio: 0.6
+  valid_ratio: 0.2
+  normalize: True
+
+
+model:
+  n_estimators: 10
+  max_depth: 2
+  criterion: "squared_error"
+  target_quantiles:
+    - [0.950, 0.05]
+  prediction_step: 1
+  window_size: 100
+
+
+saving_dir: "./results/spci_lstm_air/"
