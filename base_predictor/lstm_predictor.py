@@ -224,20 +224,10 @@ class LSTMPredictor:
 
         for key, item in tqdm(self.data_processed.items()):
 
-            data_record[key] = {"normalized_train_x" : item["normalized_train_x"],
-                                "train_x" : item["train_x"],
-                                "normalized_heldout_x" : item["normalized_heldout_x"],
-                                "heldout_x" : item["heldout_x"],
-                                "normalized_train_y" : item["normalized_train_y"],
+            data_record[key] = {"train_x" : item["train_x"],
+                                "heldout_x" : item["heldout_x"][self.window_length - 1:],
                                 "train_y" : item["train_y"],
-                                "normalized_heldout_y" : item["normalized_heldout_y"],
-                                "heldout_y" : item["heldout_y"],
-                                "train_x_seq" : item["train_x_seq"],
-                                "train_y_seq" : item["train_y_seq"],
-                                "train_x_mu" : item["train_x_mu"],
-                                "train_x_std" : item["train_x_std"],
-                                "train_y_mu" : item["train_y_mu"], 
-                                "train_y_std" : item["train_y_std"],
+                                "heldout_y" : item["heldout_y"][self.window_length - 1:],
                                 "heldout_predictions" : self.predictions[key]}
             
         predictor_results_save_path = os.path.join(save_dir, f"lstm_{self.data_type}_results.pkl")
