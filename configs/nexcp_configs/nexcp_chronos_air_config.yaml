@@ -1,6 +1,6 @@
 data:
   data_path: "./data/air-10_prediction/chronos/chronos_air-10_data.pkl"  
-  calibration_ratio: 0.8
+  calibration_ratio: 0.66
 
 
 model:
