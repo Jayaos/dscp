@@ -29,7 +29,7 @@ def plot_darts_predictions(prediction_data, plot_len, n_seqs, save_dir=None):
         plt.legend()
 
         if save_dir is not None:
-            fname = f"{key}_predictions_len{plot_len}.png"
+            fname = f"{key}_lr_predictions_len{plot_len}.pdf"
             plt.savefig(os.path.join(save_dir, fname), bbox_inches="tight")
             plt.close()
         else:
@@ -62,14 +62,14 @@ def plot_lstm_predictions(prediction_data, plot_len, n_seqs, save_dir=None):
         plt.legend()
 
         if save_dir is not None:
-            fname = f"{key}_predictions_len{plot_len}.png"
+            fname = f"{key}_lstm_predictions_len{plot_len}.pdf"
             plt.savefig(os.path.join(save_dir, fname), bbox_inches="tight")
             plt.close()
         else:
             plt.show()
 
 
-def plot_chronous_predictions(prediction_data, plot_len, n_seqs, save_dir=None):
+def plot_chronos_predictions(prediction_data, plot_len, n_seqs, save_dir=None):
 
     if save_dir is not None:
         os.makedirs(save_dir, exist_ok=True)
@@ -95,7 +95,7 @@ def plot_chronous_predictions(prediction_data, plot_len, n_seqs, save_dir=None):
         plt.legend()
 
         if save_dir is not None:
-            fname = f"{key}_predictions_len{plot_len}.png"
+            fname = f"{key}_chronos_predictions_len{plot_len}.pdf"
             plt.savefig(os.path.join(save_dir, fname), bbox_inches="tight")
             plt.close()
         else:
@@ -180,7 +180,7 @@ def plot_cp_prediction_intervals(log, target_quantiles, plotting_seq_length, sav
                     int(tuple_quantile_pair[0] * 100),
                     int(tuple_quantile_pair[1] * 100),
                 )
-                filename = "{}_q{}_len{}.png".format(key, quantile_tag, seq_len)
+                filename = "{}_q{}_len{}.pdf".format(key, quantile_tag, seq_len)
                 fig.savefig(os.path.join(save_dir, filename), bbox_inches="tight")
                 plt.close(fig)
             else:
