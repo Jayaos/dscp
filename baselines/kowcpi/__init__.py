@@ -1,0 +1,2 @@
+"""KOWCPI baseline implementation."""
+
