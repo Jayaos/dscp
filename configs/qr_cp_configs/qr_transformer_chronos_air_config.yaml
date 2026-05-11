@@ -1,0 +1,37 @@
+device: 0
+
+
+data:
+  data_path: "./data/air-10_prediction/chronos/chronos_air-10_data.pkl"
+  train_ratio: 0.5
+  valid_ratio: 0.16
+  normalize: True
+  strided_features: "xr"
+
+
+model:
+  dim_model: 16
+  num_heads: 2
+  num_layers: 2
+  dropout: 0.
+  use_current_feature: False
+  target_quantiles:
+    - [0.05, 0.95]
+  prediction_step: 1
+  window_size: 200
+
+
+training:
+  batch_size: 32
+  learning_rate: 0.0001
+  epochs: 50
+  early_stop: 3
+
+
+plotting:
+  plotting: True
+  plotting_seq_len: 200
+  
+
+saving_dir: "./results/qr_transformer_chronos_air/"
+
