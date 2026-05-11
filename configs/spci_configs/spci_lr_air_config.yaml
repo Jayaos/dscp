@@ -15,4 +15,9 @@ model:
   window_size: 100
 
 
+plotting:
+  plotting: True
+  plotting_seq_len: 200
+  
+
 saving_dir: "./results/spci_lr_air/"
