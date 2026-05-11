@@ -8,8 +8,8 @@ parallel:
 
 data:
   data_path: "./data/air-10_prediction/lr/lr_air-10_data.pkl"
-  train_ratio: 0.25
-  valid_ratio: 0.25
+  train_ratio: 0.33
+  valid_ratio: 0.33
   normalize: True
 
 
@@ -33,7 +33,7 @@ model:
 training:
   learning_rate: 0.001
   epochs: 3000
-  validation_epochs: 50
+  validation_epochs: 100
   # Set to "all" for paper-style full-batch training across all sequences,
   # or an integer such as 4/8/16 for sequence mini-batches.
   sequence_batch_size: 2

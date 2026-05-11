@@ -7,7 +7,7 @@ parallel:
   devices: [0, 1]
 
 data:
-  data_path: "./data/air-10_prediction/lr/lr_air-10_data.pkl"
+  data_path: "./data/air-10_prediction/lstm/lstm_air-10_data.pkl"
   train_ratio: 0.33
   valid_ratio: 0.33
   normalize: True
@@ -41,4 +41,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/hopcpt_lr_air/"
+saving_dir: "./results/hopcpt_lstm_air/"
