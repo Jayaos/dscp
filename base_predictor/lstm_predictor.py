@@ -226,8 +226,8 @@ class LSTMPredictor:
 
             data_record[key] = {"train_x" : item["train_x"],
                                 "heldout_x" : item["heldout_x"][self.window_length - 1:],
-                                "train_y" : item["train_y"],
-                                "heldout_y" : item["heldout_y"][self.window_length - 1:],
+                                "train_y" : item["train_y"].reshape(-1, 1),
+                                "heldout_y" : item["heldout_y"][self.window_length - 1:].reshape(-1, 1),
                                 "heldout_predictions" : self.predictions[key].detach().cpu().numpy()}
             
         predictor_results_save_path = os.path.join(save_dir, f"lstm_{self.data_type}_results.pkl")
