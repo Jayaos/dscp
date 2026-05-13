@@ -1,5 +1,5 @@
 data:
-  data_path: "./data/air-10_prediction/lstm/lstm_air-10_data.pkl"
+  data_path: "./data/air-10_prediction/chronos/chronos_air-10_data.pkl"
   train_ratio: 0.5
   valid_ratio: 0.16
   normalize: True
@@ -20,10 +20,13 @@ model:
   kernel: "epanechnikov"
   bandwidth: null
   bandwidth_range: [0.1, 3.0, 30]
+  # If True, KOWCPI searches asymmetric beta pairs in [0, alpha].
+  # If False, only use the exact target_quantiles pair, e.g. [0.05, 0.95].
+  use_beta_search: False
   bins: 5
 
   weigh_residuals: False
-  residual_weight_decay: 0.995
+  residual_weight_decay: 0.995 # only used if `weigh_residuals` is True
   max_training_blocks: null
   min_training_blocks: 2
 
@@ -36,4 +39,4 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/kowcpi_lstm_air/"
+saving_dir: "./results/kowcpi_chronos_air/"

@@ -245,18 +245,26 @@ def glr_select_block_w(
     return int(np.clip(selected, max(w_min, m0), length - m0))
 
 
-def empirical_beta_interval(past_resid, alpha, bins=5):
+def empirical_beta_interval(past_resid, alpha, bins=5, fixed_beta=None):
     """
     Empirical fallback for the KOWCPI beta search.
 
-    It searches beta in [0, alpha] and returns the shortest
-    [beta, 1 - alpha + beta] residual interval.
+    If fixed_beta is provided, only the corresponding
+    [fixed_beta, 1 - alpha + fixed_beta] interval is evaluated.
+    Otherwise, it searches beta in [0, alpha] and returns the shortest
+    residual interval.
     """
     past_resid = np.asarray(past_resid, dtype=float).reshape(-1)
     if past_resid.size == 0:
         raise ValueError("At least one residual is required.")
 
-    beta_grid = np.linspace(0.0, float(alpha), int(bins))
+    if fixed_beta is None:
+        beta_grid = np.linspace(0.0, float(alpha), int(bins))
+    else:
+        fixed_beta = float(fixed_beta)
+        if fixed_beta < 0.0 or fixed_beta > float(alpha):
+            raise ValueError("fixed_beta must be in [0, alpha].")
+        beta_grid = np.asarray([fixed_beta], dtype=float)
     widths = np.zeros(len(beta_grid), dtype=float)
     lows = np.zeros(len(beta_grid), dtype=float)
     highs = np.zeros(len(beta_grid), dtype=float)
@@ -293,6 +301,7 @@ class KOWCPIResidualIntervalEstimator:
         residual_weight_decay=0.995,
         max_training_blocks=None,
         min_training_blocks=2,
+        fixed_beta=None,
     ):
         self.bandwidth = bandwidth
         self.kernel = kernel
@@ -302,6 +311,7 @@ class KOWCPIResidualIntervalEstimator:
         self.residual_weight_decay = float(residual_weight_decay)
         self.max_training_blocks = max_training_blocks
         self.min_training_blocks = int(min_training_blocks)
+        self.fixed_beta = None if fixed_beta is None else float(fixed_beta)
 
     def _make_residual_design(self, past_resid, block_size):
         past_resid = np.asarray(past_resid, dtype=float).reshape(-1)
@@ -322,10 +332,17 @@ class KOWCPIResidualIntervalEstimator:
             return None
         return self.residual_weight_decay ** np.arange(n, 0, -1, dtype=float)
 
+    def _beta_grid(self, alpha):
+        if self.fixed_beta is None:
+            return np.linspace(0.0, float(alpha), self.bins)
+        if self.fixed_beta < 0.0 or self.fixed_beta > float(alpha):
+            raise ValueError("fixed_beta must be in [0, alpha].")
+        return np.asarray([self.fixed_beta], dtype=float)
+
     def _fit_widths(self, past_resid, alpha, block_size):
         train_x, train_y, last_x = self._make_residual_design(past_resid, block_size)
         if train_x is None or len(train_y) < self.min_training_blocks:
-            return empirical_beta_interval(past_resid, alpha, self.bins)
+            return empirical_beta_interval(past_resid, alpha, self.bins, self.fixed_beta)
 
         if self.max_training_blocks is not None:
             max_blocks = int(self.max_training_blocks)
@@ -334,9 +351,9 @@ class KOWCPIResidualIntervalEstimator:
             train_x = train_x[-max_blocks:]
             train_y = train_y[-max_blocks:]
             if len(train_y) < self.min_training_blocks:
-                return empirical_beta_interval(past_resid, alpha, self.bins)
+                return empirical_beta_interval(past_resid, alpha, self.bins, self.fixed_beta)
 
-        beta_grid = np.linspace(0.0, float(alpha), self.bins)
+        beta_grid = self._beta_grid(alpha)
         quantiles = np.append(beta_grid, 1.0 - float(alpha) + beta_grid)
 
         quantile_model = WeightedNadarayaWatsonQuantile(
@@ -424,7 +441,7 @@ class KOWCPIResidualIntervalEstimator:
                 raise ValueError("No residual history available for KOWCPI.")
 
             if past_resid.size <= 1:
-                low, high = empirical_beta_interval(past_resid, alpha, self.bins)
+                low, high = empirical_beta_interval(past_resid, alpha, self.bins, self.fixed_beta)
             else:
                 selected_block = self._select_block_size(
                     past_resid,

@@ -152,6 +152,8 @@ def _run_kowcpi_sequence(key, item, config, target_quantiles):
         tuple_confidence_pair = tuple(confidence_pair)
         target_coverage = max(tuple_confidence_pair) - min(tuple_confidence_pair)
         alpha = 1.0 - target_coverage
+        use_beta_search = bool(OmegaConf.select(config, "model.use_beta_search", default=True))
+        fixed_beta = None if use_beta_search else min(tuple_confidence_pair)
 
         print("{} KOWCPI alpha {}".format(key, alpha))
         bandwidth_range = None if bandwidth is not None else _bandwidth_range_from_config(config)
@@ -166,6 +168,7 @@ def _run_kowcpi_sequence(key, item, config, target_quantiles):
             ),
             max_training_blocks=OmegaConf.select(config, "model.max_training_blocks", default=None),
             min_training_blocks=int(OmegaConf.select(config, "model.min_training_blocks", default=2)),
+            fixed_beta=fixed_beta,
         )
 
         lo, hi = estimator.predict_residual_intervals(
