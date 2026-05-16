@@ -98,8 +98,9 @@ class BasePredictorData:
         append_coords = dataset_type.endswith("-wCoord")
         data = data.iloc[::drop_every_n, :]
         Y_full = data['dhi']
-        X_full = data.loc[:, data.columns != 'dhi']
-        X_full.drop(columns=X_full.columns[0:6], inplace=True)  # Drop Date Stuff
+        X_full = data.loc[:, data.columns != "dhi"].copy()
+        # Drop the date, year, month, day, hour, minute, dhi (y) columns
+        X_full.drop(columns=X_full.columns[0:6], inplace=True)
         if append_coords:
             p = Path(data_path)
             coordinates = pd.read_csv(p.parent.parent / "solar_coordinates.csv")
