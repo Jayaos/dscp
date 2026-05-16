@@ -1,4 +1,5 @@
 import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 import torch
@@ -96,6 +97,25 @@ def _split_sizes(n, train_ratio, valid_ratio):
             )
         )
     return train_size, valid_size, test_size
+
+
+def _validate_num_cores(num_cores):
+    if num_cores is None:
+        return 1
+    num_cores = int(num_cores)
+    if num_cores < 1:
+        raise ValueError("num_cores must be a positive integer.")
+    return num_cores
+
+
+def _ordered_completed_log(log, sequence_keys):
+    return {key: log[key] for key in sequence_keys if key in log}
+
+
+def _run_kowcpi_sequence_worker(args):
+    key, item, config_container, target_quantiles = args
+    config = OmegaConf.create(config_container)
+    return key, _run_kowcpi_sequence(key, item, config, target_quantiles)
 
 
 def _run_kowcpi_sequence(key, item, config, target_quantiles):
@@ -235,9 +255,10 @@ def _run_kowcpi_sequence(key, item, config, target_quantiles):
     return {"evaluation_results": evaluation_results}
 
 
-def run_kowcpi(config_path):
+def run_kowcpi(config_path, num_cores=1):
     config = OmegaConf.load(config_path)
     os.makedirs(config.saving_dir, exist_ok=True)
+    num_cores = _validate_num_cores(num_cores)
 
     prediction_step = int(OmegaConf.select(config, "model.prediction_step", default=1))
     if prediction_step != 1:
@@ -252,11 +273,36 @@ def run_kowcpi(config_path):
     print("Base predictor: {}".format(base_predictor))
     print("Data: {}".format(data_type))
     print("{} independent sequences".format(len(data)))
+    print("{} parallel sequence worker(s)".format(min(num_cores, max(len(data), 1))))
 
     log = {}
-    for key, item in tqdm(data.items(), desc="repetition over independent sequences"):
-        log[key] = _run_kowcpi_sequence(key, item, config, target_quantiles)
-        save_data(os.path.join(config.saving_dir, "log.pkl"), log)
+    sequence_keys = list(data.keys())
+    log_path = os.path.join(config.saving_dir, "log.pkl")
+
+    if num_cores == 1 or len(data) <= 1:
+        for key, item in tqdm(data.items(), desc="repetition over independent sequences"):
+            log[key] = _run_kowcpi_sequence(key, item, config, target_quantiles)
+            save_data(log_path, _ordered_completed_log(log, sequence_keys))
+    else:
+        max_workers = min(num_cores, len(data))
+        config_container = OmegaConf.to_container(config, resolve=True)
+        worker_args = [
+            (key, data[key], config_container, target_quantiles)
+            for key in sequence_keys
+        ]
+
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(_run_kowcpi_sequence_worker, args) for args in worker_args]
+            for future in tqdm(
+                as_completed(futures),
+                total=len(futures),
+                desc="repetition over independent sequences",
+            ):
+                key, result = future.result()
+                log[key] = result
+                save_data(log_path, _ordered_completed_log(log, sequence_keys))
+
+        log = _ordered_completed_log(log, sequence_keys)
 
     summary_results = summarize_evaluation_results(log, target_quantiles)
 
