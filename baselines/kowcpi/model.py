@@ -340,14 +340,20 @@ class KOWCPIResidualIntervalEstimator:
         return np.asarray([self.fixed_beta], dtype=float)
 
     def _fit_widths(self, past_resid, alpha, block_size):
+        if self.max_training_blocks is not None:
+            max_blocks = int(self.max_training_blocks)
+            if max_blocks <= 0:
+                raise ValueError("max_training_blocks must be positive when set.")
+            max_history = int(block_size) + max_blocks
+            if len(past_resid) > max_history:
+                past_resid = past_resid[-max_history:]
+
         train_x, train_y, last_x = self._make_residual_design(past_resid, block_size)
         if train_x is None or len(train_y) < self.min_training_blocks:
             return empirical_beta_interval(past_resid, alpha, self.bins, self.fixed_beta)
 
         if self.max_training_blocks is not None:
             max_blocks = int(self.max_training_blocks)
-            if max_blocks <= 0:
-                raise ValueError("max_training_blocks must be positive when set.")
             train_x = train_x[-max_blocks:]
             train_y = train_y[-max_blocks:]
             if len(train_y) < self.min_training_blocks:
