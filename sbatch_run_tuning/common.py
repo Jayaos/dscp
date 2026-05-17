@@ -14,7 +14,7 @@ from utils.utils import save_data
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def parse_args(method_name: str) -> argparse.Namespace:
+def parse_args(method_name: str, include_num_cores: bool = False) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             f"Run hyperparameter tuning for {method_name}. "
@@ -66,6 +66,16 @@ def parse_args(method_name: str) -> argparse.Namespace:
         default=42,
         help="Base random seed. Trial index is added to this value.",
     )
+    if include_num_cores:
+        parser.add_argument(
+            "--num-cores",
+            type=int,
+            default=1,
+            help=(
+                "Number of parallel sequence workers to use inside each grid trial. "
+                "Grid trials are still evaluated sequentially."
+            ),
+        )
     return parser.parse_args()
 
 

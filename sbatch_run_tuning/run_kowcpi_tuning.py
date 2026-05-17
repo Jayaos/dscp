@@ -1,6 +1,9 @@
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
 import numpy as np
 import torch
 from omegaconf import OmegaConf
+from tqdm import tqdm
 
 from baselines.kowcpi.model import KOWCPIResidualIntervalEstimator
 from sbatch_run_tuning.common import (
@@ -99,6 +102,25 @@ def _validate_grid_keys(grid):
                 unexpected_keys,
             )
         )
+
+
+def _validate_num_cores(num_cores):
+    if num_cores is None:
+        return 1
+    num_cores = int(num_cores)
+    if num_cores < 1:
+        raise ValueError("num_cores must be a positive integer.")
+    return num_cores
+
+
+def _ordered_sequence_results(sequence_results: dict, sequence_keys: list) -> dict:
+    return {key: sequence_results[key] for key in sequence_keys if key in sequence_results}
+
+
+def _run_single_trial_worker(args):
+    sequence_key, sequence_data, config_container = args
+    config = OmegaConf.create(config_container)
+    return sequence_key, _run_single_trial(config, sequence_data)
 
 
 def _run_single_trial(config, sequence_data):
@@ -293,10 +315,39 @@ def _aggregate_sequence_results(sequence_results: dict, target_quantiles: list) 
     }
 
 
+def _run_trial_sequences(config, data: dict, sequence_keys: list, num_cores: int) -> dict:
+    if num_cores == 1 or len(sequence_keys) <= 1:
+        return {
+            sequence_key: _run_single_trial(config, data[sequence_key])
+            for sequence_key in sequence_keys
+        }
+
+    max_workers = min(num_cores, len(sequence_keys))
+    config_container = OmegaConf.to_container(config, resolve=True)
+    worker_args = [
+        (sequence_key, data[sequence_key], config_container)
+        for sequence_key in sequence_keys
+    ]
+
+    sequence_results = {}
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_run_single_trial_worker, args) for args in worker_args]
+        for future in tqdm(
+            as_completed(futures),
+            total=len(futures),
+            desc="tuning sequences",
+        ):
+            sequence_key, result = future.result()
+            sequence_results[sequence_key] = result
+
+    return _ordered_sequence_results(sequence_results, sequence_keys)
+
+
 def main():
-    args = parse_args("kowcpi")
+    args = parse_args("kowcpi", include_num_cores=True)
     save_dir = args.save_dir.resolve()
     save_dir.mkdir(parents=True, exist_ok=True)
+    num_cores = _validate_num_cores(args.num_cores)
 
     base_config = OmegaConf.load(args.base_config)
     grid, tuning_cfg = load_grid(args.grid_config)
@@ -322,10 +373,18 @@ def main():
     for trial_index, (trial_config, grid_values) in enumerate(iter_grid_configs(base_config, grid), start=1):
         print(f"[kowcpi] starting trial {trial_index} with grid_values={grid_values}", flush=True)
         set_global_seed(args.seed + trial_index)
-        sequence_results = {
-            sequence_key: _run_single_trial(trial_config, data[sequence_key])
-            for sequence_key in sequence_keys
-        }
+        print(
+            "[kowcpi] using {} parallel sequence worker(s) inside this grid trial".format(
+                min(num_cores, max(len(sequence_keys), 1))
+            ),
+            flush=True,
+        )
+        sequence_results = _run_trial_sequences(
+            trial_config,
+            data,
+            sequence_keys,
+            num_cores,
+        )
         result = _aggregate_sequence_results(sequence_results, target_quantiles)
         record = {
             "trial_index": trial_index,
@@ -347,6 +406,7 @@ def main():
         "grid_config_path": str(args.grid_config.resolve()),
         "sequence_keys": sequence_keys,
         "num_sequences": len(sequence_keys),
+        "num_cores": num_cores,
         "delta_threshold": delta_threshold,
         "num_trials": len(trials),
         "num_positive_delta_coverage_trials": len(positive_trials),
