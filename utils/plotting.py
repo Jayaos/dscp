@@ -45,7 +45,7 @@ def plot_lstm_predictions(prediction_data, plot_len, n_seqs, save_dir=None):
 
     for key in keys_to_plot:
         true_ts = prediction_data[key]["heldout_y"]
-        pred_ts = prediction_data[key]["heldout_predictions"].cpu().numpy()
+        pred_ts = prediction_data[key]["heldout_predictions"]
 
         # convert to pandas series (aligned by time index)
         true_series = true_ts[:plot_len]
