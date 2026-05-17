@@ -15,9 +15,6 @@ def _default_data_dir(data_type: str) -> Path:
     if data_type in {"nsdb-60m", "nsdb-30m"}:
         return REPO_ROOT / "data" / "nsdb_2018-2020"
 
-    if data_type == "toy":
-        return REPO_ROOT / "data" / "toy.csv"
-
     raise ValueError(f"Unsupported data type: {data_type}")
 
 

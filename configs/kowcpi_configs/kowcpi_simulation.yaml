@@ -1,0 +1,34 @@
+data:
+  data_path: "C:/Users/jayao/Desktop/python_projects/DSCP/data/kowcpi_sim_data.pkl"
+  train_ratio: 0.8
+  # valid split is not used for model selection
+  # train_ratio + valid_ratio will be used as calibration set
+  valid_ratio: 0.0
+  normalize: False
+
+
+model:
+  target_quantiles:
+    - [0.05, 0.95]
+  prediction_step: 1
+  past_window: 5
+  history_window: null
+  kernel: "epanechnikov"
+  bandwidth: null
+  bandwidth_range: [1.0, 10.0, 100]
+  use_beta_search: False
+  bins: 5
+  weigh_residuals: False
+  residual_weight_decay: 0.995
+  max_training_blocks: null
+  min_training_blocks: 2
+  use_adaptive_window: False
+  update_with_test: True
+
+
+plotting:
+  plotting: True
+  plotting_seq_len: 50
+  
+
+saving_dir: "./results/kowcpi_simulation/"

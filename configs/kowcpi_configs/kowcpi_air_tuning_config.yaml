@@ -1,5 +1,5 @@
 grid:
-  model.kernel: ["epanechnikov", "gaussian"]
+  model.kernel: ["epanechnikov"]
   model.past_window: [5, 10, 20, 50, 100]
 
 
