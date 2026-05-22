@@ -27,7 +27,7 @@ model:
   weigh_residuals: False
   residual_weight_decay: 0.995 # only used if `weigh_residuals` is True
   # Cap RNW training blocks to avoid O(n^2) AIC bandwidth memory on long Chronos sequences.
-  max_training_blocks: 100
+  max_training_blocks: 2000
   min_training_blocks: 2
 
   use_adaptive_window: False
