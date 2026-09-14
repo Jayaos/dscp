@@ -18,6 +18,7 @@ RUNPATH=/storage/project/r-yxie77-0/jlee3541/projects/dscp
 cd "$RUNPATH"
 
 export PYTHONPATH="$RUNPATH:$RUNPATH/sbatch:${PYTHONPATH:-}"
+export PYTHONNOUSERSITE=1
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export HF_HOME="${HF_HOME:-$RUNPATH/data/huggingface_cache}"
@@ -25,6 +26,8 @@ mkdir -p "$HF_HOME"
 
 module load anaconda3
 conda activate chronos
+
+python -c 'import threadpoolctl; from threadpoolctl import ThreadpoolController; print("threadpoolctl:", threadpoolctl.__version__, threadpoolctl.__file__)'
 
 python -u -m sbatch_run_base_predictor.run_chronos nsdb-60m \
   --data-dir "$RUNPATH/data/nsdb_2018-2020" \
