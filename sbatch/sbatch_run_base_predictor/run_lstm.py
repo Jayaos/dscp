@@ -25,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--window-length",
         type=int,
         default=100,
-        help="Sliding window length for sequence construction.",
+        help="Number of past covariate/target steps used for one-step prediction.",
     )
     parser.add_argument(
         "--embedding-dim",
@@ -49,7 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--fit-train-ratio",
         type=float,
         default=0.9,
-        help="Fraction of merged sequence windows used for training vs validation.",
+        help=(
+            "Chronological inner-training fraction applied to each sequence's "
+            "fitting prefix; the remaining tail is used for validation."
+        ),
     )
     parser.add_argument(
         "--batch-size",

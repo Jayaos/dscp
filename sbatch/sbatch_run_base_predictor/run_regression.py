@@ -29,8 +29,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--prediction-step",
         type=int,
+        choices=[1],
         default=1,
-        help="Forecast output chunk length.",
+        help="One-step horizon used for rolling heldout evaluation.",
     )
     return parser
 

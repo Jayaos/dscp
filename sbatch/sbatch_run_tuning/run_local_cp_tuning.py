@@ -3,7 +3,7 @@ import copy
 import numpy as np
 import torch
 from omegaconf import OmegaConf
-from torch.utils.data import ConcatDataset, DataLoader, Subset
+from torch.utils.data import DataLoader
 
 from dscp.data import ConformalPredictionData
 from dscp.loss import compute_loss_rnn_predictor, compute_loss_transformer_predictor
@@ -68,6 +68,7 @@ def _run_single_trial(config, sequence_item, sequence_data):
 
     train_dataset = sequence_item["train_dataset"]
     valid_dataset = sequence_item["valid_dataset"]
+    calibration_dataset = sequence_item["calibration_dataset"]
     test_dataset = sequence_item["test_dataset"]
 
     train_dataloader = DataLoader(train_dataset, batch_size=config.training.batch_size, shuffle=True)
@@ -161,26 +162,35 @@ def _run_single_trial(config, sequence_item, sequence_data):
         residual_mu = sequence_data["train_residuals_mu"]
         residual_std = sequence_data["train_residuals_std"]
 
-    tv_dataset = ConcatDataset([train_dataset, valid_dataset])
-    if len(tv_dataset) > config.model.calibration_size:
-        start_idx = len(tv_dataset) - config.model.calibration_size
-        tv_dataset = Subset(tv_dataset, range(start_idx, len(tv_dataset)))
-    tv_dataloader = DataLoader(tv_dataset, batch_size=config.training.batch_size, shuffle=False)
+    calibration_dataloader = DataLoader(
+        calibration_dataset,
+        batch_size=config.training.batch_size,
+        shuffle=False,
+    )
 
+    model.eval()
     with torch.no_grad():
-        tv_repr, tv_residual = model.encode_dataloader(
+        calibration_repr, calibration_residual = model.encode_dataloader(
             model,
-            tv_dataloader,
+            calibration_dataloader,
             config.data.strided_features,
             device,
             use_current_feature=use_current_feature,
         )
 
-    past_test_repr = []
-    past_test_residual = []
-    test_data_count = 0
+    configured_calibration_size = OmegaConf.select(config, "model.calibration_size", default=None)
+    if configured_calibration_size is None:
+        calibration_pool_size = len(calibration_dataset)
+    else:
+        calibration_pool_size = min(int(configured_calibration_size), len(calibration_dataset))
+        if calibration_pool_size <= 0:
+            raise ValueError("model.calibration_size must be positive when it is provided.")
 
-    model.eval()
+    # Keep the sequential calibration state on CPU. LocalConformalPrediction
+    # transfers it to the configured device for each similarity computation.
+    calibration_repr = calibration_repr[-calibration_pool_size:].detach().cpu()
+    calibration_residual = calibration_residual[-calibration_pool_size:].detach().cpu()
+
     for strided_x, strided_residual, strided_y, target_x, target_residual, target_y, target_predictions in test_dataloader:
         with torch.no_grad():
             strided_feature = generate_strided_feature(
@@ -197,25 +207,9 @@ def _run_single_trial(config, sequence_item, sequence_data):
             )
             query_repr = encoded[:, -1, :]
 
-        tv_idx = max((config.model.calibration_size - test_data_count), 0)
-        calib_repr_parts = []
-        calib_residual_parts = []
-
-        if tv_idx > 0 and len(tv_repr) > 0:
-            calib_repr_parts.append(tv_repr[-tv_idx:])
-            calib_residual_parts.append(tv_residual[-tv_idx:])
-
-        if len(past_test_repr) > 0:
-            calib_repr_parts.append(torch.vstack(past_test_repr[-config.model.calibration_size:]))
-            calib_residual_parts.append(torch.vstack(past_test_residual[-config.model.calibration_size:]))
-
-        calib_repr = torch.vstack(calib_repr_parts)
-        calib_residual = torch.vstack(calib_residual_parts)
-        test_data_count += 1
-
         local_cp = LocalConformalPrediction(
-            calib_repr,
-            calib_residual,
+            calibration_repr,
+            calibration_residual,
             config.model.similarity_fn,
             config.model.temperature,
             device,
@@ -245,16 +239,14 @@ def _run_single_trial(config, sequence_item, sequence_data):
                 )
             )
 
-        if device.type == "cpu":
-            past_test_repr.append(query_repr.detach().cpu())
-            past_test_residual.append(strided_residual[:, -1].detach().cpu().reshape(-1, 1))
-        else:
-            past_test_repr.append(query_repr.detach())
-            past_test_residual.append(strided_residual[:, -1].detach().reshape(-1, 1))
-
-        if len(past_test_repr) > config.model.calibration_size:
-            past_test_repr = past_test_repr[-config.model.calibration_size:]
-            past_test_residual = past_test_residual[-config.model.calibration_size:]
+        # Update only after scoring the current test point, so its label cannot
+        # influence its own interval. The FIFO pool remains a fixed size.
+        calibration_repr = torch.vstack(
+            [calibration_repr, query_repr.detach().cpu()]
+        )[-calibration_pool_size:]
+        calibration_residual = torch.vstack(
+            [calibration_residual, target_residual.detach().cpu().reshape(-1, 1)]
+        )[-calibration_pool_size:]
 
     pair_metrics, selection_score, positive_delta_coverage = summarize_evaluation_results(
         evaluation_results,
@@ -283,25 +275,44 @@ def main():
     grid, tuning_cfg = load_grid(args.grid_config)
 
     data = load_data(base_config.data.data_path)
-    cpd = ConformalPredictionData(data)
-    cpd.prepare_quantile_regression_datasets(
-        base_config.model.window_size,
-        base_config.model.prediction_step,
-        base_config.data.train_ratio,
-        base_config.data.valid_ratio,
-        normalize=base_config.data.normalize,
-    )
     num_sequences = resolve_num_sequences(tuning_cfg)
     delta_threshold = resolve_delta_threshold(tuning_cfg)
     base_config.tuning = dict(tuning_cfg)
-    sequence_keys = choose_sequence_keys(cpd.dataset, args.sequence_key, args.sequence_index, num_sequences)
+    sequence_keys = choose_sequence_keys(data, args.sequence_key, args.sequence_index, num_sequences)
 
     trials = []
+    prepared_data_cache = {}
     for trial_index, (trial_config, grid_values) in enumerate(iter_grid_configs(base_config, grid), start=1):
         print(f"[local_cp] starting trial {trial_index} with grid_values={grid_values}", flush=True)
         set_global_seed(args.seed + trial_index)
+        data_cache_key = (
+            int(trial_config.model.window_size),
+            int(trial_config.model.prediction_step),
+            float(trial_config.data.train_ratio),
+            float(trial_config.data.valid_ratio),
+            float(trial_config.data.calibration_ratio),
+            float(trial_config.data.test_ratio),
+            bool(trial_config.data.normalize),
+        )
+        trial_cpd = prepared_data_cache.get(data_cache_key)
+        if trial_cpd is None:
+            trial_cpd = ConformalPredictionData(copy.deepcopy(data))
+            trial_cpd.prepare_quantile_regression_datasets(
+                trial_config.model.window_size,
+                trial_config.model.prediction_step,
+                trial_config.data.train_ratio,
+                trial_config.data.valid_ratio,
+                normalize=trial_config.data.normalize,
+                calibration_ratio=trial_config.data.calibration_ratio,
+                test_ratio=trial_config.data.test_ratio,
+            )
+            prepared_data_cache[data_cache_key] = trial_cpd
         sequence_results = {
-            sequence_key: _run_single_trial(trial_config, cpd.dataset[sequence_key], cpd.data[sequence_key])
+            sequence_key: _run_single_trial(
+                trial_config,
+                trial_cpd.dataset[sequence_key],
+                trial_cpd.data[sequence_key],
+            )
             for sequence_key in sequence_keys
         }
         result = aggregate_sequence_results(sequence_results, trial_config.model.target_quantiles)

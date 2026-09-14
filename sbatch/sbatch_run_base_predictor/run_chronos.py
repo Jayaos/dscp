@@ -15,6 +15,15 @@ def _default_data_dir(data_type: str) -> Path:
     if data_type in {"nsdb-60m", "nsdb-30m"}:
         return REPO_ROOT / "data" / "nsdb_2018-2020"
 
+    if data_type == "sapflux-solo3-large":
+        return (
+            REPO_ROOT
+            / "data"
+            / "sapflux"
+            / "0.1.5"
+            / "prepared"
+        )
+
     raise ValueError(f"Unsupported data type: {data_type}")
 
 
@@ -35,7 +44,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "data_type",
-        choices=["air-10", "air-25", "nsdb-60m", "nsdb-30m", "toy"],
+        choices=[
+            "air-10",
+            "air-25",
+            "nsdb-60m",
+            "nsdb-30m",
+            "sapflux-solo3-large",
+            "toy",
+        ],
         help="Dataset type to load with BasePredictorData.",
     )
     parser.add_argument(
@@ -60,7 +76,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--prediction-length",
         type=int,
         default=10,
-        help="Chronos forecast horizon per rollout step.",
+        help=(
+            "Chronos forecast horizon/stride; covariates from the forecast "
+            "block are not supplied to the model."
+        ),
     )
     parser.add_argument(
         "--device",

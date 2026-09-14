@@ -1,24 +1,22 @@
 device: 0
 
-
 data:
-  data_path: "./data/air-10_prediction/chronos/chronos_air-10_data.pkl"
+  data_path: "./data/sapflux-solo3-large/lstm/lstm_sapflux-solo3-large_data.pkl"
   train_ratio: 0.6
   valid_ratio: 0.1
   calibration_ratio: 0.1
   test_ratio: 0.2
   normalize: True
-  strided_features: "xr"
-
+  strided_features: "xry"
 
 model:
-  rnn_type: "lstm"
   dim_model: 32
-  num_layers: 1
+  num_heads: 2
+  num_layers: 4
   dropout: 0.
   use_current_feature: False
   target_quantiles:
-    - [0.05, 0.950]
+    - [0.05, 0.95]
   prediction_step: 1
   window_size: 100
   calibration_size: 500
@@ -26,10 +24,9 @@ model:
   temperature: 0.1
   sampling_num: 1000
 
-
 training:
   batch_size: 32
-  learning_rate: 0.001
+  learning_rate: 0.0001
   epochs: 50
   early_stop: 3
 
@@ -37,5 +34,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-
-saving_dir: "./results/lcp_rnn_chronos_air/"
+saving_dir: "./results/lcp_transformer_lstm_sapflux_solo3_large/"

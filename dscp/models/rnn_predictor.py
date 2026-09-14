@@ -80,6 +80,6 @@ class RNNPredictor(torch.nn.Module):
                                 current_feature=target_x if use_current_feature else None)
 
             repr_list.append(repr[:, -1, :])
-            residual_list.append(strided_residual[:, -1])
+            residual_list.append(target_residual)
 
-        return torch.vstack(repr_list), torch.vstack(residual_list)
+        return torch.cat(repr_list, dim=0), torch.cat(residual_list, dim=0)

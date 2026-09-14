@@ -12,7 +12,52 @@ from dscp.data import ConformalPredictionData
 from utils.utils import load_data, save_data, read_setup, generate_strided_feature, get_interval_quantile_indices
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, summarize_evaluation_results
 from utils.plotting import plot_cp_prediction_intervals
-from torch.utils.data import DataLoader, ConcatDataset, Subset
+from torch.utils.data import DataLoader
+
+
+def _initialize_calibration_pool(predictor, calibration_dataset, config, device):
+    """Encode the dedicated calibration split and keep its latest observations."""
+    requested_size = OmegaConf.select(config, "model.calibration_size", default=None)
+    if requested_size is None:
+        calibration_capacity = len(calibration_dataset)
+    else:
+        calibration_capacity = min(int(requested_size), len(calibration_dataset))
+
+    if calibration_capacity <= 0:
+        raise ValueError("Local-CP requires at least one calibration observation.")
+
+    calibration_dataloader = DataLoader(
+        calibration_dataset,
+        batch_size=config.training.batch_size,
+        shuffle=False,
+    )
+    predictor.eval()
+    with torch.no_grad():
+        calibration_repr, calibration_residual = predictor.encode_dataloader(
+            predictor,
+            calibration_dataloader,
+            config.data.strided_features,
+            device,
+            use_current_feature=config.model.use_current_feature,
+        )
+
+    # The rolling pool lives on CPU; LocalConformalPrediction moves it to the
+    # configured device only while computing a test-time interval.
+    calibration_repr = calibration_repr[-calibration_capacity:].detach().cpu()
+    calibration_residual = calibration_residual[-calibration_capacity:].detach().cpu()
+    return calibration_repr, calibration_residual, calibration_capacity
+
+
+def _append_to_calibration_pool(calibration_repr, calibration_residual,
+                                query_repr, target_residual, capacity):
+    """Append an observed test point and evict the oldest point if necessary."""
+    calibration_repr = torch.cat(
+        (calibration_repr, query_repr.detach().cpu()), dim=0
+    )[-capacity:]
+    calibration_residual = torch.cat(
+        (calibration_residual, target_residual.detach().cpu().reshape(-1, 1)), dim=0
+    )[-capacity:]
+    return calibration_repr, calibration_residual
 
 
 def run_transformer_local_cp(config_path):
@@ -24,11 +69,15 @@ def run_transformer_local_cp(config_path):
     data = load_data(config.data.data_path) # load predictor results here
     base_predictor, data_type = read_setup(config.data.data_path)
     cpd = ConformalPredictionData(data)
-    cpd.prepare_quantile_regression_datasets(config.model.window_size, 
-                              config.model.prediction_step, 
-                              config.data.train_ratio, 
-                              config.data.valid_ratio, 
-                              config.data.normalize)
+    cpd.prepare_quantile_regression_datasets(
+        config.model.window_size,
+        config.model.prediction_step,
+        config.data.train_ratio,
+        config.data.valid_ratio,
+        normalize=config.data.normalize,
+        calibration_ratio=config.data.calibration_ratio,
+        test_ratio=config.data.test_ratio,
+    )
     device = config.device
     sorted_quantiles, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
     log = dict()
@@ -43,6 +92,7 @@ def run_transformer_local_cp(config_path):
 
         train_dataset = item["train_dataset"]
         valid_dataset = item["valid_dataset"]
+        calibration_dataset = item["calibration_dataset"]
         test_dataset = item["test_dataset"]
 
         train_dataloader = DataLoader(train_dataset, batch_size=config.training.batch_size, shuffle=True)
@@ -163,25 +213,12 @@ def run_transformer_local_cp(config_path):
             residuals_noramlized_mu = cpd.data[key]["train_residuals_mu"]
             residuals_noramlized_std = cpd.data[key]["train_residuals_std"]
 
-        # NOTE: test_dataloader batch size must be 1 in the current setup
-        tv_dataset = ConcatDataset([train_dataset, valid_dataset])
-        if len(tv_dataset) > config.model.calibration_size:
-            start_idx = len(tv_dataset) - config.model.calibration_size
-            tv_dataset = Subset(tv_dataset, range(start_idx, len(tv_dataset)))
-        tv_dataloader = DataLoader(tv_dataset, batch_size=config.training.batch_size, shuffle=False)
+        # NOTE: test_dataloader batch size must be 1 in the current setup.
+        # Only the dedicated calibration partition seeds the online pool.
+        calib_repr, calib_residual, calibration_capacity = _initialize_calibration_pool(
+            transformer_predictor, calibration_dataset, config, device
+        )
 
-        with torch.no_grad():
-            tv_repr, tv_residual = transformer_predictor.encode_dataloader(transformer_predictor,
-                                                                           tv_dataloader,
-                                                                           config.data.strided_features,
-                                                                           device,
-                                                                           use_current_feature=config.model.use_current_feature)
-
-        past_test_repr = []
-        past_test_residual = []
-
-        test_data_count = 0
-        transformer_predictor.eval()
         for strided_x, strided_residual, strided_y, \
             target_x, target_residual, target_y, target_predictions in tqdm(test_dataloader):
 
@@ -197,24 +234,6 @@ def run_transformer_local_cp(config_path):
                                                  strided_feature,
                                                  current_feature=target_x if config.model.use_current_feature else None)
                 query_repr = o[:, -1, :] # representation of the last timestep, (query_size, dim_model)
-
-            tv_idx = max((config.model.calibration_size - test_data_count), 0)
-            
-            calib_repr_parts = []
-            calib_residual_parts = []
-
-            if tv_idx > 0 and len(tv_repr) > 0:
-                calib_repr_parts.append(tv_repr[-tv_idx:])
-                calib_residual_parts.append(tv_residual[-tv_idx:])
-
-            if len(past_test_repr) > 0:
-                calib_repr_parts.append(torch.vstack(past_test_repr[-config.model.calibration_size:]))
-                calib_residual_parts.append(torch.vstack(past_test_residual[-config.model.calibration_size:]))
-
-            calib_repr = torch.vstack(calib_repr_parts)
-            calib_residual = torch.vstack(calib_residual_parts)
-                 
-            test_data_count += 1
 
             local_cp = LocalConformalPrediction(calib_repr,
                                                 calib_residual, 
@@ -271,16 +290,15 @@ def run_transformer_local_cp(config_path):
                     evaluation_results[tuple_confidence_pair]["train_residuals_mu"] = residuals_noramlized_mu
                     evaluation_results[tuple_confidence_pair]["train_residuals_std"] = residuals_noramlized_std
 
-            if device == "cpu":
-                past_test_repr.append(query_repr.detach().cpu())
-                past_test_residual.append(strided_residual[:, -1].detach().cpu().reshape(-1, 1))
-            else:
-                past_test_repr.append(query_repr.detach())
-                past_test_residual.append(strided_residual[:, -1].reshape(-1, 1))       
-
-            if len(past_test_repr) > config.model.calibration_size:
-                past_test_repr = past_test_repr[-config.model.calibration_size:]
-                past_test_residual = past_test_residual[-config.model.calibration_size:]
+            # Update only after the interval and metrics for this point are
+            # computed, so its outcome cannot leak into its own interval.
+            calib_repr, calib_residual = _append_to_calibration_pool(
+                calib_repr,
+                calib_residual,
+                query_repr,
+                target_residual,
+                calibration_capacity,
+            )
         
         for confidence_pair in config.model.target_quantiles:
             tuple_confidence_pair = tuple(confidence_pair)
@@ -344,11 +362,15 @@ def run_rnn_local_cp(config_path):
     data = load_data(config.data.data_path) # load predictor results here
     base_predictor, data_type = read_setup(config.data.data_path)
     cpd = ConformalPredictionData(data)
-    cpd.prepare_quantile_regression_datasets(config.model.window_size,
-                              config.model.prediction_step,
-                              config.data.train_ratio,
-                              config.data.valid_ratio,
-                              config.data.normalize)
+    cpd.prepare_quantile_regression_datasets(
+        config.model.window_size,
+        config.model.prediction_step,
+        config.data.train_ratio,
+        config.data.valid_ratio,
+        normalize=config.data.normalize,
+        calibration_ratio=config.data.calibration_ratio,
+        test_ratio=config.data.test_ratio,
+    )
     device = config.device
     sorted_quantiles, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
     log = dict()
@@ -363,6 +385,7 @@ def run_rnn_local_cp(config_path):
 
         train_dataset = item["train_dataset"]
         valid_dataset = item["valid_dataset"]
+        calibration_dataset = item["calibration_dataset"]
         test_dataset = item["test_dataset"]
 
         train_dataloader = DataLoader(train_dataset, batch_size=config.training.batch_size, shuffle=True)
@@ -482,25 +505,12 @@ def run_rnn_local_cp(config_path):
             residuals_noramlized_mu = cpd.data[key]["train_residuals_mu"]
             residuals_noramlized_std = cpd.data[key]["train_residuals_std"]
 
-        # NOTE: test_dataloader batch size must be 1 in the current setup
-        tv_dataset = ConcatDataset([train_dataset, valid_dataset])
-        if len(tv_dataset) > config.model.calibration_size:
-            start_idx = len(tv_dataset) - config.model.calibration_size
-            tv_dataset = Subset(tv_dataset, range(start_idx, len(tv_dataset)))
-        tv_dataloader = DataLoader(tv_dataset, batch_size=config.training.batch_size, shuffle=False)
+        # NOTE: test_dataloader batch size must be 1 in the current setup.
+        # Only the dedicated calibration partition seeds the online pool.
+        calib_repr, calib_residual, calibration_capacity = _initialize_calibration_pool(
+            rnn_predictor, calibration_dataset, config, device
+        )
 
-        with torch.no_grad():
-            tv_repr, tv_residual = rnn_predictor.encode_dataloader(rnn_predictor,
-                                                                   tv_dataloader,
-                                                                   config.data.strided_features,
-                                                                   device,
-                                                                   use_current_feature=config.model.use_current_feature)
-
-        past_test_repr = []
-        past_test_residual = []
-
-        test_data_count = 0
-        rnn_predictor.eval()
         for strided_x, strided_residual, strided_y, \
             target_x, target_residual, target_y, target_predictions in tqdm(test_dataloader):
 
@@ -516,24 +526,6 @@ def run_rnn_local_cp(config_path):
                                          strided_feature,
                                          current_feature=target_x if config.model.use_current_feature else None)
                 query_repr = o[:, -1, :] # representation of the last timestep, (query_size, dim_model)
-
-            tv_idx = max((config.model.calibration_size - test_data_count), 0)
-
-            calib_repr_parts = []
-            calib_residual_parts = []
-
-            if tv_idx > 0 and len(tv_repr) > 0:
-                calib_repr_parts.append(tv_repr[-tv_idx:])
-                calib_residual_parts.append(tv_residual[-tv_idx:])
-
-            if len(past_test_repr) > 0:
-                calib_repr_parts.append(torch.vstack(past_test_repr[-config.model.calibration_size:]))
-                calib_residual_parts.append(torch.vstack(past_test_residual[-config.model.calibration_size:]))
-
-            calib_repr = torch.vstack(calib_repr_parts)
-            calib_residual = torch.vstack(calib_residual_parts)
-
-            test_data_count += 1
 
             local_cp = LocalConformalPrediction(calib_repr,
                                                 calib_residual,
@@ -590,16 +582,15 @@ def run_rnn_local_cp(config_path):
                     evaluation_results[tuple_confidence_pair]["train_residuals_mu"] = residuals_noramlized_mu
                     evaluation_results[tuple_confidence_pair]["train_residuals_std"] = residuals_noramlized_std
 
-            if device == "cpu":
-                past_test_repr.append(query_repr.detach().cpu())
-                past_test_residual.append(strided_residual[:, -1].detach().cpu().reshape(-1, 1))
-            else:
-                past_test_repr.append(query_repr.detach())
-                past_test_residual.append(strided_residual[:, -1].reshape(-1, 1))       
-
-            if len(past_test_repr) > config.model.calibration_size:
-                past_test_repr = past_test_repr[-config.model.calibration_size:]
-                past_test_residual = past_test_residual[-config.model.calibration_size:]
+            # Update only after the interval and metrics for this point are
+            # computed, so its outcome cannot leak into its own interval.
+            calib_repr, calib_residual = _append_to_calibration_pool(
+                calib_repr,
+                calib_residual,
+                query_repr,
+                target_residual,
+                calibration_capacity,
+            )
 
         for confidence_pair in config.model.target_quantiles:
             tuple_confidence_pair = tuple(confidence_pair)

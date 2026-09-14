@@ -44,8 +44,18 @@ class LinearRegressionPredictor:
     
     def fit_predict(self):
         """
-        fit linear regression predictor on data and make point prediction
+        Fit each linear model once and evaluate it with rolling one-step forecasts.
+
+        At every held-out timestamp, the forecast uses the true target values
+        observed before that timestamp. The fitted regression coefficients are
+        kept fixed throughout the held-out period.
         """
+        if self.prediction_step != 1:
+            raise ValueError(
+                "Rolling one-step-ahead evaluation requires prediction_step=1; "
+                f"got {self.prediction_step}."
+            )
+
         mse_list = []
         mae_list = []
 
@@ -58,10 +68,20 @@ class LinearRegressionPredictor:
             
             model.fit(item["train_y"], past_covariates=item["train_x"])
 
-            print("making predictions on heldout set...")
+            print("making rolling one-step predictions on heldout set...")
             all_x = concatenate([item["train_x"], item["heldout_x"]], axis="time")
-            past_x = all_x[len(item["train_x"])-self.past_window:]
-            predictions = model.predict(len(item["heldout_y"]), past_covariates=past_x)
+            all_y = concatenate([item["train_y"], item["heldout_y"]], axis="time")
+            predictions = model.historical_forecasts(
+                series=all_y,
+                past_covariates=all_x,
+                start=len(item["train_y"]),
+                start_format="position",
+                forecast_horizon=1,
+                stride=1,
+                retrain=False,
+                last_points_only=True,
+                show_warnings=False,
+            )
             mse_heldout = mse(item["heldout_y"], predictions)
             mae_heldout = mae(item["heldout_y"], predictions)
 
@@ -92,9 +112,9 @@ class LinearRegressionPredictor:
         predictor_results_save_path = os.path.join(save_dir, f"lr_{self.data_type}_results.pkl")
         predictor_results = {"past_window" : self.past_window,
                              "prediction_step" : self.prediction_step,
+                             "evaluation_mode" : "rolling_one_step",
                              "average_mse" : self.average_mse,
                              "average_mae" : self.average_mae}
 
         save_data(save_path, data_record)
         save_data(predictor_results_save_path, predictor_results)
-

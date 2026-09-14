@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J transformer_lcp_air_tuning
+#SBATCH -J rnn_lcp_air_tuning
 #SBATCH --account=gts-yxie77-paid
 #SBATCH --gres=gpu:1 -C V100
 #SBATCH --mem=8GB
@@ -18,9 +18,9 @@ conda activate dscp
 
 
 python sbatch_run_tuning/run_local_cp_tuning.py \
-  --base-config configs/lcp_configs/lcp_transformer_air_config.yaml \
-  --grid-config configs/lcp_configs/lcp_transformer_air_tuning_config.yaml \
-  --save-dir results/tuning/lcp_transformer_chronos_air \
+  --base-config configs/lcp_configs/lcp_rnn_chronos_air_config.yaml \
+  --grid-config configs/lcp_configs/lcp_rnn_air_tuning_config.yaml \
+  --save-dir results/tuning/lcp_rnn_chronos_air \
   --sequence-index 0 \
   --top-k 3 \
   --seed 2026

@@ -4,7 +4,9 @@ device: 0
 data:
   data_path: "./data/air-10_prediction/chronos/chronos_air-10_data.pkl"
   train_ratio: 0.6
-  valid_ratio: 0.2
+  valid_ratio: 0.1
+  calibration_ratio: 0.1
+  test_ratio: 0.2
   normalize: True
   strided_features: "xry"
 

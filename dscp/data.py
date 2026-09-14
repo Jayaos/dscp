@@ -1,7 +1,12 @@
 import torch
 import numpy as np
 from torch.utils.data import Dataset
-from utils.utils import to_strided_feature, to_strided_residual, chronological_split_fixed_test
+from utils.utils import (
+    chronological_split_fixed_calibration_test,
+    chronological_split_fixed_test,
+    to_strided_feature,
+    to_strided_residual,
+)
 from utils.utils import build_hopcpt_context_features
 from utils.utils import normalize_array_with_params, compute_mean_std
 
@@ -21,13 +26,45 @@ class ConformalPredictionData:
                                              prediction_steps, 
                                              train_ratio, 
                                              valid_ratio, 
-                                             normalize=False):
+                                             normalize=False,
+                                             *,
+                                             calibration_ratio=None,
+                                             test_ratio=None):
         """
-        prepare dscp dataset to predict t only with past_window context of features and residuals.
+        Prepare sequence examples that predict future residuals from past context.
 
-        shifted_concatenation only changes how strided feature is constructed.
+        Calls without calibration_ratio/test_ratio retain the legacy chronological
+        train | validation | test split. Providing both adds a dedicated
+        validation | calibration | test tail; all four ratios then refer to raw
+        held-out timestamps and must sum to one. The four-way split is currently
+        restricted to one-step Local-CP prediction.
 
         """
+
+        use_calibration_split = calibration_ratio is not None or test_ratio is not None
+        if use_calibration_split:
+            if calibration_ratio is None or test_ratio is None:
+                raise ValueError(
+                    "calibration_ratio and test_ratio must be provided together."
+                )
+            if prediction_steps != 1:
+                raise ValueError(
+                    "The four-way Local-CP split currently supports prediction_steps=1 only."
+                )
+            ratios = np.asarray(
+                [train_ratio, valid_ratio, calibration_ratio, test_ratio],
+                dtype=float,
+            )
+            if not np.all(np.isfinite(ratios)) or np.any(ratios <= 0):
+                raise ValueError(
+                    "train, validation, calibration, and test ratios must all be "
+                    "finite and strictly positive."
+                )
+            if not np.isclose(ratios.sum(), 1.0, rtol=0.0, atol=1e-8):
+                raise ValueError(
+                    "train_ratio + valid_ratio + calibration_ratio + test_ratio "
+                    f"must equal 1; got {ratios.sum():.12g}."
+                )
 
         for key, item in self.data.items():
             raw_heldout_y = np.asarray(item["heldout_y"])
@@ -35,9 +72,28 @@ class ConformalPredictionData:
             raw_heldout_residuals = (raw_heldout_y - raw_heldout_predictions).flatten()
 
             heldout_size = len(raw_heldout_y)
-            train_size = int(np.floor(heldout_size*train_ratio))
-            valid_size = int(np.ceil(heldout_size*valid_ratio))
-            test_size = heldout_size - (train_size+valid_size)
+            if use_calibration_split:
+                raw_boundaries = heldout_size * np.cumsum(ratios[:3])
+                # Move each floating-point product one representable value
+                # upward before floor so exact conceptual boundaries such as
+                # 20 * (0.7 + 0.1) are not rounded from 16 down to 15.
+                train_end, valid_end, calibration_end = np.floor(
+                    np.nextafter(raw_boundaries, np.inf)
+                ).astype(int).tolist()
+                train_size = train_end
+                valid_size = valid_end - train_end
+                calibration_size = calibration_end - valid_end
+                test_size = heldout_size - calibration_end
+                if min(train_size, valid_size, calibration_size, test_size) <= 0:
+                    raise ValueError(
+                        f"Empty split for {key!r}: heldout_size={heldout_size}, "
+                        f"train={train_size}, valid={valid_size}, "
+                        f"calibration={calibration_size}, test={test_size}."
+                    )
+            else:
+                train_size = int(np.floor(heldout_size*train_ratio))
+                valid_size = int(np.ceil(heldout_size*valid_ratio))
+                test_size = heldout_size - (train_size+valid_size)
 
             if normalize:
                 # normalize variables that will be used for sequence model prediction
@@ -122,37 +178,75 @@ class ConformalPredictionData:
                                         "heldout_residuals" : heldout_residuals,
                                         "raw_heldout_residuals" : raw_heldout_residuals})
             
-            train_split, valid_split, test_split = chronological_split_fixed_test([strided_x,
-                                                                                   strided_residual,
-                                                                                   strided_y,
-                                                                                   target_x,
-                                                                                   target_residual,
-                                                                                   target_y,
-                                                                                   target_predictions],
-                                                                                   valid_size, 
-                                                                                   test_size)
+            arrays = [strided_x,
+                      strided_residual,
+                      strided_y,
+                      target_x,
+                      target_residual,
+                      target_y,
+                      target_predictions]
+            if use_calibration_split:
+                train_split, valid_split, calibration_split, test_split = \
+                    chronological_split_fixed_calibration_test(
+                        arrays,
+                        valid_size,
+                        calibration_size,
+                        test_size,
+                    )
+            else:
+                train_split, valid_split, test_split = chronological_split_fixed_test(
+                    arrays,
+                    valid_size,
+                    test_size,
+                )
 
-            self.dataset[key] = {"train_dataset" : QuantileRegressionDataset(train_split[0], 
-                                                                             train_split[1], 
-                                                                             train_split[2], 
-                                                                             train_split[3], 
-                                                                             train_split[4],
-                                                                             train_split[5],
-                                                                             train_split[6]),
-                                 "valid_dataset" : QuantileRegressionDataset(valid_split[0], 
-                                                                             valid_split[1], 
-                                                                             valid_split[2],
-                                                                             valid_split[3],
-                                                                             valid_split[4],
-                                                                             valid_split[5],
-                                                                             valid_split[6]),
-                                 "test_dataset" : QuantileRegressionDataset(test_split[0], 
-                                                                            test_split[1], 
-                                                                            test_split[2],
-                                                                            test_split[3],
-                                                                            test_split[4],
-                                                                            test_split[5],
-                                                                            test_split[6])}
+            datasets = {
+                "train_dataset": QuantileRegressionDataset(
+                    train_split[0],
+                    train_split[1],
+                    train_split[2],
+                    train_split[3],
+                    train_split[4],
+                    train_split[5],
+                    train_split[6],
+                ),
+                "valid_dataset": QuantileRegressionDataset(
+                    valid_split[0],
+                    valid_split[1],
+                    valid_split[2],
+                    valid_split[3],
+                    valid_split[4],
+                    valid_split[5],
+                    valid_split[6],
+                ),
+                "test_dataset": QuantileRegressionDataset(
+                    test_split[0],
+                    test_split[1],
+                    test_split[2],
+                    test_split[3],
+                    test_split[4],
+                    test_split[5],
+                    test_split[6],
+                ),
+            }
+            if use_calibration_split:
+                datasets["calibration_dataset"] = QuantileRegressionDataset(
+                    calibration_split[0],
+                    calibration_split[1],
+                    calibration_split[2],
+                    calibration_split[3],
+                    calibration_split[4],
+                    calibration_split[5],
+                    calibration_split[6],
+                )
+            self.dataset[key] = datasets
+            if use_calibration_split:
+                self.data[key].update({
+                    "train_size": train_size,
+                    "valid_size": valid_size,
+                    "calibration_size": calibration_size,
+                    "test_size": test_size,
+                })
 
     def prepare_hopcpt_datasets(self, 
                                 prediction_steps, 

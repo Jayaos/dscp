@@ -11,7 +11,7 @@ import os
 
 class ChronosPredictor:
     """
-    Global Chronos-2 predictor
+    Global Chronos-2 predictor using historical targets and past-only covariates.
     """
 
     def __init__(self, data: BasePredictorData, device):
@@ -26,6 +26,12 @@ class ChronosPredictor:
         self.predictions = dict()
 
     def predict(self, window_length, prediction_length):
+        """Generate rolling block forecasts without forecast-time covariates.
+
+        Every forecast uses only the targets and covariates strictly before its
+        origin.  Covariates at the timestamps being predicted are intentionally
+        not passed to Chronos.
+        """
 
         self.window_length = window_length
         self.prediction_length = prediction_length
@@ -45,15 +51,13 @@ class ChronosPredictor:
             for i in tqdm(range(iter_num)):
 
                 context_x = x[i*prediction_length:i*prediction_length+window_length,:]
-                future_x = x[i*prediction_length+window_length:i*prediction_length+window_length+prediction_length,:]
                 context_y = y[i*prediction_length:i*prediction_length+window_length]
                 future_y = y[i*prediction_length+window_length:i*prediction_length+window_length+prediction_length]
 
-                context_df, future_df = _build_context_future_df(context_x, future_x, context_y)
+                context_df = _build_context_df(context_x, context_y)
                 pred_df = self.chronos2.predict_df(context_df,
-                                                   future_df=future_df,
-                                                   prediction_length=future_x.shape[0],  # Number of steps to forecast
-                                                   quantile_levels=[0.1, 0.5, 0.9],  # Quantile for probabilistic forecast
+                                                   prediction_length=future_y.shape[0],  # Number of steps to forecast
+                                                   quantile_levels=[0.5],  # Request only the median forecast
                                                    id_column="id",  # Column identifying different time series
                                                    timestamp_column="timestamp",  # Column with datetime information
                                                    target="target",  # Column(s) with time series values to predict
@@ -92,6 +96,8 @@ class ChronosPredictor:
         predictor_results_save_path = os.path.join(save_dir, f"chronos_{self.data_type}_results.pkl")
         predictor_results = {"window_length" : self.window_length,
                              "prediction_length" : self.prediction_length,
+                             "uses_future_covariates" : False,
+                             "quantile_levels" : [0.5],
                              "average_mse" : self.average_mse,
                              "average_mae" : self.average_mae}
 
@@ -99,10 +105,9 @@ class ChronosPredictor:
         save_data(predictor_results_save_path, predictor_results)
 
 
-def _build_context_future_df(context_x, future_x, context_y):
+def _build_context_df(context_x, context_y):
     
     t = np.arange(context_x.shape[0])
-    t_future = np.arange(context_x.shape[0], context_x.shape[0]+future_x.shape[0])
 
     context_df = pd.DataFrame({
         "id": "ts_0",
@@ -114,13 +119,5 @@ def _build_context_future_df(context_x, future_x, context_y):
     for j in range(feature_dim):
         context_df[f"feat_{j}"] = context_x[:, j]
 
-    future_df = pd.DataFrame({
-        "id": "ts_0",
-        "timestamp": t_future,
-    })
-
-    for j in range(feature_dim):
-        future_df[f"feat_{j}"] = future_x[:, j]
-
-    return context_df, future_df
+    return context_df
 

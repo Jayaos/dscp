@@ -1,0 +1,35 @@
+device: 0
+
+data:
+  data_path: "./data/sapflux-solo3-large/lstm/lstm_sapflux-solo3-large_data.pkl"
+  train_ratio: 0.6
+  valid_ratio: 0.2
+  normalize: True
+  strided_features: "xry"
+
+model:
+  rnn_type: "lstm"
+  shared_dim: &shared_dim 16
+  dim_model: *shared_dim
+  num_layers: 2
+  dropout: 0.
+  use_current_feature: False
+  iqn_hidden_dim: *shared_dim
+  cos_emb_dim: *shared_dim
+  num_taus: 64
+  target_quantiles:
+    - [0.95, 0.05]
+  prediction_step: 1
+  window_size: 100
+
+training:
+  batch_size: 64
+  learning_rate: 0.001
+  epochs: 50
+  early_stop: 3
+
+plotting:
+  plotting: True
+  plotting_seq_len: 200
+
+saving_dir: "./results/iqn_rnn_lstm_sapflux_solo3_large/"

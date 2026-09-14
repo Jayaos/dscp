@@ -241,6 +241,52 @@ def chronological_split_fixed_test(arrays, valid_size, test_size):
     return train, valid, test
 
 
+def chronological_split_fixed_calibration_test(arrays, valid_size, calibration_size, test_size):
+    """Split aligned arrays as train | validation | calibration | test.
+
+    Validation, calibration, and test have fixed target counts so that a
+    history window only reduces the number of training examples.
+    """
+    if not isinstance(arrays, (list, tuple)) or len(arrays) == 0:
+        raise ValueError("`arrays` must be a non-empty list or tuple.")
+
+    arrays = [np.asarray(a) for a in arrays]
+    N = arrays[0].shape[0]
+    for i, a in enumerate(arrays[1:], start=1):
+        if a.shape[0] != N:
+            raise ValueError(
+                "All arrays must have the same length along axis=0. "
+                f"arrays[0]={N}, arrays[{i}]={a.shape[0]}"
+            )
+
+    n_va = int(valid_size)
+    n_ca = int(calibration_size)
+    n_te = int(test_size)
+    n_tr = N - n_va - n_ca - n_te
+    if n_tr <= 0 or n_va <= 0 or n_ca <= 0 or n_te <= 0:
+        raise ValueError(
+            "Empty split: "
+            f"N={N}, train={n_tr}, valid={n_va}, "
+            f"calibration={n_ca}, test={n_te}"
+        )
+
+    def take(a, sl):
+        idx = [slice(None)] * a.ndim
+        idx[0] = sl
+        return a[tuple(idx)]
+
+    valid_start = n_tr
+    calibration_start = valid_start + n_va
+    test_start = calibration_start + n_ca
+    split_slices = (
+        slice(0, valid_start),
+        slice(valid_start, calibration_start),
+        slice(calibration_start, test_start),
+        slice(test_start, None),
+    )
+    return tuple(tuple(take(a, sl) for a in arrays) for sl in split_slices)
+
+
 def normalize_array(X):
     """
     standardize array

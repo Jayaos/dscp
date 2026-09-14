@@ -1,0 +1,29 @@
+data:
+  data_path: "./data/sapflux-solo3-large/lstm/lstm_sapflux-solo3-large_data.pkl"
+  train_ratio: 0.5
+  valid_ratio: 0.16
+  normalize: True
+
+model:
+  target_quantiles:
+    - [0.05, 0.95]
+  prediction_step: 1
+  past_window: 5
+  history_window: null
+  kernel: "epanechnikov"
+  bandwidth: null
+  bandwidth_range: [1.0, 10.0, 100]
+  use_beta_search: False
+  bins: 5
+  weigh_residuals: False
+  residual_weight_decay: 0.995
+  max_training_blocks: 2000
+  min_training_blocks: 2
+  use_adaptive_window: False
+  update_with_test: True
+
+plotting:
+  plotting: True
+  plotting_seq_len: 200
+
+saving_dir: "./results/kowcpi_lstm_sapflux_solo3_large/"

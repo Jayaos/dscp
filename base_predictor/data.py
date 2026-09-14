@@ -4,6 +4,23 @@ import pandas as pd
 from pathlib import Path
 
 
+SAPFLUX_SOLO3_LARGE = "sapflux-solo3-large"
+SAPFLUX_FEATURE_COLUMNS = (
+    "ta",
+    "rh",
+    "sw_in",
+    "ppfd_in",
+    "ws",
+    "precip",
+    "swc_shallow",
+    "swc_deep",
+    "ext_rad",
+    "vpd",
+)
+SAPFLUX_LARGE_MIN_LENGTH = 15_000
+SAPFLUX_LARGE_MAX_LENGTH = 20_000
+
+
 class BasePredictorData:
     """
     Data class to load data for base predictor
@@ -25,6 +42,86 @@ class BasePredictorData:
 
         elif data_type in ["toy"]:
             self._load_toy_data(data_dir)
+
+        elif data_type == SAPFLUX_SOLO3_LARGE:
+            self._load_sapflux_solo3_large_data(data_dir)
+
+        else:
+            raise ValueError(f"Unsupported data type: {data_type}")
+
+    def _load_sapflux_solo3_large_data(self, data_dir):
+        data_path = Path(data_dir)
+        csv_paths = sorted(data_path.glob("*.csv")) if data_path.is_dir() else []
+        if not csv_paths:
+            data_path = data_path / "solo_3"
+            csv_paths = sorted(data_path.glob("*.csv")) if data_path.is_dir() else []
+
+        if not data_path.is_dir():
+            raise FileNotFoundError(
+                "Sapflow data directory not found. Expected either the prepared "
+                f"directory or its solo_3 child: {data_path}"
+            )
+
+        if not csv_paths:
+            raise FileNotFoundError(f"No Sapflow CSV files found in {data_path}.")
+
+        data = {}
+        for csv_path in csv_paths:
+            raw_data = pd.read_csv(csv_path)
+            if not (
+                SAPFLUX_LARGE_MIN_LENGTH
+                <= len(raw_data)
+                <= SAPFLUX_LARGE_MAX_LENGTH
+            ):
+                continue
+
+            if raw_data.columns[0] != "solar_TIMESTAMP":
+                raise ValueError(
+                    "Sapflow CSV must start with a 'solar_TIMESTAMP' column: "
+                    f"{csv_path}"
+                )
+
+            feature_columns = tuple(raw_data.columns[2:])
+            if feature_columns != SAPFLUX_FEATURE_COLUMNS:
+                raise ValueError(
+                    "Unexpected Sapflow feature columns in "
+                    f"{csv_path}: {feature_columns}"
+                )
+
+            timestamps = pd.to_datetime(
+                raw_data["solar_TIMESTAMP"], errors="coerce"
+            )
+            if timestamps.isna().any():
+                raise ValueError(f"Invalid Sapflow timestamp in {csv_path}.")
+            if (
+                timestamps.duplicated().any()
+                or not timestamps.is_monotonic_increasing
+            ):
+                raise ValueError(
+                    "Sapflow timestamps must be unique and increasing in "
+                    f"{csv_path}."
+                )
+
+            x = raw_data.loc[:, SAPFLUX_FEATURE_COLUMNS].to_numpy(
+                dtype=np.float32
+            )
+            y = raw_data.iloc[:, 1].to_numpy(dtype=np.float32)
+            if not np.isfinite(x).all() or not np.isfinite(y).all():
+                raise ValueError(f"Sapflow X and y must be finite in {csv_path}.")
+
+            data[csv_path.stem] = {
+                "x": x,
+                "y": y,
+            }
+
+        if not data:
+            raise ValueError(
+                "No Sapflow series satisfied the inclusive "
+                f"{SAPFLUX_LARGE_MIN_LENGTH}-{SAPFLUX_LARGE_MAX_LENGTH} row range "
+                f"in {data_path}."
+            )
+
+        self.data = data
 
     def _load_toy_data(self, data_dir):
 

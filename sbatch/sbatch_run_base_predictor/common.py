@@ -3,7 +3,14 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DATA_TYPE_CHOICES = ["air-10", "air-25", "nsdb-60m", "nsdb-30m", "toy"]
+DATA_TYPE_CHOICES = [
+    "air-10",
+    "air-25",
+    "nsdb-60m",
+    "nsdb-30m",
+    "sapflux-solo3-large",
+    "toy",
+]
 
 
 def default_data_dir(data_type: str) -> Path:
@@ -12,6 +19,15 @@ def default_data_dir(data_type: str) -> Path:
 
     if data_type in {"nsdb-60m", "nsdb-30m"}:
         return REPO_ROOT / "data" / "nsdb_2018-2020"
+
+    if data_type == "sapflux-solo3-large":
+        return (
+            REPO_ROOT
+            / "data"
+            / "sapflux"
+            / "0.1.5"
+            / "prepared"
+        )
 
     if data_type == "toy":
         return REPO_ROOT / "example"

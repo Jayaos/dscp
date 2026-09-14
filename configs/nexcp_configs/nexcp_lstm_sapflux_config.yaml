@@ -1,0 +1,15 @@
+data:
+  data_path: "./data/sapflux-solo3-large/lstm/lstm_sapflux-solo3-large_data.pkl"
+  calibration_ratio: 0.66
+
+model:
+  rho: 0.99
+  max_past: 200
+  target_quantiles:
+    - [0.05, 0.95]
+
+plotting:
+  plotting: True
+  plotting_seq_len: 200
+
+saving_dir: "./results/nexcp_lstm_sapflux_solo3_large/"
