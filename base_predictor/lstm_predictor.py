@@ -125,7 +125,7 @@ class LSTMPredictor:
                 self.window_length,
             )
 
-            self.data_processed[key].update({"normalized_train_x" : normalized_train_x,
+            item.update({"normalized_train_x" : normalized_train_x,
                                              "normalized_heldout_x" : normalized_heldout_x,
                                              "normalized_train_y" : normalized_train_y,
                                              "normalized_heldout_y" : normalized_heldout_y,
