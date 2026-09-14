@@ -23,6 +23,16 @@ module load anaconda3
 conda activate dscp
 
 python -u sbatch/sbatch_run_plotting/run_lr_plotting.py \
-  --datasets air-10 nsdb-60m sapflux-solo3-large \
+  --datasets air-10 \
   --plot-len 1000 \
-  --n-seqs 2
+  --all-series
+
+python -u sbatch/sbatch_run_plotting/run_lr_plotting.py \
+  --datasets nsdb-60m \
+  --plot-len 1000 \
+  --n-seqs 10
+
+python -u sbatch/sbatch_run_plotting/run_lr_plotting.py \
+  --datasets sapflux-solo3-large \
+  --plot-len 1000 \
+  --all-series
