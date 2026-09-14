@@ -1,6 +1,8 @@
 notebooks/
 data/
-*.pyc
 misc/
 HopCPT/
 KOWCPI_Codes/
+
+__pycache__/
+*.py[cod]
