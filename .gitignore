@@ -6,3 +6,6 @@ KOWCPI_Codes/
 
 __pycache__/
 *.py[cod]
+
+.ipynb_checkpoints/
+*.pdf
