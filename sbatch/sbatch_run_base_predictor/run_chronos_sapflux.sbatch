@@ -6,7 +6,7 @@
 #SBATCH --gres=gpu:1 -C V100
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH -t1440
+#SBATCH -t60
 #SBATCH -qinferno
 #SBATCH -o Report-%j.out
 #SBATCH --mail-type=ALL
