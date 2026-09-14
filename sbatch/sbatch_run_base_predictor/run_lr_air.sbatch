@@ -1,6 +1,9 @@
 #!/bin/bash
 #SBATCH -J lr_air
 #SBATCH --account=gts-yxie77-paid
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH -t120
 #SBATCH -qinferno
