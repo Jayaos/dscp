@@ -1,13 +1,13 @@
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 
 import torch
 
-from .iqn import ImplicitQuantileNetwork
+from .iqn import build_quantile_head
 
 
 class IQNRNN(torch.nn.Module):
     """
-    RNN encoder with an IQN head for quantile prediction.
+    RNN encoder with a selectable conditional-quantile prediction head.
 
     Input:
         src: (batch_size, window_size, dim_feature)
@@ -28,6 +28,10 @@ class IQNRNN(torch.nn.Module):
         n_cos_embedding: int = 64,
         dropout: float = 0.1,
         batch_first: bool = True,
+        prediction_head: str = "cosine_embedding",
+        monotonic_num_layers: int = 1,
+        monotonic_hidden_dims: Optional[Sequence[int]] = None,
+        monotonic_activation: str = "tanh",
     ):
         super().__init__()
         self.rnn_type = rnn_type.lower()
@@ -48,12 +52,17 @@ class IQNRNN(torch.nn.Module):
         )
 
         self.input_linear = torch.nn.Linear(dim_feature, dim_model)
-        self.iqn = ImplicitQuantileNetwork(
+        self.iqn = build_quantile_head(
+            prediction_head=prediction_head,
             input_dim=dim_model + current_feature_dim,
             hidden_dim=iqn_hidden_dim,
             n_cos_embedding=n_cos_embedding,
             dropout=dropout,
+            monotonic_num_layers=monotonic_num_layers,
+            monotonic_hidden_dims=monotonic_hidden_dims,
+            monotonic_activation=monotonic_activation,
         )
+        self.prediction_head = self.iqn.head_type
 
     def forward(
         self,

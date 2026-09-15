@@ -10,6 +10,7 @@ data:
 
 
 model:
+  head_type: nondecreasing # choices: nondecreasing, independent
   rnn_type: "lstm"
   dim_model: 32
   num_layers: 2

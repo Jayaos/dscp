@@ -1,4 +1,5 @@
 grid:
+  # model.prediction_head: [partially_monotonic, cosine_embedding] # uncomment to compare both
   model.shared_dim: [16, 32]
   model.num_layers: [2, 4]
   model.use_current_feature: [True, False]
@@ -10,3 +11,4 @@ grid:
 tuning:
   num_sequences: 2
   delta_threshold: -0.01
+  model_selection_valid_ratio: 0.2

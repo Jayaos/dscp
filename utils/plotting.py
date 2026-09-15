@@ -3,6 +3,39 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+def _resolve_logged_interval_endpoints(result):
+    """Return target-scale endpoints from current or legacy result schemas."""
+    lower = np.asarray(result["lower_interval"], dtype=float)
+    upper = np.asarray(result["upper_interval"], dtype=float)
+
+    has_response_scale_endpoints = (
+        "lower_residual_quantile" in result
+        and "upper_residual_quantile" in result
+    )
+    if has_response_scale_endpoints:
+        return lower, upper
+
+    # Backward compatibility for old DSCP logs and baseline logs, where the
+    # interval fields contain residual offsets rather than final endpoints.
+    predictions = np.asarray(result["target_predictions"], dtype=float)
+    if "train_residuals_mu" in result and "train_residuals_std" in result:
+        lower = (
+            lower * result["train_residuals_std"]
+            + result["train_residuals_mu"]
+            + predictions
+        )
+        upper = (
+            upper * result["train_residuals_std"]
+            + result["train_residuals_mu"]
+            + predictions
+        )
+    else:
+        lower = lower + predictions
+        upper = upper + predictions
+
+    return lower, upper
+
+
 def plot_darts_predictions(prediction_data, plot_len, n_seqs, save_dir=None):
 
     if save_dir is not None:
@@ -115,21 +148,12 @@ def plot_cp_prediction_intervals(log, target_quantiles, plotting_seq_length, sav
             tuple_quantile_pair = tuple(quantile_pair)
             result = evaluation_results[tuple_quantile_pair]
 
-            lower = np.asarray(result["lower_interval"], dtype=float)
-            upper = np.asarray(result["upper_interval"], dtype=float)
             y = np.asarray(result["target_y"], dtype=float)
             hat_y = np.asarray(result["target_predictions"], dtype=float)
+            lower_value, upper_value = _resolve_logged_interval_endpoints(result)
 
             seq_len = min(plotting_seq_length, len(y))
             x = np.arange(len(y))
-
-            if "train_residuals_mu" in result and "train_residuals_std" in result:
-                # data was normalize, therefore denormalize data before plotting
-                lower_value = lower * result["train_residuals_std"] + result["train_residuals_mu"] + hat_y
-                upper_value = upper * result["train_residuals_std"] + result["train_residuals_mu"] + hat_y
-            else:
-                lower_value = lower + hat_y
-                upper_value = upper + hat_y
 
             fig, axes = plt.subplots(1, 2, figsize=(16, 4), sharey=True)
 

@@ -1,5 +1,72 @@
 # DSCP
 
+## QR-CP prediction heads
+
+RNN and Transformer QR-CP support two choices through `model.head_type`:
+
+| Value | Quantile prediction |
+| --- | --- |
+| `nondecreasing` (default) | Predicts the lowest quantile directly and adds cumulative softplus increments for higher quantiles, guaranteeing nondecreasing outputs. |
+| `independent` | Each quantile head directly predicts its residual quantile, `q_tau = g_tau(h)`. Quantile crossing is possible. |
+
+To select independent heads, change this field in your QR-CP YAML:
+
+```yaml
+model:
+  head_type: independent
+```
+
+Both choices use the same shared encoder, quantile loss, and sorted set of
+quantile levels. Independent predictions and interval endpoints are not sorted
+after prediction. Omitting `head_type` preserves the existing nondecreasing
+method. The QR-CP pipeline currently supports `model.prediction_step: 1`.
+
+The tuning runner inherits the choice from the base configuration. To compare
+both choices in a grid search, uncomment `model.head_type` in the QR-CP tuning
+YAML. Use a different `saving_dir` for each ordinary run when comparing the
+methods so that model checkpoints and results are retained separately.
+
+## IQN-CP prediction heads
+
+RNN and Transformer IQN-CP support two choices through
+`model.prediction_head`:
+
+| Value | Quantile prediction |
+| --- | --- |
+| `partially_monotonic` | Implements the partially monotonic head. The quantile level is supplied directly, all weights along the quantile-dependent path are positive softplus transforms, and inference evaluates `g(h, tau)` directly. Quantiles are nondecreasing in `tau` by construction. |
+| `cosine_embedding` (legacy default) | Preserves the original cosine quantile embedding and sampling-based rearrangement behavior, including compatibility with existing configurations and checkpoints. The raw embedded head itself is not constrained to be monotonic. |
+
+The checked-in IQN-CP experiment configurations explicitly select the
+partially monotonic design. To switch back to the legacy embedding design,
+change only the selector:
+
+```yaml
+model:
+  prediction_head: partially_monotonic # or cosine_embedding
+  iqn_hidden_dim: 32
+  monotonic_num_layers: 2
+  monotonic_activation: tanh
+```
+
+For the monotonic head, `iqn_hidden_dim` is the common width of its hidden
+layers and `monotonic_num_layers` is K. An optional
+`monotonic_hidden_dims: [32, 16, 8]` overrides both settings when different
+layer widths are wanted. Supported monotonic activations are `tanh`,
+`sigmoid`, and `softplus`. The `cos_emb_dim` setting is used only by the
+legacy cosine head.
+
+The two head choices have different state-dictionary layouts, so a checkpoint
+must be reconstructed with the complete matching model configuration. Each
+ordinary run now writes `resolved_config.yaml` beside its checkpoints, and the
+checked-in monotonic experiments use head-specific `saving_dir` values to
+avoid overwriting legacy cosine-head results. Their output paths interpolate
+`model.prediction_head`, so changing the selector also changes the ordinary
+run directory. For separate tuning invocations, likewise use a distinct
+`--save-dir`; a single grid run already keeps its head choices in distinct
+trials. Configurations that omit the selector retain the legacy
+`cosine_embedding` behavior. IQN-CP currently supports
+`model.prediction_step: 1`.
+
 ## Data split strategy
 
 ### Two-stage chronological split
@@ -123,9 +190,10 @@ be used for this dataset.
 ### Common CP split construction
 
 QR-CP, IQN-CP, Local-CP, and SPCI call
-[`ConformalPredictionData.prepare_quantile_regression_datasets`](dscp/data.py#L19-L155).
-QR-CP, IQN-CP, and SPCI use its legacy three-way split. For a saved held-out
-sequence of length `L`, this computes
+[`ConformalPredictionData.prepare_quantile_regression_datasets`](dscp/data.py).
+The ordinary QR-CP, IQN-CP, and SPCI runners use its legacy three-way split;
+the nested QR-CP, IQN-CP, and Local-CP tuning variants are described below.
+For a saved held-out sequence of length `L`, the legacy split computes
 
 ```python
 n_train = floor(L * train_ratio)
@@ -133,8 +201,8 @@ n_valid = ceil(L * valid_ratio)
 n_test = L - n_train - n_valid
 ```
 
-Local-CP supplies all four ratios and uses cumulative chronological
-boundaries:
+The ordinary Local-CP runner supplies all four ratios and uses cumulative
+chronological boundaries:
 
 ```python
 train_end = floor(L * train_ratio)
@@ -191,9 +259,9 @@ to the Chronos base predictor.
 
 ### QR-CP, IQN-CP, and Local-CP data usage
 
-The following table describes how the checked-in air-data runners use the
-base-predictor held-out suffix. Percentages are approximate because split
-boundaries are integer-valued.
+The following table describes how the checked-in ordinary (non-tuning)
+air-data runners use the base-predictor held-out suffix. Percentages are
+approximate because split boundaries are integer-valued.
 
 | Method | Training | Validation | Calibration | Test |
 | --- | --- | --- | --- | --- |
@@ -256,16 +324,60 @@ the next block origin, observations from the preceding block have become
 historical and enter the new context window. Existing Chronos artifacts must
 be regenerated to adopt this past-only covariate protocol.
 
-### Hyperparameter-tuning split caution
+### Hyperparameter-tuning protocol
 
-Where applicable, the ordinary method runners use validation for checkpoint
-selection and test for reporting as described above. The current grid-search
-runners under [`sbatch_run_tuning/`](sbatch_run_tuning/) additionally evaluate every
-hyperparameter trial on the nominal test portion, filter trials by test
-coverage, and rank them by test Winkler score. Their reported test results are
-therefore tuning results, not an untouched final evaluation.
+QR-CP, IQN-CP, and Local-CP grid search use nested chronological splits so
+the final test suffix is not used for hyperparameter selection. The setting
+`tuning.model_selection_valid_ratio: 0.2` assigns the later 20% of the
+nominal training prefix to checkpoint selection. The earlier 80% fits the
+model. QR-CP and IQN-CP then use the nominal validation partition to evaluate
+and rank trials.
 
-For a clean final comparison, choose hyperparameters without the final test
-suffix, freeze the chosen configuration, and evaluate that suffix once. All
-methods being compared should also use the same base-predictor artifact and
-the same CP split boundaries.
+For the checked-in air configurations, the allocations below are percentages
+of the saved base-predictor held-out suffix. They are approximate only when
+integer rounding is required.
+
+| Tuning role | QR-CP (`50 / 16 / 34` outer split) | IQN-CP (`60 / 20 / 20` outer split) | Use |
+| --- | --- | --- | --- |
+| Inner model fit | First 40% (80% of the nominal 50% training prefix) | First 48% (80% of the nominal 60% training prefix) | Optimizes model parameters. When normalization is enabled, only this prefix determines its statistics. |
+| Inner checkpoint validation | Next 10% (later 20% of nominal training) | Next 12% (later 20% of nominal training) | Selects the checkpoint and controls early stopping; it does not update parameters. |
+| Tuning evaluation | Next 16% (the nominal validation partition) | Next 20% (the nominal validation partition) | Filters trials by coverage and ranks eligible trials by Winkler score. |
+| Final test | Final 34% | Final 20% | Remains untouched: no test dataset is requested or consumed by trial training, checkpoint selection, evaluation, filtering, or ranking. |
+
+Local-CP must additionally keep calibration separate from fitting,
+checkpoint selection, and tuning evaluation. Its ordinary outer split remains
+`0.60 / 0.10 / 0.10 / 0.20`, but the tuner assigns those regions as follows:
+
+| Tuning role | Local-CP allocation | Use |
+| --- | --- | --- |
+| Inner model fit | First 48% (80% of the outer 60% training prefix) | Optimizes the residual predictor. When normalization is enabled, only this prefix determines its statistics. |
+| Inner checkpoint validation | Next 12% (later 20% of the outer training prefix) | Selects the checkpoint and controls early stopping; it does not update parameters. |
+| Tuning calibration | Next 10% (the ordinary runner's validation region) | Initializes Local-CP after the selected model is frozen. `model.calibration_size` still caps the latest eligible calibration points retained in the rolling pool. |
+| Tuning evaluation | Next 10% (the ordinary runner's calibration region) | Evaluates coverage and Winkler score, updates the rolling pool only after scoring each point, and filters/ranks trials. |
+| Final test | Final 20% | Remains unavailable to the tuner: no test dataset is constructed, requested, or consumed. |
+
+For a length-100 held-out sequence, before accounting for the history window,
+the exact Local-CP tuning boundaries are therefore
+`[0,48) / [48,60) / [60,70) / [70,80) / [80,100)`. This differs deliberately
+from the ordinary Local-CP runner, which uses
+`[0,60) / [60,70) / [70,80) / [80,100)` for fit, checkpoint validation,
+calibration, and final test.
+
+With a history window of length `W`, the first `W` observations in the inner
+fit prefix provide context and are not prediction targets. Context at a later
+boundary may include already observed values from the preceding partition,
+but never the current or a future target. The nested tuning split currently
+supports `model.prediction_step=1`.
+
+After choosing hyperparameters, copy them into the corresponding ordinary
+QR-CP, IQN-CP, or Local-CP configuration and run the non-tuning runner. That
+runner may then refit using its normal training/validation/calibration
+protocol and evaluate the previously untouched final test suffix once.
+Grid-search output itself is a validation result, not the final test result.
+
+This nested protocol currently applies to the QR-CP, IQN-CP, and Local-CP
+tuning runners. Other tuners under
+[`sbatch/sbatch_run_tuning/`](sbatch/sbatch_run_tuning/) may still evaluate or
+rank candidates on their test partition and should not be assumed to provide
+an untouched final evaluation. All methods in a final comparison should use
+the same base-predictor artifact and compatible CP split boundaries.

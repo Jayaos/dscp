@@ -61,19 +61,68 @@ def _build_model(config, dim_feature: int, dim_x: int):
     return model, loss_fn, model_type, use_current_feature
 
 
-def _run_single_trial(config, sequence_item, sequence_data):
+def _model_selection_valid_ratio(config) -> float:
+    return float(config.tuning.get("model_selection_valid_ratio", 0.2))
+
+
+def _normalization_params(config, sequence_data):
+    if not bool(config.data.normalize):
+        return None
+    return (
+        sequence_data["train_residuals_mu"],
+        sequence_data["train_residuals_std"],
+    )
+
+
+def _prepared_data_cache_key(config):
+    return (
+        int(config.model.window_size),
+        int(config.model.prediction_step),
+        float(config.data.train_ratio),
+        float(config.data.valid_ratio),
+        float(config.data.calibration_ratio),
+        float(config.data.test_ratio),
+        bool(config.data.normalize),
+        _model_selection_valid_ratio(config),
+    )
+
+
+def _prepare_trial_data(raw_data, config):
+    cpd = ConformalPredictionData(copy.deepcopy(raw_data))
+    cpd.prepare_quantile_regression_datasets(
+        config.model.window_size,
+        config.model.prediction_step,
+        config.data.train_ratio,
+        config.data.valid_ratio,
+        normalize=config.data.normalize,
+        calibration_ratio=config.data.calibration_ratio,
+        test_ratio=config.data.test_ratio,
+        model_selection_valid_ratio=_model_selection_valid_ratio(config),
+    )
+    return cpd
+
+
+def _run_single_trial(config, sequence_item, normalization_params):
     device = resolve_device(config.device)
     sorted_quantiles, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
     delta_threshold = float(config.tuning.get("delta_threshold", 0.0))
 
     train_dataset = sequence_item["train_dataset"]
-    valid_dataset = sequence_item["valid_dataset"]
+    model_selection_valid_dataset = sequence_item["model_selection_valid_dataset"]
     calibration_dataset = sequence_item["calibration_dataset"]
-    test_dataset = sequence_item["test_dataset"]
+    tuning_evaluation_dataset = sequence_item["tuning_evaluation_dataset"]
 
     train_dataloader = DataLoader(train_dataset, batch_size=config.training.batch_size, shuffle=True)
-    valid_dataloader = DataLoader(valid_dataset, batch_size=config.training.batch_size, shuffle=False)
-    test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+    model_selection_valid_dataloader = DataLoader(
+        model_selection_valid_dataset,
+        batch_size=config.training.batch_size,
+        shuffle=False,
+    )
+    tuning_evaluation_dataloader = DataLoader(
+        tuning_evaluation_dataset,
+        batch_size=1,
+        shuffle=False,
+    )
 
     dim_x = train_dataset.strided_x.shape[-1]
     if config.data.strided_features == "xry":
@@ -90,7 +139,7 @@ def _run_single_trial(config, sequence_item, sequence_data):
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.training.learning_rate)
 
     train_loss = []
-    valid_loss = []
+    model_selection_valid_loss = []
     best_loss = np.inf
     best_epoch = 0
     best_model = copy.deepcopy(model.state_dict())
@@ -121,7 +170,7 @@ def _run_single_trial(config, sequence_item, sequence_data):
 
         model.eval()
         loss_sum = 0.0
-        for strided_x, strided_residual, strided_y, target_x, target_residual, _, _ in valid_dataloader:
+        for strided_x, strided_residual, strided_y, target_x, target_residual, _, _ in model_selection_valid_dataloader:
             strided_feature = generate_strided_feature(
                 strided_x,
                 strided_residual,
@@ -137,8 +186,8 @@ def _run_single_trial(config, sequence_item, sequence_data):
                     loss = loss_fn(model, strided_feature, target_residual)
             loss_sum += loss.item()
 
-        epoch_valid_loss = loss_sum / len(valid_dataloader)
-        valid_loss.append(float(epoch_valid_loss))
+        epoch_valid_loss = loss_sum / len(model_selection_valid_dataloader)
+        model_selection_valid_loss.append(float(epoch_valid_loss))
 
         if epoch_valid_loss < best_loss:
             best_loss = epoch_valid_loss
@@ -158,9 +207,8 @@ def _run_single_trial(config, sequence_item, sequence_data):
         for confidence_pair in config.model.target_quantiles
     }
 
-    if config.data.normalize:
-        residual_mu = sequence_data["train_residuals_mu"]
-        residual_std = sequence_data["train_residuals_std"]
+    if normalization_params is not None:
+        residual_mu, residual_std = normalization_params
 
     calibration_dataloader = DataLoader(
         calibration_dataset,
@@ -191,7 +239,7 @@ def _run_single_trial(config, sequence_item, sequence_data):
     calibration_repr = calibration_repr[-calibration_pool_size:].detach().cpu()
     calibration_residual = calibration_residual[-calibration_pool_size:].detach().cpu()
 
-    for strided_x, strided_residual, strided_y, target_x, target_residual, target_y, target_predictions in test_dataloader:
+    for strided_x, strided_residual, strided_y, target_x, target_residual, target_y, target_predictions in tuning_evaluation_dataloader:
         with torch.no_grad():
             strided_feature = generate_strided_feature(
                 strided_x,
@@ -226,7 +274,11 @@ def _run_single_trial(config, sequence_item, sequence_data):
             lo = pred_quantile_values[lo_idx, :]
             evaluation_results[pair_key]["coverage"].extend(compute_coverage(hi, lo, target_residual))
             evaluation_results[pair_key]["interval_width"].extend(
-                compute_interval_width(hi, lo, normalized_std=residual_std if config.data.normalize else None)
+                compute_interval_width(
+                    hi,
+                    lo,
+                    normalized_std=residual_std if normalization_params is not None else None,
+                )
             )
             evaluation_results[pair_key]["winkler_score"].extend(
                 compute_winkler_score(
@@ -235,12 +287,14 @@ def _run_single_trial(config, sequence_item, sequence_data):
                     target_y,
                     target_predictions,
                     pair_key,
-                    normalized_params=(residual_mu, residual_std) if config.data.normalize else None,
+                    normalized_params=(residual_mu, residual_std)
+                    if normalization_params is not None
+                    else None,
                 )
             )
 
-        # Update only after scoring the current test point, so its label cannot
-        # influence its own interval. The FIFO pool remains a fixed size.
+        # Update only after scoring the current tuning-evaluation point, so its
+        # label cannot influence its own interval. The FIFO pool remains fixed.
         calibration_repr = torch.vstack(
             [calibration_repr, query_repr.detach().cpu()]
         )[-calibration_pool_size:]
@@ -257,9 +311,34 @@ def _run_single_trial(config, sequence_item, sequence_data):
     return {
         "model_type": model_type,
         "train_loss": train_loss,
-        "valid_loss": valid_loss,
+        "model_fit_train_loss": train_loss,
+        "model_selection_valid_loss": model_selection_valid_loss,
+        # Backward-compatible aliases consumed by shared aggregation/reporting.
+        "valid_loss": model_selection_valid_loss,
+        "best_model_selection_valid_loss": float(best_loss),
         "best_valid_loss": float(best_loss),
         "best_epoch": best_epoch,
+        "calibration_split": "nominal_validation",
+        "evaluation_split": "nominal_calibration",
+        "final_test_evaluated": False,
+        "num_train_samples": len(train_dataset),
+        "num_model_selection_valid_samples": len(model_selection_valid_dataset),
+        "num_calibration_samples": len(calibration_dataset),
+        "num_initial_calibration_pool_samples": calibration_pool_size,
+        "num_tuning_evaluation_samples": len(tuning_evaluation_dataset),
+        "sample_counts": {
+            "train": len(train_dataset),
+            "model_selection_valid": len(model_selection_valid_dataset),
+            "calibration": len(calibration_dataset),
+            "initial_calibration_pool": calibration_pool_size,
+            "tuning_evaluation": len(tuning_evaluation_dataset),
+        },
+        "dataset_roles": {
+            "model_fit": "train_dataset",
+            "checkpoint_selection": "model_selection_valid_dataset",
+            "conformal_calibration": "calibration_dataset",
+            "hyperparameter_evaluation": "tuning_evaluation_dataset",
+        },
         "pair_metrics": pair_metrics,
         "selection_score": selection_score,
         "positive_delta_coverage": positive_delta_coverage,
@@ -279,47 +358,44 @@ def main():
     delta_threshold = resolve_delta_threshold(tuning_cfg)
     base_config.tuning = dict(tuning_cfg)
     sequence_keys = choose_sequence_keys(data, args.sequence_key, args.sequence_index, num_sequences)
+    selected_data = {sequence_key: data[sequence_key] for sequence_key in sequence_keys}
 
     trials = []
     prepared_data_cache = {}
     for trial_index, (trial_config, grid_values) in enumerate(iter_grid_configs(base_config, grid), start=1):
         print(f"[local_cp] starting trial {trial_index} with grid_values={grid_values}", flush=True)
         set_global_seed(args.seed + trial_index)
-        data_cache_key = (
-            int(trial_config.model.window_size),
-            int(trial_config.model.prediction_step),
-            float(trial_config.data.train_ratio),
-            float(trial_config.data.valid_ratio),
-            float(trial_config.data.calibration_ratio),
-            float(trial_config.data.test_ratio),
-            bool(trial_config.data.normalize),
-        )
+        data_cache_key = _prepared_data_cache_key(trial_config)
         trial_cpd = prepared_data_cache.get(data_cache_key)
         if trial_cpd is None:
-            trial_cpd = ConformalPredictionData(copy.deepcopy(data))
-            trial_cpd.prepare_quantile_regression_datasets(
-                trial_config.model.window_size,
-                trial_config.model.prediction_step,
-                trial_config.data.train_ratio,
-                trial_config.data.valid_ratio,
-                normalize=trial_config.data.normalize,
-                calibration_ratio=trial_config.data.calibration_ratio,
-                test_ratio=trial_config.data.test_ratio,
-            )
+            trial_cpd = _prepare_trial_data(selected_data, trial_config)
             prepared_data_cache[data_cache_key] = trial_cpd
         sequence_results = {
             sequence_key: _run_single_trial(
                 trial_config,
                 trial_cpd.dataset[sequence_key],
-                trial_cpd.data[sequence_key],
+                _normalization_params(trial_config, trial_cpd.data[sequence_key]),
             )
             for sequence_key in sequence_keys
         }
         result = aggregate_sequence_results(sequence_results, trial_config.model.target_quantiles)
+        result["mean_best_model_selection_valid_loss"] = result["mean_best_valid_loss"]
+        result["calibration_split"] = "nominal_validation"
+        result["evaluation_split"] = "nominal_calibration"
+        result["final_test_evaluated"] = False
+        result["dataset_roles"] = {
+            "model_fit": "train_dataset",
+            "checkpoint_selection": "model_selection_valid_dataset",
+            "conformal_calibration": "calibration_dataset",
+            "hyperparameter_evaluation": "tuning_evaluation_dataset",
+        }
         record = {
             "trial_index": trial_index,
             "sequence_keys": sequence_keys,
             "grid_values": grid_values,
+            "calibration_split": "nominal_validation",
+            "evaluation_split": "nominal_calibration",
+            "final_test_evaluated": False,
             "result": result,
             "resolved_config": plain_config(trial_config),
         }
@@ -340,6 +416,23 @@ def main():
         "num_trials": len(trials),
         "num_positive_delta_coverage_trials": len(positive_trials),
         "top_k": args.top_k,
+        "calibration_split": "nominal_validation",
+        "evaluation_split": "nominal_calibration",
+        "final_test_evaluated": False,
+        "tuning_protocol": {
+            "model_fit_dataset": "train_dataset",
+            "checkpoint_selection_dataset": "model_selection_valid_dataset",
+            "conformal_calibration_dataset": "calibration_dataset",
+            "hyperparameter_evaluation_dataset": "tuning_evaluation_dataset",
+            "model_fit_split": "early_nominal_train",
+            "checkpoint_selection_split": "late_nominal_train",
+            "calibration_split": "nominal_validation",
+            "evaluation_split": "nominal_calibration",
+            "model_selection_valid_ratio": _model_selection_valid_ratio(base_config),
+            "final_test_split": "nominal_test",
+            "final_test_exposed": False,
+            "final_test_evaluated": False,
+        },
         "top_trials": top_trials,
         "all_trials": trials,
     }

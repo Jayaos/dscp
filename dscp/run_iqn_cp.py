@@ -6,18 +6,74 @@ import numpy as np
 from tqdm import tqdm
 from dscp.models.iqn_transformer import IQNTransformer
 from dscp.models.iqn_rnn import IQNRNN
+from dscp.models.iqn import build_iqn_optimizer
 from dscp.data import ConformalPredictionData
 from dscp.loss import compute_loss_iqn_transformer, compute_loss_iqn_rnn
 from utils.utils import load_data, save_data, read_setup, generate_strided_feature, get_interval_quantile_indices
-from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, summarize_evaluation_results
+from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, construct_interval_endpoints, summarize_evaluation_results
 from utils.plotting import plot_cp_prediction_intervals
 from torch.utils.data import DataLoader
+
+
+def _prediction_head_kwargs(model_config):
+    """Resolve prediction-head options while preserving legacy configurations."""
+    return {
+        "prediction_head": model_config.get("prediction_head", "cosine_embedding"),
+        "monotonic_num_layers": model_config.get("monotonic_num_layers", 1),
+        "monotonic_hidden_dims": model_config.get("monotonic_hidden_dims"),
+        "monotonic_activation": model_config.get(
+            "monotonic_activation",
+            "tanh",
+        ),
+    }
+
+
+def _materialize_prediction_head_selector(model_config):
+    """Make the effective legacy default explicit in saved configurations."""
+    model_config.prediction_head = str(
+        model_config.get("prediction_head", "cosine_embedding")
+    ).strip().lower()
+
+
+def _prediction_head_dimensions(model_config):
+    """Resolve only dimensions used by the selected head."""
+    prediction_head = model_config.get("prediction_head", "cosine_embedding")
+    if prediction_head == "cosine_embedding":
+        hidden_value = model_config.get("iqn_hidden_dim", model_config.dim_model)
+        iqn_hidden_dim = None if hidden_value is None else int(hidden_value)
+        embedding_value = model_config.get(
+            "cos_emb_dim",
+            iqn_hidden_dim if iqn_hidden_dim is not None else 64,
+        )
+        n_cos_embedding = (
+            64 if embedding_value is None else int(embedding_value)
+        )
+        return iqn_hidden_dim, n_cos_embedding
+
+    if prediction_head == "partially_monotonic":
+        if model_config.get("monotonic_hidden_dims") is not None:
+            return None, 64
+        return model_config.get("iqn_hidden_dim", model_config.dim_model), 64
+
+    # Let the head factory produce the canonical unsupported-selector error.
+    return None, 64
+
+
+def _save_resolved_config(config):
+    """Persist the complete architecture next to state-dict checkpoints."""
+    OmegaConf.save(
+        config=config,
+        f=os.path.join(config.saving_dir, "resolved_config.yaml"),
+        resolve=True,
+    )
 
 
 def run_transformer_iqn_cp(config_path):
 
     config = OmegaConf.load(config_path)
+    _materialize_prediction_head_selector(config.model)
     os.makedirs(config.saving_dir, exist_ok=True)
+    _save_resolved_config(config)
 
     # load data
     data = load_data(config.data.data_path)  # load predictor results here
@@ -34,6 +90,9 @@ def run_transformer_iqn_cp(config_path):
 
     print("Experiment setup")
     print("Method: IQN - Transformer")
+    print("Prediction head: {}".format(
+        config.model.get("prediction_head", "cosine_embedding")
+    ))
     print("Base predictor: {}".format(base_predictor))
     print("Data: {}".format(data_type))
     print("{} independent sequences".format(len(cpd.dataset)))
@@ -58,6 +117,9 @@ def run_transformer_iqn_cp(config_path):
         else:
             raise ValueError("wrong strided features specified")
 
+        iqn_hidden_dim, n_cos_embedding = _prediction_head_dimensions(
+            config.model
+        )
         iqn_transformer = IQNTransformer(
             dim_feature=dim_feature,
             dim_model=config.model.dim_model,
@@ -65,14 +127,16 @@ def run_transformer_iqn_cp(config_path):
             dim_ff=config.model.dim_model * 4,
             num_layers=config.model.num_layers,
             current_feature_dim=dim_x if config.model.use_current_feature else 0,
-            iqn_hidden_dim= config.model.iqn_hidden_dim,
-            n_cos_embedding=config.model.cos_emb_dim,
+            iqn_hidden_dim=iqn_hidden_dim,
+            n_cos_embedding=n_cos_embedding,
             dropout=config.model.dropout,
+            **_prediction_head_kwargs(config.model),
         )
         iqn_transformer.to(device)
-        optimizer = torch.optim.AdamW(
-            iqn_transformer.parameters(),
-            lr=config.training.learning_rate,
+        optimizer = build_iqn_optimizer(
+            iqn_transformer,
+            learning_rate=config.training.learning_rate,
+            weight_decay=float(config.training.get("weight_decay", 0.01)),
         )
 
         train_loss = []
@@ -166,6 +230,8 @@ def run_transformer_iqn_cp(config_path):
                                      "winkler_score": [],
                                      "upper_interval": [],
                                      "lower_interval": [],
+                                     "upper_residual_quantile": [],
+                                     "lower_residual_quantile": [],
                                      "target_y": [],
                                      "target_predictions": []}
             for confidence_pair in config.model.target_quantiles
@@ -232,8 +298,19 @@ def run_transformer_iqn_cp(config_path):
                                                                tuple_confidence_pair,
                                                                normalized_params=None)
 
-                evaluation_results[tuple_confidence_pair]["upper_interval"].extend(hi.tolist())
-                evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lo.tolist())
+                upper_interval, lower_interval = construct_interval_endpoints(
+                    hi,
+                    lo,
+                    target_predictions,
+                    normalized_params=(residuals_noramlized_mu,
+                                       residuals_noramlized_std)
+                    if config.data.normalize else None,
+                )
+
+                evaluation_results[tuple_confidence_pair]["upper_interval"].extend(upper_interval.tolist())
+                evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lower_interval.tolist())
+                evaluation_results[tuple_confidence_pair]["upper_residual_quantile"].extend(hi.tolist())
+                evaluation_results[tuple_confidence_pair]["lower_residual_quantile"].extend(lo.tolist())
                 evaluation_results[tuple_confidence_pair]["coverage"].extend(this_coverage)
                 evaluation_results[tuple_confidence_pair]["interval_width"].extend(this_interval_width)
                 evaluation_results[tuple_confidence_pair]["winkler_score"].extend(this_winkler_score)
@@ -260,7 +337,9 @@ def run_transformer_iqn_cp(config_path):
             evaluation_results[tuple_confidence_pair]["avg_interval_width"] = avg_interval_width
             evaluation_results[tuple_confidence_pair]["avg_winkler_score"] = avg_winkler_score
 
-        log[key] = {"train_loss": train_loss,
+        log[key] = {"prediction_head": iqn_transformer.prediction_head,
+                    "model_config": OmegaConf.to_container(config.model, resolve=True),
+                    "train_loss": train_loss,
                     "valid_loss": valid_loss,
                     "evaluation_results": evaluation_results}
 
@@ -300,7 +379,9 @@ def run_transformer_iqn_cp(config_path):
 def run_rnn_iqn_cp(config_path):
 
     config = OmegaConf.load(config_path)
+    _materialize_prediction_head_selector(config.model)
     os.makedirs(config.saving_dir, exist_ok=True)
+    _save_resolved_config(config)
 
     # load data
     data = load_data(config.data.data_path)  # load predictor results here
@@ -317,6 +398,9 @@ def run_rnn_iqn_cp(config_path):
 
     print("Experiment setup")
     print("Method: IQN - RNN")
+    print("Prediction head: {}".format(
+        config.model.get("prediction_head", "cosine_embedding")
+    ))
     print("Base predictor: {}".format(base_predictor))
     print("Data: {}".format(data_type))
     print("{} independent sequences".format(len(cpd.dataset)))
@@ -341,20 +425,25 @@ def run_rnn_iqn_cp(config_path):
         else:
             raise ValueError("wrong strided features specified")
 
+        iqn_hidden_dim, n_cos_embedding = _prediction_head_dimensions(
+            config.model
+        )
         iqn_rnn = IQNRNN(
             rnn_type=config.model.rnn_type,
             dim_feature=dim_feature,
             dim_model=config.model.dim_model,
             num_layers=config.model.num_layers,
             current_feature_dim=dim_x if config.model.use_current_feature else 0,
-            iqn_hidden_dim=config.model.iqn_hidden_dim,
-            n_cos_embedding=config.model.cos_emb_dim,
+            iqn_hidden_dim=iqn_hidden_dim,
+            n_cos_embedding=n_cos_embedding,
             dropout=config.model.dropout,
+            **_prediction_head_kwargs(config.model),
         )
         iqn_rnn.to(device)
-        optimizer = torch.optim.AdamW(
-            iqn_rnn.parameters(),
-            lr=config.training.learning_rate,
+        optimizer = build_iqn_optimizer(
+            iqn_rnn,
+            learning_rate=config.training.learning_rate,
+            weight_decay=float(config.training.get("weight_decay", 0.01)),
         )
 
         train_loss = []
@@ -448,6 +537,8 @@ def run_rnn_iqn_cp(config_path):
                                      "winkler_score": [],
                                      "upper_interval": [],
                                      "lower_interval": [],
+                                     "upper_residual_quantile": [],
+                                     "lower_residual_quantile": [],
                                      "target_y": [],
                                      "target_predictions": []}
             for confidence_pair in config.model.target_quantiles
@@ -514,8 +605,19 @@ def run_rnn_iqn_cp(config_path):
                                                                tuple_confidence_pair,
                                                                normalized_params=None)
 
-                evaluation_results[tuple_confidence_pair]["upper_interval"].extend(hi.tolist())
-                evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lo.tolist())
+                upper_interval, lower_interval = construct_interval_endpoints(
+                    hi,
+                    lo,
+                    target_predictions,
+                    normalized_params=(residuals_noramlized_mu,
+                                       residuals_noramlized_std)
+                    if config.data.normalize else None,
+                )
+
+                evaluation_results[tuple_confidence_pair]["upper_interval"].extend(upper_interval.tolist())
+                evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lower_interval.tolist())
+                evaluation_results[tuple_confidence_pair]["upper_residual_quantile"].extend(hi.tolist())
+                evaluation_results[tuple_confidence_pair]["lower_residual_quantile"].extend(lo.tolist())
                 evaluation_results[tuple_confidence_pair]["coverage"].extend(this_coverage)
                 evaluation_results[tuple_confidence_pair]["interval_width"].extend(this_interval_width)
                 evaluation_results[tuple_confidence_pair]["winkler_score"].extend(this_winkler_score)
@@ -542,7 +644,9 @@ def run_rnn_iqn_cp(config_path):
             evaluation_results[tuple_confidence_pair]["avg_interval_width"] = avg_interval_width
             evaluation_results[tuple_confidence_pair]["avg_winkler_score"] = avg_winkler_score
 
-        log[key] = {"train_loss": train_loss,
+        log[key] = {"prediction_head": iqn_rnn.prediction_head,
+                    "model_config": OmegaConf.to_container(config.model, resolve=True),
+                    "train_loss": train_loss,
                     "valid_loss": valid_loss,
                     "evaluation_results": evaluation_results}
 

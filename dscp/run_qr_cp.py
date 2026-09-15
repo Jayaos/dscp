@@ -9,7 +9,7 @@ from dscp.models.qr_rnn import QuantileRegressionRNN
 from dscp.loss import compute_loss_quantile_regression_transformer, compute_loss_quantile_regression_rnn
 from dscp.data import ConformalPredictionData
 from utils.utils import load_data, save_data, read_setup, generate_strided_feature, get_interval_quantile_indices
-from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, summarize_evaluation_results
+from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, construct_interval_endpoints, summarize_evaluation_results
 from utils.plotting import plot_cp_prediction_intervals
 from torch.utils.data import DataLoader
 
@@ -69,7 +69,8 @@ def run_transformer_quantile_regression_cp(config_path):
                                                     config.model.target_quantiles,
                                                     config.model.prediction_step, 
                                                     config.model.dropout,
-                                                    current_feature_dim=dim_x)
+                                                    current_feature_dim=dim_x,
+                                                    head_type=config.model.get("head_type", "nondecreasing"))
         else:
             # utilizing up to x_{t-1} to predict r_t
             qr_transformer = QuantileRegressionTransformer(dim_feature, 
@@ -80,7 +81,8 @@ def run_transformer_quantile_regression_cp(config_path):
                                                     config.model.target_quantiles,
                                                     config.model.prediction_step, 
                                                     config.model.dropout,
-                                                    current_feature_dim=0)
+                                                    current_feature_dim=0,
+                                                    head_type=config.model.get("head_type", "nondecreasing"))
 
         qr_transformer.to(device)
         optimizer = torch.optim.AdamW(qr_transformer.parameters(), 
@@ -177,6 +179,8 @@ def run_transformer_quantile_regression_cp(config_path):
                                      "winkler_score" : [],
                                      "upper_interval" : [],
                                      "lower_interval" : [],
+                                     "upper_residual_quantile" : [],
+                                     "lower_residual_quantile" : [],
                                      "target_y" : [],
                                      "target_predictions" : []}
             for confidence_pair in config.model.target_quantiles
@@ -238,9 +242,20 @@ def run_transformer_quantile_regression_cp(config_path):
                                                                target_predictions, 
                                                                tuple_confidence_pair, 
                                                                normalized_params=None)
+
+                upper_interval, lower_interval = construct_interval_endpoints(
+                    hi,
+                    lo,
+                    target_predictions,
+                    normalized_params=(residuals_noramlized_mu,
+                                       residuals_noramlized_std)
+                    if config.data.normalize else None,
+                )
                 
-                evaluation_results[tuple_confidence_pair]["upper_interval"].extend(hi.tolist())
-                evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lo.tolist())
+                evaluation_results[tuple_confidence_pair]["upper_interval"].extend(upper_interval.tolist())
+                evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lower_interval.tolist())
+                evaluation_results[tuple_confidence_pair]["upper_residual_quantile"].extend(hi.tolist())
+                evaluation_results[tuple_confidence_pair]["lower_residual_quantile"].extend(lo.tolist())
                 evaluation_results[tuple_confidence_pair]["coverage"].extend(this_coverage)
                 evaluation_results[tuple_confidence_pair]["interval_width"].extend(this_interval_width)
                 evaluation_results[tuple_confidence_pair]["winkler_score"].extend(this_winkler_score)
@@ -358,7 +373,8 @@ def run_rnn_quantile_regression_cp(config_path):
                                            config.model.target_quantiles,
                                            config.model.prediction_step,
                                            config.model.dropout,
-                                           current_feature_dim=dim_x)
+                                           current_feature_dim=dim_x,
+                                           head_type=config.model.get("head_type", "nondecreasing"))
         else:
             # utilizing up to x_{t-1} to predict r_t
             qr_rnn = QuantileRegressionRNN(config.model.rnn_type,
@@ -368,7 +384,8 @@ def run_rnn_quantile_regression_cp(config_path):
                                            config.model.target_quantiles,
                                            config.model.prediction_step,
                                            config.model.dropout,
-                                           current_feature_dim=0)
+                                           current_feature_dim=0,
+                                           head_type=config.model.get("head_type", "nondecreasing"))
 
         qr_rnn.to(device)
         optimizer = torch.optim.AdamW(qr_rnn.parameters(), 
@@ -465,6 +482,8 @@ def run_rnn_quantile_regression_cp(config_path):
                                      "winkler_score" : [],
                                      "upper_interval" : [],
                                      "lower_interval" : [],
+                                     "upper_residual_quantile" : [],
+                                     "lower_residual_quantile" : [],
                                      "target_y" : [],
                                      "target_predictions" : []}
             for confidence_pair in config.model.target_quantiles
@@ -523,9 +542,20 @@ def run_rnn_quantile_regression_cp(config_path):
                                                                target_predictions, 
                                                                tuple_confidence_pair, 
                                                                normalized_params=None)
+
+                upper_interval, lower_interval = construct_interval_endpoints(
+                    hi,
+                    lo,
+                    target_predictions,
+                    normalized_params=(residuals_noramlized_mu,
+                                       residuals_noramlized_std)
+                    if config.data.normalize else None,
+                )
                 
-                evaluation_results[tuple_confidence_pair]["upper_interval"].extend(hi.tolist())
-                evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lo.tolist())
+                evaluation_results[tuple_confidence_pair]["upper_interval"].extend(upper_interval.tolist())
+                evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lower_interval.tolist())
+                evaluation_results[tuple_confidence_pair]["upper_residual_quantile"].extend(hi.tolist())
+                evaluation_results[tuple_confidence_pair]["lower_residual_quantile"].extend(lo.tolist())
                 evaluation_results[tuple_confidence_pair]["coverage"].extend(this_coverage)
                 evaluation_results[tuple_confidence_pair]["interval_width"].extend(this_interval_width)
                 evaluation_results[tuple_confidence_pair]["winkler_score"].extend(this_winkler_score)

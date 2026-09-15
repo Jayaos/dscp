@@ -29,19 +29,30 @@ class ConformalPredictionData:
                                              normalize=False,
                                              *,
                                              calibration_ratio=None,
-                                             test_ratio=None):
+                                             test_ratio=None,
+                                             model_selection_valid_ratio=None):
         """
         Prepare sequence examples that predict future residuals from past context.
 
-        Calls without calibration_ratio/test_ratio retain the legacy chronological
-        train | validation | test split. Providing both adds a dedicated
-        validation | calibration | test tail; all four ratios then refer to raw
-        held-out timestamps and must sum to one. The four-way split is currently
-        restricted to one-step Local-CP prediction.
+        Calls without optional split arguments retain the legacy chronological
+        train | validation | test split. Providing calibration_ratio/test_ratio
+        adds a dedicated calibration partition. Providing only
+        model_selection_valid_ratio splits the nominal training prefix into
+        model-fit and checkpoint-validation partitions and exposes the nominal
+        validation partition as tuning_evaluation_dataset without exposing a
+        test dataset. Providing all three optional ratios creates the nested
+        Local-CP tuning split: the nominal validation partition is calibration,
+        the nominal calibration partition is tuning evaluation, and the final
+        test partition remains reserved and is not exposed as a dataset.
+        Calibration and nested tuning splits are currently restricted to
+        one-step prediction.
 
         """
 
         use_calibration_split = calibration_ratio is not None or test_ratio is not None
+        use_model_selection_split = model_selection_valid_ratio is not None
+        use_nested_local_split = use_calibration_split and use_model_selection_split
+
         if use_calibration_split:
             if calibration_ratio is None or test_ratio is None:
                 raise ValueError(
@@ -49,7 +60,8 @@ class ConformalPredictionData:
                 )
             if prediction_steps != 1:
                 raise ValueError(
-                    "The four-way Local-CP split currently supports prediction_steps=1 only."
+                    "Local-CP calibration/tuning splits currently support "
+                    "prediction_steps=1 only."
                 )
             ratios = np.asarray(
                 [train_ratio, valid_ratio, calibration_ratio, test_ratio],
@@ -66,13 +78,94 @@ class ConformalPredictionData:
                     f"must equal 1; got {ratios.sum():.12g}."
                 )
 
+        if use_model_selection_split:
+            if prediction_steps != 1:
+                raise ValueError(
+                    "The nested tuning split currently supports prediction_steps=1 only."
+                )
+            outer_ratios = np.asarray([train_ratio, valid_ratio], dtype=float)
+            if (
+                not np.all(np.isfinite(outer_ratios))
+                or np.any(outer_ratios <= 0)
+                or outer_ratios.sum() >= 1
+            ):
+                raise ValueError(
+                    "train_ratio and valid_ratio must be finite, strictly positive, "
+                    "and sum to less than 1 for nested tuning."
+                )
+            model_selection_valid_ratio = float(model_selection_valid_ratio)
+            if (
+                not np.isfinite(model_selection_valid_ratio)
+                or not 0 < model_selection_valid_ratio < 1
+            ):
+                raise ValueError(
+                    "model_selection_valid_ratio must be finite and strictly between 0 and 1."
+                )
+
         for key, item in self.data.items():
             raw_heldout_y = np.asarray(item["heldout_y"])
             raw_heldout_predictions = np.asarray(item["heldout_predictions"])
             raw_heldout_residuals = (raw_heldout_y - raw_heldout_predictions).flatten()
 
             heldout_size = len(raw_heldout_y)
-            if use_calibration_split:
+            if use_nested_local_split:
+                raw_boundaries = heldout_size * np.cumsum(ratios[:3])
+                nominal_train_size, outer_valid_end, outer_calibration_end = np.floor(
+                    np.nextafter(raw_boundaries, np.inf)
+                ).astype(int).tolist()
+                calibration_size = outer_valid_end - nominal_train_size
+                tuning_evaluation_size = outer_calibration_end - outer_valid_end
+                test_size = heldout_size - outer_calibration_end
+                train_size = int(
+                    np.floor(
+                        np.nextafter(
+                            nominal_train_size * (1 - model_selection_valid_ratio),
+                            np.inf,
+                        )
+                    )
+                )
+                model_selection_valid_size = nominal_train_size - train_size
+                if min(
+                    train_size,
+                    model_selection_valid_size,
+                    calibration_size,
+                    tuning_evaluation_size,
+                    test_size,
+                ) <= 0:
+                    raise ValueError(
+                        f"Empty nested Local-CP tuning split for {key!r}: "
+                        f"heldout_size={heldout_size}, fit={train_size}, "
+                        f"checkpoint_valid={model_selection_valid_size}, "
+                        f"calibration={calibration_size}, "
+                        f"tuning={tuning_evaluation_size}, test={test_size}."
+                    )
+            elif use_model_selection_split:
+                nominal_train_size = int(np.floor(heldout_size * train_ratio))
+                tuning_size = int(np.ceil(heldout_size * valid_ratio))
+                test_size = heldout_size - nominal_train_size - tuning_size
+                train_size = int(
+                    np.floor(
+                        np.nextafter(
+                            nominal_train_size * (1 - model_selection_valid_ratio),
+                            np.inf,
+                        )
+                    )
+                )
+                model_selection_valid_size = nominal_train_size - train_size
+                if min(
+                    train_size,
+                    model_selection_valid_size,
+                    tuning_size,
+                    test_size,
+                ) <= 0:
+                    raise ValueError(
+                        f"Empty nested tuning split for {key!r}: "
+                        f"heldout_size={heldout_size}, fit={train_size}, "
+                        f"checkpoint_valid={model_selection_valid_size}, "
+                        f"tuning={tuning_size}, "
+                        f"test={test_size}."
+                    )
+            elif use_calibration_split:
                 raw_boundaries = heldout_size * np.cumsum(ratios[:3])
                 # Move each floating-point product one representable value
                 # upward before floor so exact conceptual boundaries such as
@@ -185,12 +278,30 @@ class ConformalPredictionData:
                       target_residual,
                       target_y,
                       target_predictions]
-            if use_calibration_split:
-                train_split, valid_split, calibration_split, test_split = \
+            if use_nested_local_split:
+                train_split, valid_split, calibration_split, heldout_split = \
                     chronological_split_fixed_calibration_test(
                         arrays,
-                        valid_size,
+                        model_selection_valid_size,
                         calibration_size,
+                        tuning_evaluation_size + test_size,
+                    )
+                tuning_evaluation_split = tuple(
+                    array[:tuning_evaluation_size] for array in heldout_split
+                )
+            elif use_calibration_split or use_model_selection_split:
+                fourth_split_size = (
+                    calibration_size if use_calibration_split else tuning_size
+                )
+                train_split, valid_split, fourth_split, test_split = \
+                    chronological_split_fixed_calibration_test(
+                        arrays,
+                        (
+                            model_selection_valid_size
+                            if use_model_selection_split
+                            else valid_size
+                        ),
+                        fourth_split_size,
                         test_size,
                     )
             else:
@@ -210,26 +321,23 @@ class ConformalPredictionData:
                     train_split[5],
                     train_split[6],
                 ),
-                "valid_dataset": QuantileRegressionDataset(
-                    valid_split[0],
-                    valid_split[1],
-                    valid_split[2],
-                    valid_split[3],
-                    valid_split[4],
-                    valid_split[5],
-                    valid_split[6],
-                ),
-                "test_dataset": QuantileRegressionDataset(
-                    test_split[0],
-                    test_split[1],
-                    test_split[2],
-                    test_split[3],
-                    test_split[4],
-                    test_split[5],
-                    test_split[6],
-                ),
             }
-            if use_calibration_split:
+            valid_dataset = QuantileRegressionDataset(
+                valid_split[0],
+                valid_split[1],
+                valid_split[2],
+                valid_split[3],
+                valid_split[4],
+                valid_split[5],
+                valid_split[6],
+            )
+            valid_dataset_key = (
+                "model_selection_valid_dataset"
+                if use_model_selection_split
+                else "valid_dataset"
+            )
+            datasets[valid_dataset_key] = valid_dataset
+            if use_nested_local_split:
                 datasets["calibration_dataset"] = QuantileRegressionDataset(
                     calibration_split[0],
                     calibration_split[1],
@@ -239,12 +347,69 @@ class ConformalPredictionData:
                     calibration_split[5],
                     calibration_split[6],
                 )
+                datasets["tuning_evaluation_dataset"] = QuantileRegressionDataset(
+                    tuning_evaluation_split[0],
+                    tuning_evaluation_split[1],
+                    tuning_evaluation_split[2],
+                    tuning_evaluation_split[3],
+                    tuning_evaluation_split[4],
+                    tuning_evaluation_split[5],
+                    tuning_evaluation_split[6],
+                )
+            elif use_calibration_split:
+                datasets["calibration_dataset"] = QuantileRegressionDataset(
+                    fourth_split[0],
+                    fourth_split[1],
+                    fourth_split[2],
+                    fourth_split[3],
+                    fourth_split[4],
+                    fourth_split[5],
+                    fourth_split[6],
+                )
+            elif use_model_selection_split:
+                datasets["tuning_evaluation_dataset"] = QuantileRegressionDataset(
+                    fourth_split[0],
+                    fourth_split[1],
+                    fourth_split[2],
+                    fourth_split[3],
+                    fourth_split[4],
+                    fourth_split[5],
+                    fourth_split[6],
+                )
+
+            if not use_model_selection_split:
+                datasets["test_dataset"] = QuantileRegressionDataset(
+                    test_split[0],
+                    test_split[1],
+                    test_split[2],
+                    test_split[3],
+                    test_split[4],
+                    test_split[5],
+                    test_split[6],
+                )
             self.dataset[key] = datasets
-            if use_calibration_split:
+            if use_nested_local_split:
+                self.data[key].update({
+                    "nominal_train_size": nominal_train_size,
+                    "train_size": train_size,
+                    "model_selection_valid_size": model_selection_valid_size,
+                    "calibration_size": calibration_size,
+                    "tuning_evaluation_size": tuning_evaluation_size,
+                    "test_size": test_size,
+                })
+            elif use_calibration_split:
                 self.data[key].update({
                     "train_size": train_size,
                     "valid_size": valid_size,
                     "calibration_size": calibration_size,
+                    "test_size": test_size,
+                })
+            elif use_model_selection_split:
+                self.data[key].update({
+                    "nominal_train_size": nominal_train_size,
+                    "train_size": train_size,
+                    "model_selection_valid_size": model_selection_valid_size,
+                    "tuning_evaluation_size": tuning_size,
                     "test_size": test_size,
                 })
 

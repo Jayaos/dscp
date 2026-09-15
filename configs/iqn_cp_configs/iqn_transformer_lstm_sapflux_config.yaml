@@ -14,7 +14,11 @@ model:
   num_layers: 2
   dropout: 0.
   use_current_feature: False
+  # Choose "partially_monotonic" or the legacy "cosine_embedding" IQN head.
+  prediction_head: "partially_monotonic"
   iqn_hidden_dim: *shared_dim
+  monotonic_num_layers: 2
+  monotonic_activation: "tanh"
   cos_emb_dim: *shared_dim
   num_taus: 64
   target_quantiles:
@@ -32,4 +36,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/iqn_transformer_lstm_sapflux_solo3_large/"
+saving_dir: "./results/iqn_transformer_lstm_sapflux_solo3_large_${model.prediction_head}/"

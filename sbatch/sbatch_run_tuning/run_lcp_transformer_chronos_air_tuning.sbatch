@@ -12,12 +12,12 @@
 
 RUNPATH=/storage/project/r-yxie77-0/jlee3541/projects/dscp
 cd "$RUNPATH"
-export PYTHONPATH="$RUNPATH:$PYTHONPATH"
+export PYTHONPATH="$RUNPATH:$RUNPATH/sbatch:$PYTHONPATH"
 module load anaconda3
 conda activate dscp
 
 
-python sbatch_run_tuning/run_local_cp_tuning.py \
+python sbatch/sbatch_run_tuning/run_local_cp_tuning.py \
   --base-config configs/lcp_configs/lcp_transformer_chronos_air_config.yaml \
   --grid-config configs/lcp_configs/lcp_transformer_air_tuning_config.yaml \
   --save-dir results/tuning/lcp_transformer_chronos_air \

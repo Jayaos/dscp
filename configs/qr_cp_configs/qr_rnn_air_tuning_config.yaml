@@ -1,4 +1,5 @@
 grid:
+  # model.head_type: [nondecreasing, independent] # uncomment to compare both
   model.dim_model: [16, 32]
   model.num_layers: [1, 2]
   model.window_size: [100, 200]
@@ -10,3 +11,4 @@ grid:
 tuning:
   num_sequences: 2
   delta_threshold: -0.01
+  model_selection_valid_ratio: 0.2

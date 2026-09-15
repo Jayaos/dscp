@@ -8,6 +8,7 @@ data:
   strided_features: "xr"
 
 model:
+  head_type: nondecreasing # choices: nondecreasing, independent
   dim_model: 16
   num_heads: 2
   num_layers: 2

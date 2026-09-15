@@ -4,6 +4,11 @@ from utils.utils import get_sorted_unique_quantiles
 
 
 class QuantileRegressionRNN(torch.nn.Module):
+    """Shared recurrent encoder with selectable quantile prediction heads.
+
+    head_type="nondecreasing" uses cumulative nonnegative increments (default).
+    head_type="independent" directly predicts each quantile and allows crossing.
+    """
 
     def __init__(self,
                  rnn_type: str,
@@ -14,8 +19,14 @@ class QuantileRegressionRNN(torch.nn.Module):
                  prediction_step: int,
                  dropout: float = 0.1,
                  current_feature_dim: int=0,
-                 batch_first: bool=True):
+                 batch_first: bool=True,
+                 head_type: str = "nondecreasing"):
         super(QuantileRegressionRNN, self).__init__()
+        if head_type not in ("nondecreasing", "independent"):
+            raise ValueError(
+                f"head_type must be 'nondecreasing' or 'independent', got {head_type!r}"
+            )
+        self.head_type = head_type
         self.rnn_type = rnn_type.lower()
         self.dim_model = dim_model
         self.target_quantiles = target_quantiles
@@ -40,10 +51,16 @@ class QuantileRegressionRNN(torch.nn.Module):
         else:
             head_input_dim = dim_model + current_feature_dim
 
-        self.base_head = torch.nn.Linear(head_input_dim, prediction_step)
-        self.increment_head = torch.nn.Linear(
-            head_input_dim, prediction_step * max(self.num_quantiles - 1, 0)
-        )
+        if self.head_type == "nondecreasing":
+            self.base_head = torch.nn.Linear(head_input_dim, prediction_step)
+            self.increment_head = torch.nn.Linear(
+                head_input_dim, prediction_step * max(self.num_quantiles - 1, 0)
+            )
+        else:
+            self.quantile_heads = torch.nn.ModuleList(
+                torch.nn.Linear(head_input_dim, prediction_step)
+                for _ in self.sorted_quantiles
+            )
             
     def forward(self, x, current_feature=None):
 
@@ -56,14 +73,17 @@ class QuantileRegressionRNN(torch.nn.Module):
             # (batch_size, window_len, model_dim+current_feature_dim)
             h = torch.cat([h, current_feature.repeat(1, T, 1)], dim=-1)
 
-        base = self.base_head(h).unsqueeze(-1)
-
-        if self.num_quantiles == 1:
-            quantiles = base
+        if self.head_type == "independent":
+            quantiles = torch.stack([head(h) for head in self.quantile_heads], dim=-1)
         else:
-            increments = F.softplus(self.increment_head(h))
-            increments = increments.view(B, T, self.prediction_step, self.num_quantiles - 1)
-            quantiles = torch.cat([base, base + torch.cumsum(increments, dim=-1)], dim=-1)
+            base = self.base_head(h).unsqueeze(-1)
+
+            if self.num_quantiles == 1:
+                quantiles = base
+            else:
+                increments = F.softplus(self.increment_head(h))
+                increments = increments.view(B, T, self.prediction_step, self.num_quantiles - 1)
+                quantiles = torch.cat([base, base + torch.cumsum(increments, dim=-1)], dim=-1)
 
         return quantiles.reshape(B, T, self.prediction_step * self.num_quantiles)
 

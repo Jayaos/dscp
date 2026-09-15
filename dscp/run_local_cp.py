@@ -10,7 +10,7 @@ from dscp.models.local_cp import LocalConformalPrediction
 from dscp.loss import compute_loss_transformer_predictor, compute_loss_rnn_predictor
 from dscp.data import ConformalPredictionData
 from utils.utils import load_data, save_data, read_setup, generate_strided_feature, get_interval_quantile_indices
-from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, summarize_evaluation_results
+from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, construct_interval_endpoints, summarize_evaluation_results
 from utils.plotting import plot_cp_prediction_intervals
 from torch.utils.data import DataLoader
 
@@ -204,6 +204,8 @@ def run_transformer_local_cp(config_path):
                                      "winkler_score" : [],
                                      "upper_interval" : [],
                                      "lower_interval" : [],
+                                     "upper_residual_quantile" : [],
+                                     "lower_residual_quantile" : [],
                                      "target_y" : [],
                                      "target_predictions" : []}
             for confidence_pair in config.model.target_quantiles
@@ -277,9 +279,20 @@ def run_transformer_local_cp(config_path):
                                                                target_predictions, 
                                                                tuple_confidence_pair, 
                                                                normalized_params=None)
+
+                upper_interval, lower_interval = construct_interval_endpoints(
+                    hi,
+                    lo,
+                    target_predictions,
+                    normalized_params=(residuals_noramlized_mu,
+                                       residuals_noramlized_std)
+                    if config.data.normalize else None,
+                )
                     
-                evaluation_results[tuple_confidence_pair]["upper_interval"].extend(hi.tolist())
-                evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lo.tolist())
+                evaluation_results[tuple_confidence_pair]["upper_interval"].extend(upper_interval.tolist())
+                evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lower_interval.tolist())
+                evaluation_results[tuple_confidence_pair]["upper_residual_quantile"].extend(hi.tolist())
+                evaluation_results[tuple_confidence_pair]["lower_residual_quantile"].extend(lo.tolist())
                 evaluation_results[tuple_confidence_pair]["coverage"].extend(this_coverage)
                 evaluation_results[tuple_confidence_pair]["interval_width"].extend(this_interval_width)
                 evaluation_results[tuple_confidence_pair]["winkler_score"].extend(this_winkler_score)
@@ -496,6 +509,8 @@ def run_rnn_local_cp(config_path):
                                      "winkler_score" : [],
                                      "upper_interval" : [],
                                      "lower_interval" : [],
+                                     "upper_residual_quantile" : [],
+                                     "lower_residual_quantile" : [],
                                      "target_y" : [],
                                      "target_predictions" : []}
             for confidence_pair in config.model.target_quantiles
@@ -570,8 +585,19 @@ def run_rnn_local_cp(config_path):
                                                                tuple_confidence_pair,
                                                                normalized_params=None)
 
-                evaluation_results[tuple_confidence_pair]["upper_interval"].extend(hi.tolist())
-                evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lo.tolist())
+                upper_interval, lower_interval = construct_interval_endpoints(
+                    hi,
+                    lo,
+                    target_predictions,
+                    normalized_params=(residuals_noramlized_mu,
+                                       residuals_noramlized_std)
+                    if config.data.normalize else None,
+                )
+
+                evaluation_results[tuple_confidence_pair]["upper_interval"].extend(upper_interval.tolist())
+                evaluation_results[tuple_confidence_pair]["lower_interval"].extend(lower_interval.tolist())
+                evaluation_results[tuple_confidence_pair]["upper_residual_quantile"].extend(hi.tolist())
+                evaluation_results[tuple_confidence_pair]["lower_residual_quantile"].extend(lo.tolist())
                 evaluation_results[tuple_confidence_pair]["coverage"].extend(this_coverage)
                 evaluation_results[tuple_confidence_pair]["interval_width"].extend(this_interval_width)
                 evaluation_results[tuple_confidence_pair]["winkler_score"].extend(this_winkler_score)
