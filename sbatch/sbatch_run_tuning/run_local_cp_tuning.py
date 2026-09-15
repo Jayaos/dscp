@@ -26,7 +26,10 @@ from sbatch_run_tuning.common import (
     write_trial_artifacts,
 )
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score
-from utils.utils import generate_strided_feature, get_interval_quantile_indices, load_data
+from utils.utils import (
+    generate_strided_feature, get_interval_quantile_indices, load_data,
+    validate_rolling_calibration,
+)
 
 
 def _build_model(config, dim_feature: int, dim_x: int):
@@ -42,6 +45,7 @@ def _build_model(config, dim_feature: int, dim_x: int):
             prediction_step=config.model.prediction_step,
             current_feature_dim=current_feature_dim,
             dropout=config.model.dropout,
+            training_quantiles=OmegaConf.select(config, "model.training_quantiles"),
         )
         loss_fn = compute_loss_rnn_predictor
         model_type = "rnn"
@@ -55,6 +59,7 @@ def _build_model(config, dim_feature: int, dim_x: int):
             prediction_step=config.model.prediction_step,
             current_feature_dim=current_feature_dim,
             dropout=config.model.dropout,
+            training_quantiles=OmegaConf.select(config, "model.training_quantiles"),
         )
         loss_fn = compute_loss_transformer_predictor
         model_type = "transformer"
@@ -103,6 +108,9 @@ def _prepare_trial_data(raw_data, config):
 
 
 def _run_single_trial(config, sequence_item, normalization_params):
+    rolling_calibration = validate_rolling_calibration(
+        OmegaConf.select(config, "model.rolling_calibration", default=True)
+    )
     device = resolve_device(config.device)
     sorted_quantiles, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
     delta_threshold = float(config.tuning.get("delta_threshold", 0.0))
@@ -234,7 +242,7 @@ def _run_single_trial(config, sequence_item, normalization_params):
         if calibration_pool_size <= 0:
             raise ValueError("model.calibration_size must be positive when it is provided.")
 
-    # Keep the sequential calibration state on CPU. LocalConformalPrediction
+    # Keep the calibration state on CPU. LocalConformalPrediction
     # transfers it to the configured device for each similarity computation.
     calibration_repr = calibration_repr[-calibration_pool_size:].detach().cpu()
     calibration_residual = calibration_residual[-calibration_pool_size:].detach().cpu()
@@ -293,14 +301,15 @@ def _run_single_trial(config, sequence_item, normalization_params):
                 )
             )
 
-        # Update only after scoring the current tuning-evaluation point, so its
-        # label cannot influence its own interval. The FIFO pool remains fixed.
-        calibration_repr = torch.vstack(
-            [calibration_repr, query_repr.detach().cpu()]
-        )[-calibration_pool_size:]
-        calibration_residual = torch.vstack(
-            [calibration_residual, target_residual.detach().cpu().reshape(-1, 1)]
-        )[-calibration_pool_size:]
+        # Optional updates happen after scoring; otherwise the initial
+        # calibration pairs remain fixed throughout tuning evaluation.
+        if rolling_calibration:
+            calibration_repr = torch.vstack(
+                [calibration_repr, query_repr.detach().cpu()]
+            )[-calibration_pool_size:]
+            calibration_residual = torch.vstack(
+                [calibration_residual, target_residual.detach().cpu().reshape(-1, 1)]
+            )[-calibration_pool_size:]
 
     pair_metrics, selection_score, positive_delta_coverage = summarize_evaluation_results(
         evaluation_results,
@@ -310,6 +319,8 @@ def _run_single_trial(config, sequence_item, normalization_params):
 
     return {
         "model_type": model_type,
+        "training_quantiles": model.training_quantiles.detach().cpu().tolist(),
+        "rolling_calibration": rolling_calibration,
         "train_loss": train_loss,
         "model_fit_train_loss": train_loss,
         "model_selection_valid_loss": model_selection_valid_loss,

@@ -9,7 +9,11 @@ from dscp.models.rnn_predictor import RNNPredictor
 from dscp.models.local_cp import LocalConformalPrediction
 from dscp.loss import compute_loss_transformer_predictor, compute_loss_rnn_predictor
 from dscp.data import ConformalPredictionData
-from utils.utils import load_data, save_data, read_setup, generate_strided_feature, get_interval_quantile_indices
+from utils.utils import (
+    load_data, save_data, read_setup, generate_strided_feature,
+    get_interval_quantile_indices, validate_training_quantiles,
+    validate_rolling_calibration,
+)
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, construct_interval_endpoints, summarize_evaluation_results
 from utils.plotting import plot_cp_prediction_intervals
 from torch.utils.data import DataLoader
@@ -41,7 +45,7 @@ def _initialize_calibration_pool(predictor, calibration_dataset, config, device)
             use_current_feature=config.model.use_current_feature,
         )
 
-    # The rolling pool lives on CPU; LocalConformalPrediction moves it to the
+    # The calibration pool lives on CPU; LocalConformalPrediction moves it to the
     # configured device only while computing a test-time interval.
     calibration_repr = calibration_repr[-calibration_capacity:].detach().cpu()
     calibration_residual = calibration_residual[-calibration_capacity:].detach().cpu()
@@ -63,6 +67,12 @@ def _append_to_calibration_pool(calibration_repr, calibration_residual,
 def run_transformer_local_cp(config_path):
 
     config = OmegaConf.load(config_path)
+    rolling_calibration = validate_rolling_calibration(
+        OmegaConf.select(config, "model.rolling_calibration", default=True)
+    )
+    training_quantiles = validate_training_quantiles(
+        OmegaConf.select(config, "model.training_quantiles")
+    )
     os.makedirs(config.saving_dir, exist_ok=True)
 
     # load data
@@ -117,7 +127,8 @@ def run_transformer_local_cp(config_path):
                                                      config.model.num_layers,
                                                      config.model.prediction_step, 
                                                      current_feature_dim=dim_x if config.model.use_current_feature else 0,
-                                                     dropout=config.model.dropout)
+                                                     dropout=config.model.dropout,
+                                                     training_quantiles=training_quantiles)
         transformer_predictor.to(device)
         optimizer = torch.optim.AdamW(transformer_predictor.parameters(), 
                                       lr=config.training.learning_rate) # TODO: params for adamW?
@@ -303,15 +314,16 @@ def run_transformer_local_cp(config_path):
                     evaluation_results[tuple_confidence_pair]["train_residuals_mu"] = residuals_noramlized_mu
                     evaluation_results[tuple_confidence_pair]["train_residuals_std"] = residuals_noramlized_std
 
-            # Update only after the interval and metrics for this point are
-            # computed, so its outcome cannot leak into its own interval.
-            calib_repr, calib_residual = _append_to_calibration_pool(
-                calib_repr,
-                calib_residual,
-                query_repr,
-                target_residual,
-                calibration_capacity,
-            )
+            # Optional updates happen after prediction and scoring. With updates
+            # disabled, every query uses the same initial calibration pairs.
+            if rolling_calibration:
+                calib_repr, calib_residual = _append_to_calibration_pool(
+                    calib_repr,
+                    calib_residual,
+                    query_repr,
+                    target_residual,
+                    calibration_capacity,
+                )
         
         for confidence_pair in config.model.target_quantiles:
             tuple_confidence_pair = tuple(confidence_pair)
@@ -331,6 +343,8 @@ def run_transformer_local_cp(config_path):
 
         log[key] = {"train_loss" : train_loss,
                     "valid_loss" : valid_loss,
+                    "training_quantiles" : training_quantiles,
+                    "rolling_calibration" : rolling_calibration,
                     "evaluation_results" : evaluation_results}
         
         torch.save(best_model, os.path.join(config.saving_dir, key + '_model.pt'))
@@ -369,6 +383,12 @@ def run_transformer_local_cp(config_path):
 def run_rnn_local_cp(config_path):
 
     config = OmegaConf.load(config_path)
+    rolling_calibration = validate_rolling_calibration(
+        OmegaConf.select(config, "model.rolling_calibration", default=True)
+    )
+    training_quantiles = validate_training_quantiles(
+        OmegaConf.select(config, "model.training_quantiles")
+    )
     os.makedirs(config.saving_dir, exist_ok=True)
 
     # load data
@@ -422,7 +442,8 @@ def run_rnn_local_cp(config_path):
                                      config.model.num_layers,
                                      config.model.prediction_step,
                                      current_feature_dim=dim_x if config.model.use_current_feature else 0,
-                                     dropout=config.model.dropout)
+                                     dropout=config.model.dropout,
+                                     training_quantiles=training_quantiles)
         rnn_predictor.to(device)
         optimizer = torch.optim.AdamW(rnn_predictor.parameters(),
                                       lr=config.training.learning_rate) # TODO: params for adamW?
@@ -608,15 +629,16 @@ def run_rnn_local_cp(config_path):
                     evaluation_results[tuple_confidence_pair]["train_residuals_mu"] = residuals_noramlized_mu
                     evaluation_results[tuple_confidence_pair]["train_residuals_std"] = residuals_noramlized_std
 
-            # Update only after the interval and metrics for this point are
-            # computed, so its outcome cannot leak into its own interval.
-            calib_repr, calib_residual = _append_to_calibration_pool(
-                calib_repr,
-                calib_residual,
-                query_repr,
-                target_residual,
-                calibration_capacity,
-            )
+            # Optional updates happen after prediction and scoring. With updates
+            # disabled, every query uses the same initial calibration pairs.
+            if rolling_calibration:
+                calib_repr, calib_residual = _append_to_calibration_pool(
+                    calib_repr,
+                    calib_residual,
+                    query_repr,
+                    target_residual,
+                    calibration_capacity,
+                )
 
         for confidence_pair in config.model.target_quantiles:
             tuple_confidence_pair = tuple(confidence_pair)
@@ -636,6 +658,8 @@ def run_rnn_local_cp(config_path):
 
         log[key] = {"train_loss" : train_loss,
                     "valid_loss" : valid_loss,
+                    "training_quantiles" : training_quantiles,
+                    "rolling_calibration" : rolling_calibration,
                     "evaluation_results" : evaluation_results}
 
         torch.save(best_model, os.path.join(config.saving_dir, key + '_model.pt'))

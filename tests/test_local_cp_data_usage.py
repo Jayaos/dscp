@@ -176,6 +176,7 @@ class LocalCPEncodingTests(unittest.TestCase):
             num_layer=1,
             prediction_step=1,
             dropout=0.0,
+            training_quantiles=[0.1, 0.5, 0.9],
         )
         _, residuals = model.encode_dataloader(
             model,
@@ -197,6 +198,7 @@ class LocalCPEncodingTests(unittest.TestCase):
             num_layer=1,
             prediction_step=1,
             dropout=0.0,
+            training_quantiles=[0.1, 0.5, 0.9],
         )
         _, residuals = model.encode_dataloader(
             model,

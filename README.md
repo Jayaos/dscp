@@ -1,5 +1,172 @@
 # DSCP
 
+## DistMatch baseline
+
+DistMatch reads saved base-predictor forecasts and estimates intervals from
+signed residual windows. Its experiment YAML controls all three chronological
+partitions and the number of parallel sequence workers:
+
+```yaml
+num_cores: 4
+threads_per_worker: 1
+data:
+  train_ratio: 0.50
+  valid_ratio: 0.16
+  test_ratio: 0.34
+```
+
+The ratios partition each complete saved held-out suffix and must sum to one.
+Training and test must be positive; `valid_ratio: 0` is allowed for fixed
+settings without tuning. The matching trees fit on training only. Validation
+observations then enter their leaves in chronological order before final-test
+evaluation. Each new test residual becomes available only after its interval
+is issued. There is no additional calibration partition.
+
+From the repository root, after activating the environment defined in
+[`envs/env-distmatch.yml`](envs/env-distmatch.yml):
+
+```bash
+python -m sbatch.sbatch_run_distmatch.run_distmatch configs/distmatch_configs/distmatch_lr_air_config.yaml
+```
+
+`num_cores` is the maximum number of independent series evaluated concurrently;
+timestamps within each series remain sequential. Omitting `--num-cores` uses
+the YAML value. All workers have reproducible series-specific random streams.
+
+See the [DistMatch guide](baselines/distmatch/README.md) for presets, validation-only
+tuning, cache controls, and batch execution, and the
+[provenance notes](baselines/distmatch/UPSTREAM.md) for reference compatibility.
+
+## ResCP
+
+The ResCP baseline applies a fixed random reservoir to signed point-forecast
+residuals. It samples previously observed residuals according to reservoir-state
+similarity and builds prediction intervals from the sampled quantiles. There is
+no CP neural-network training stage. The implementation follows the official
+sampling code at commit `1d8e560`; see
+[`baselines/rescp/UPSTREAM.md`](baselines/rescp/UPSTREAM.md) for the exact
+recurrence, recency weighting, numerical choices, and documented corrections.
+The upstream MIT notice is retained alongside the adapter.
+
+### Calibration, validation, and test sizes
+
+All three split ratios are explicit configuration settings:
+
+```yaml
+data:
+  data_path: ./data/air-10_prediction/lstm/lstm_air-10_data.pkl
+  calibration_ratio: 0.50
+  validation_ratio: 0.16
+  test_ratio: 0.34
+  normalize: true
+```
+
+These are fractions of each saved base-predictor held-out sequence. They must
+be finite and sum to one; calibration and test must be positive. Validation can
+be zero when running fixed hyperparameters, for example `0.66 / 0.0 / 0.34`.
+Hyperparameter tuning requires a positive validation ratio.
+
+For a sequence of length `T`, the chronological partition sizes are
+`floor(T * calibration_ratio)`, `ceil(T * validation_ratio)`, and the remainder
+for test. Floating-point values near integer boundaries are rounded before
+floor/ceil. An empty calibration or test partition is rejected. No strided
+windows are constructed, so every validation and test target is evaluated.
+
+| Region | Use |
+| --- | --- |
+| Calibration | Fit optional residual-input normalization and replay the prefix to initialize reservoir state and residual memory. |
+| Validation | Evaluate candidate hyperparameters sequentially during tuning. Earlier revealed validation residuals may enter later intervals. |
+| Test | Evaluate the selected fixed settings. Initialization replays calibration and validation, retaining the scaler fitted on calibration alone. |
+
+`data.calibration_ratio` controls the initial data partition.
+`model.calibration_size` independently caps the number of state/residual pairs
+kept in rolling memory; set it to `null` for expanding memory. With
+`sampling_num: null`, the fixed Monte Carlo sample count is the memory cap,
+or the initial calibration length when memory is uncapped.
+
+The default `0.50 / 0.16 / 0.34` split aligns with the ordinary QR-CP/SPCI/KOWCPI
+target boundaries. Use `0.60 / 0.20 / 0.20` for the IQN/Local-CP final suffix.
+Compare the saved exact `target_indices` within a common artifact, since other
+baselines can round boundaries differently. Split settings stay fixed during
+a tuning search; changing the evaluation timestamps between candidates would
+make their scores incomparable.
+
+### Online data use and method settings
+
+At timestamp `t`, the query state contains residuals only through `t-1`. Each
+stored residual `r_j` is paired with the state before `r_j` was observed.
+ResCP emits the interval before adding `r_t` and advancing the reservoir.
+State continues across split boundaries and is independent for each series.
+The adapter accepts scalar targets/predictions in `[T]` or `[T, 1]` format and
+supports unequal sequence lengths. It does not require `heldout_x`.
+
+Normalization affects reservoir inputs only. The sampling pool, logged
+residual quantiles, final interval endpoints, widths, and Winkler scores remain
+in original units. Normalization is never refitted on validation or test.
+
+Starting settings are reservoir size 512, connectivity 0.2, spectral radius
+1.2, leak 0.9, input scaling 0.25, temperature 0.1, and memory cap 3800.
+`recurrence: upstream` preserves the executable upstream update, whose tanh
+term has no additional leak multiplier. `decay: linear` uses upstream's
+oldest-first ramp `[0, ..., n-1]`; `none` and `exponential` are also supported.
+These recurrence/ramp definitions differ from the corresponding paper
+equations and are documented in the provenance file.
+
+`use_beta_search: true` selects the narrowest interval among `beta_bins: 100`
+candidate lower-tail probabilities. Standard Winkler scoring then uses the
+nominal miscoverage alpha. With beta search disabled, the exact
+`target_quantiles` pairs are used with DSCP's tail-specific scoring.
+The adapter enforces the configured memory cap and fixed sampling count,
+handles zero states/singleton histories, and uses isolated seeded random
+streams. Residual clipping and adaptive-alpha updates are disabled.
+
+Only `model.prediction_step: 1` is supported. Chronos artifacts with flattened
+ten-step blocks can be recalibrated only under the sequential-observation
+protocol described below; use newly generated one-step artifacts for a
+homogeneous one-step forecasting comparison.
+
+### Run and tune ResCP
+
+From the repository root, in the `dscp` environment:
+
+```bash
+python -m sbatch.sbatch_run_rescp.run_rescp configs/rescp_configs/rescp_lstm_air_config.yaml
+python -m sbatch.sbatch_run_rescp.run_rescp --dataset solar --base-predictor chronos --dry-run
+python -m sbatch.sbatch_run_rescp.run_rescp --dataset sapflux --base-predictor lstm --num-cores 4
+```
+
+Nine configuration presets cover Air, Solar, and Sapflux with LR, LSTM, and
+Chronos artifacts. The corresponding saved base forecasts must already exist.
+CPU Slurm array scripts are in `sbatch/sbatch_run_rescp/`; each dataset array
+runs its three base predictors. CLI `--seed` and `--output-dir` overrides
+support separate experiment runs. `threads_per_worker` defaults to one to
+avoid oversubscribing CPUs when processing independent series in parallel.
+
+```bash
+python -m sbatch.sbatch_run_tuning.run_rescp_tuning \
+  --base-config configs/rescp_configs/rescp_lstm_air_config.yaml \
+  --grid-config configs/rescp_configs/rescp_tuning_config.yaml \
+  --save-dir results/rescp_tuning/air_lstm
+
+python -m sbatch.sbatch_run_rescp.run_rescp results/rescp_tuning/air_lstm/best_config.yaml
+```
+
+Tuning evaluates only validation. Candidates use the same seeds and are ranked
+by mean per-series/per-interval Winkler score, optionally filtered by
+`tuning.delta_threshold` for coverage gap (set it to `null` to disable the
+filter). The tuner writes trial artifacts, `tuning_results.pkl`, and
+`best_config.yaml` when an eligible candidate exists. It does not run test;
+the second command performs that final evaluation. If no candidate passes the
+coverage threshold, the results record that outcome without selecting one.
+
+Ordinary runs save `resolved_config.yaml`, `log.pkl`, `summary_results.pkl`,
+and optional `plots/`. Logs use the current DSCP schema: `lower_interval` and
+`upper_interval` are final response-scale endpoints, with separate raw
+`lower_residual_quantile` and `upper_residual_quantile` fields. They also record
+selected beta, exact target indices, scaler statistics, seeds, runtime, and
+upstream revision. Repeat selected configurations with different seeds when
+reporting reservoir/sampling variability.
+
 ## QR-CP prediction heads
 
 RNN and Transformer QR-CP support two choices through `model.head_type`:
@@ -92,7 +259,7 @@ raw series = [initial context] [saved forecast/held-out suffix]
 
 Every CP runner operates on a saved base-predictor artifact. QR-CP, IQN-CP,
 Local-CP, SPCI, and HopCPT read `heldout_x`, `heldout_y`, and
-`heldout_predictions`; NexCP and KOWCPI need only the latter two arrays. None
+`heldout_predictions`; NexCP, KOWCPI, and ResCP need only the latter two arrays. None
 uses the base predictor's fitting prefix. Consequently, CP split ratios are
 fractions of the saved held-out suffix, not fractions of the complete raw
 series.
@@ -267,15 +434,103 @@ approximate because split boundaries are integer-valued.
 | --- | --- | --- | --- | --- |
 | QR-CP | First 50%. Fits the shared encoder and fixed quantile heads with quantile loss. | Next 16%. Selects the checkpoint and controls early stopping. It does not update model parameters. | None. QR-CP directly estimates conditional residual quantiles and has no separate conformal calibration step. | Final approximately 34%. The frozen checkpoint produces residual quantiles used for coverage, width, and Winkler-score reporting. |
 | IQN-CP | First 60%. Fits the shared encoder and tau-conditioned IQN head with sampled quantile loss. | Next 20%. Selects the checkpoint and controls early stopping. It does not update model parameters. | None. IQN-CP directly estimates conditional residual quantiles and has no separate conformal calibration step. | Final approximately 20%. The frozen checkpoint produces residual quantiles used for reporting. |
-| Local-CP | First 60%. Fits a residual point predictor whose hidden state supplies the similarity representation. | Next approximately 10%. Selects the checkpoint and controls early stopping; it is not used for calibration. | Next approximately 10%. This is a dedicated calibration partition that is not used for fitting or checkpoint selection. The latest `model.calibration_size=500` eligible examples initialize the rolling pool; set a different cap to control its memory size. Each representation for time `t` is paired with its target residual `r_t`. | Final approximately 20%, processed sequentially with batch size one. The network stays frozen. The interval for time `t` is constructed before observing `r_t`; afterward, `(representation_t, r_t)` enters the rolling pool and the oldest point is discarded when the cap is reached. |
+| Local-CP | First 60%. Fits the encoder and auxiliary residual quantile head with quantile loss at `model.training_quantiles`; the hidden state supplies the similarity representation. | Next approximately 10%. Uses quantile loss at the same `model.training_quantiles` to select the checkpoint and control early stopping; it is not used for calibration. | Next approximately 10%. This is a dedicated calibration partition that is not used for fitting or checkpoint selection. The latest `model.calibration_size=500` eligible examples initialize the calibration pool; set a different cap to control its memory size. Each representation for time `t` is paired with its target residual `r_t`. | Final approximately 20%, processed sequentially with batch size one. The network stays frozen. With `model.rolling_calibration: true` (default), `(representation_t, r_t)` replaces the oldest pool pair after the interval is constructed and `r_t` is observed. With `false`, the initial pool is retained throughout inference. |
 
 Thus, `data.calibration_ratio` controls how much data is reserved and eligible
 for Local-CP calibration, while `model.calibration_size` caps how many of the
-latest eligible points are retained in the initial and rolling pools. If the
+latest eligible points are retained in the calibration pool. If the
 dedicated partition contains fewer points than the cap, all of them are used.
 The checked-in RNN and Transformer air configurations use
 `0.6 / 0.1 / 0.1 / 0.2` for training, validation, calibration, and test,
 respectively, with a pool cap of 500.
+
+### Local-CP calibration pool updates
+
+Both RNN and Transformer runners, including tuning, accept:
+
+```yaml
+model:
+  calibration_size: 500
+  rolling_calibration: true
+```
+
+- `true` (the default, also when the setting is omitted): after predicting
+  each point and observing its outcome, add its representation/residual pair
+  and remove the oldest pair, maintaining the initialized pool size.
+- `false`: retain the initially selected calibration pairs for every
+  inference point; observed evaluation residuals do not enter the pool.
+
+`model.calibration_size` applies in both modes: initialization selects the
+latest eligible calibration pairs, up to the cap. The encoder stays frozen
+and similarity weights are recomputed for each query in either mode.
+This setting controls membership of the calibration pool. Sequential
+historical contexts can still include past observed outcomes in both modes.
+
+The tuning grids include a commented `model.rolling_calibration: [true, false]`
+line. Uncomment it to compare the two modes during tuning; otherwise, tuning
+uses the ordinary configuration's setting.
+
+### Local-CP encoder training quantiles
+
+RNN and Transformer Local-CP train their encoder using an auxiliary residual
+quantile head. Configure its fixed levels independently from the interval
+quantiles used for inference and evaluation:
+
+```yaml
+model:
+  training_quantiles: [0.05, 0.25, 0.5, 0.75, 0.95]
+  target_quantiles:
+    - [0.05, 0.95]
+```
+
+`model.training_quantiles` must be a flat, nonempty list of distinct, finite
+numbers strictly between zero and one. Levels are sorted into a canonical
+order. A single level is supported; the supplied configurations use multiple
+levels so training can capture more of the conditional residual distribution.
+Ordinary and tuning runners use the same quantile loss for training and
+checkpoint validation.
+
+After checkpoint selection, the encoder stays fixed and the auxiliary
+quantile head is discarded from the inference procedure. Local-CP samples
+calibration residuals using representation-similarity weights, then computes
+the final quantiles at `model.target_quantiles` from those shared samples.
+Changing inference levels therefore does not change the training objective.
+The tuning grids include a commented `model.training_quantiles` example;
+each nested list represents one candidate set of training levels.
+
+Previous Local-CP point-predictor checkpoints require retraining because the
+quantile head and stored training-level buffer change the checkpoint format.
+
+### Local-CP calibration weights
+
+Choose `model.similarity_fn` to compute weights for a query representation
+`h` and calibration representations `h_i`. All options apply softmax across
+the calibration pool, giving nonnegative weights that sum to one.
+
+| `similarity_fn` | Score passed to softmax | Effect of increasing `temperature` |
+| --- | --- | --- |
+| `dot_product` | `temperature * dot(h, h_i)` | Concentrates weight on larger raw dot products. |
+| `cos_similarity` | `temperature * cosine_similarity(h, h_i)` | Concentrates weight on more aligned representations. |
+| `euclidean` | `-sum((h - h_i) ** 2) / temperature` | Spreads weight more evenly across calibration points. |
+
+The Euclidean option uses **squared Euclidean distance** on the unnormalized
+representations and requires a finite, strictly positive scalar temperature.
+Its weights are proportional to `exp(-distance_squared / temperature)`;
+smaller temperatures concentrate weight on nearby representations. The dot
+product and cosine options retain their existing inverse-temperature
+convention, multiplying similarity by `temperature`.
+
+For either the RNN or Transformer runner, configure Euclidean weights with:
+
+```yaml
+model:
+  similarity_fn: "euclidean"
+  temperature: 1.0
+```
+
+Both Local-CP tuning grids include all three options. These calibration
+settings are separate from `model.training_quantiles` (encoder training)
+and `model.target_quantiles` (inference and evaluation).
 
 ### Additional CP baseline allocations
 
@@ -285,6 +540,7 @@ respectively, with a pool cap of 500.
 | HopCPT | 33% train / 33% validation / about 34% test | Train fits the Hopfield network. Validation is evaluated sequentially and selects the checkpoint by coverage and interval width. The selected network stays fixed in test, while its available context/residual memory advances through validation and prior test observations. |
 | NexCP | 66% initial calibration / about 34% test | There is no learned train/validation stage. The initial prefix provides residual history; with the current `max_past=200`, each interval uses at most the latest 200 available residuals, including prior test residuals as testing advances. |
 | KOWCPI | 50% nominal train / 16% nominal validation / about 34% test | Train and validation are combined into a 66% initial calibration prefix. With the current `update_with_test=true`, later intervals also use prior test residuals. If normalization is enabled, only the nominal training prefix determines its statistics. |
+| ResCP | 50% initial calibration / 16% validation / about 34% test | Calibration supplies residual normalization and reservoir memory. Validation selects hyperparameters in the separate tuner. The final test runner replays calibration and validation with the frozen scaler, then updates memory after each test observation. All three split ratios are configurable. |
 
 The active ratios and method-specific settings are in:
 
@@ -295,6 +551,7 @@ The active ratios and method-specific settings are in:
 - [`configs/hopcpt_configs/`](configs/hopcpt_configs/)
 - [`configs/nexcp_configs/`](configs/nexcp_configs/)
 - [`configs/kowcpi_configs/`](configs/kowcpi_configs/)
+- [`configs/rescp_configs/`](configs/rescp_configs/)
 
 Non-air configurations may intentionally use different ratios. For example,
 the HopCPT toy configuration uses 25% train / 25% validation / 50% test, and
@@ -350,10 +607,10 @@ checkpoint selection, and tuning evaluation. Its ordinary outer split remains
 
 | Tuning role | Local-CP allocation | Use |
 | --- | --- | --- |
-| Inner model fit | First 48% (80% of the outer 60% training prefix) | Optimizes the residual predictor. When normalization is enabled, only this prefix determines its statistics. |
-| Inner checkpoint validation | Next 12% (later 20% of the outer training prefix) | Selects the checkpoint and controls early stopping; it does not update parameters. |
-| Tuning calibration | Next 10% (the ordinary runner's validation region) | Initializes Local-CP after the selected model is frozen. `model.calibration_size` still caps the latest eligible calibration points retained in the rolling pool. |
-| Tuning evaluation | Next 10% (the ordinary runner's calibration region) | Evaluates coverage and Winkler score, updates the rolling pool only after scoring each point, and filters/ranks trials. |
+| Inner model fit | First 48% (80% of the outer 60% training prefix) | Optimizes the encoder and auxiliary residual quantile head with quantile loss at `model.training_quantiles`. When normalization is enabled, only this prefix determines its statistics. |
+| Inner checkpoint validation | Next 12% (later 20% of the outer training prefix) | Uses quantile loss at the same `model.training_quantiles` to select the checkpoint and control early stopping; it does not update parameters. |
+| Tuning calibration | Next 10% (the ordinary runner's validation region) | Initializes Local-CP after the selected model is frozen. `model.calibration_size` still caps the latest eligible calibration points retained in the pool. |
+| Tuning evaluation | Next 10% (the ordinary runner's calibration region) | Evaluates coverage and Winkler score and filters/ranks trials. With `model.rolling_calibration: true` (default), updates the pool only after scoring each point and observing its outcome; with `false`, retains the initial tuning calibration pool. |
 | Final test | Final 20% | Remains unavailable to the tuner: no test dataset is constructed, requested, or consumed. |
 
 For a length-100 held-out sequence, before accounting for the history window,
@@ -376,7 +633,8 @@ protocol and evaluate the previously untouched final test suffix once.
 Grid-search output itself is a validation result, not the final test result.
 
 This nested protocol currently applies to the QR-CP, IQN-CP, and Local-CP
-tuning runners. Other tuners under
+tuning runners. ResCP uses its calibration/validation/test split and likewise
+reserves test during tuning. Legacy tuners under
 [`sbatch/sbatch_run_tuning/`](sbatch/sbatch_run_tuning/) may still evaluate or
 rank candidates on their test partition and should not be assumed to provide
 an untouched final evaluation. All methods in a final comparison should use

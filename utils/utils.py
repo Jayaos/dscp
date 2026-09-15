@@ -5,6 +5,8 @@ import torch
 import torch.nn.functional as F
 from pathlib import Path
 import math
+from collections.abc import Sequence
+from numbers import Real
 
 
 def load_data(data_dir):
@@ -39,6 +41,46 @@ def get_sorted_unique_quantiles(target_quantiles):
         list[float]: e.g. [0.05, 0.1, 0.9, 0.95]
     """
     return sorted({float(x) for pair in target_quantiles for x in pair})
+
+
+def validate_training_quantiles(training_quantiles):
+    """Validate and sort the flat quantile levels used to train Local-CP encoders."""
+    if (
+        not isinstance(training_quantiles, Sequence)
+        or isinstance(training_quantiles, (str, bytes))
+        or len(training_quantiles) == 0
+    ):
+        raise ValueError("training_quantiles must be a nonempty flat list of quantile levels.")
+
+    levels = []
+    for level in training_quantiles:
+        if (
+            isinstance(level, bool)
+            or not isinstance(level, Real)
+            or not 0.0 < level < 1.0
+            or not math.isfinite(level)
+        ):
+            raise ValueError("training_quantiles must contain finite numeric levels strictly between 0 and 1.")
+        levels.append(float(level))
+    if len(set(levels)) != len(levels):
+        raise ValueError("training_quantiles must contain distinct quantile levels.")
+
+    # The model stores float32 levels; reject values that collapse at that precision.
+    stored_levels = np.asarray(levels, dtype=np.float32)
+    if (
+        np.any(stored_levels <= 0.0)
+        or np.any(stored_levels >= 1.0)
+        or len(np.unique(stored_levels)) != len(levels)
+    ):
+        raise ValueError("training_quantiles must remain distinct and strictly between 0 and 1 in float32.")
+    return sorted(levels)
+
+
+def validate_rolling_calibration(rolling_calibration):
+    """Require an actual boolean so a quoted 'false' cannot enable updates."""
+    if not isinstance(rolling_calibration, bool):
+        raise ValueError("model.rolling_calibration must be true or false.")
+    return rolling_calibration
 
 
 def get_interval_quantile_indices(target_quantiles):
@@ -351,6 +393,19 @@ def cos_similarity(q, k):
     cos = qn @ kn.T
 
     return cos # (batch_size, calibration_size)
+
+
+def negative_squared_euclidean(q, k):
+    """Return -||q_i - k_j||^2 for each query/calibration pair, without normalization."""
+    if q.ndim != 2 or k.ndim != 2:
+        raise ValueError("query and calibration representations must be two-dimensional")
+    if q.shape[-1] != k.shape[-1]:
+        raise ValueError("query and key dimension must match")
+
+    # Direct distances avoid cancellation in ||q||^2 + ||k||^2 - 2 q.k
+    # when representations have large norms but are close to one another.
+    distances = torch.cdist(q, k, p=2, compute_mode="donot_use_mm_for_euclid_dist")
+    return -distances.square()
 
 
 def generate_strided_feature(strided_x, strided_residual, strided_y, features_used):

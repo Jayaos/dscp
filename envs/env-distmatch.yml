@@ -1,0 +1,18 @@
+name: distmatch
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13.2
+  - pip
+  - pip:
+      - numpy==2.3.5
+      - scipy==1.16.3
+      - scikit-learn==1.8.0
+      - sklearn-quantile==0.1.1
+      - omegaconf==2.3.0
+      - torch==2.9.1
+      - matplotlib==3.10.8
+      - threadpoolctl==3.6.0
+      - pytest==9.1.1
+      - tqdm==4.70.1
+

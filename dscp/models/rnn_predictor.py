@@ -1,10 +1,10 @@
 import torch
-from utils.utils import generate_strided_feature
+from utils.utils import generate_strided_feature, validate_training_quantiles
 
 
 class RNNPredictor(torch.nn.Module):
     """
-    stacked RNN for prediction
+    Stacked RNN encoder trained with a fixed-quantile residual prediction head.
     """
 
     def __init__(
@@ -17,8 +17,14 @@ class RNNPredictor(torch.nn.Module):
         current_feature_dim: int = 0,
         dropout: float = 0.1,
         batch_first: bool = True,
+        *,
+        training_quantiles,
     ):
         super(RNNPredictor, self).__init__()
+        if prediction_step != 1:
+            raise ValueError("Local-CP quantile training requires prediction_step=1.")
+        levels = validate_training_quantiles(training_quantiles)
+        self.register_buffer("training_quantiles", torch.tensor(levels, dtype=torch.float32))
         self.rnn_type = rnn_type.lower()
         self.dim_model = dim_model
 
@@ -34,7 +40,7 @@ class RNNPredictor(torch.nn.Module):
 
         # this will work as embedding layer for features
         self.input_linear = torch.nn.Linear(dim_feature, dim_model)
-        self.output_linear = torch.nn.Linear(dim_model + current_feature_dim, prediction_step)  # no activation
+        self.output_linear = torch.nn.Linear(dim_model + current_feature_dim, len(levels))  # no activation
 
     def forward(self, src, current_feature=None, return_repr=False):
 

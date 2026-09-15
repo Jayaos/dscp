@@ -17,11 +17,14 @@ model:
   num_layers: 4
   dropout: 0.
   use_current_feature: False
+  training_quantiles: [0.05, 0.25, 0.5, 0.75, 0.95]
   target_quantiles:
     - [0.05, 0.950]
   prediction_step: 1
   window_size: 100
   calibration_size: 500
+  rolling_calibration: true
+  # Options: dot_product, cos_similarity, euclidean (negative squared distance / temperature).
   similarity_fn: "dot_product"
   temperature: 0.1
   sampling_num: 1000

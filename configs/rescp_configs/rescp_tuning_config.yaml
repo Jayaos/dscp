@@ -1,0 +1,12 @@
+# Validation-only search. The saved final-test suffix is never scored here.
+# A small initial grid; expand after measuring runtime on one sequence.
+grid:
+  model.temperature: [0.05, 0.1, 0.2]
+  model.calibration_size: [1000, 3800]
+
+tuning:
+  # Sorted sequence subset; null uses all sequences from --sequence-index.
+  num_sequences: 3
+  # Each sequence/pair must exceed target coverage plus this threshold.
+  # null disables the coverage filter and ranks every trial by Winkler score.
+  delta_threshold: -0.01
