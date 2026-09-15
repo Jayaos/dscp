@@ -1,18 +1,30 @@
+# Create: conda env create -f envs/env-distmatch.yml
+# Activate: conda activate distmatch
+# Core versions follow env-spci.yml and were verified with the DSCP DistMatch tests.
 name: distmatch
 channels:
   - conda-forge
+
 dependencies:
   - python=3.13.2
   - pip
+
   - pip:
+      # Residual matching and leaf quantile regression forests.
       - numpy==2.3.5
       - scipy==1.16.3
       - scikit-learn==1.8.0
       - sklearn-quantile==0.1.1
+
+      # YAML configuration, shared DSCP metrics, and interval plots.
       - omegaconf==2.3.0
       - torch==2.9.1
       - matplotlib==3.10.8
+
+      # CPU thread limits inside sequence workers and progress reporting.
       - threadpoolctl==3.6.0
-      - pytest==9.1.1
       - tqdm==4.70.1
+
+      # Implementation and pipeline verification.
+      - pytest==9.1.1
 

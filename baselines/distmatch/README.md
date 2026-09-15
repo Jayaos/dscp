@@ -33,11 +33,11 @@ or fitting models. It returns an error for a missing forecast artifact. It does
 not check the contents of a pickle; the experiment runner checks those when it
 loads the artifact.
 
-The presets cover air LR/LSTM/Chronos and solar LR. The Sapflow LSTM preset is a
-template: first generate
-`data/sapflux-solo3-large/lstm/lstm_sapflux-solo3-large_data.pkl` using the existing
-base-predictor pipeline. `air-10` refers to the PM10 target; the air artifact can
-contain multiple stations.
+The presets cover LR, LSTM, and Chronos for air, solar, and Sapflow. The Sapflow
+presets are templates: first generate the saved forecasts under
+`data/sapflux-solo3-large/{lr,lstm,chronos}/` using the existing base-predictor
+pipeline. `air-10` refers to the PM10 target; the air artifact can contain
+multiple stations.
 
 Relative artifact, output, and cache paths resolve from the repository root.
 Use `--data-path`, `--output-dir`, or `--seed` for launch-specific overrides.
@@ -58,20 +58,42 @@ Use `--threads-per-worker` to change each process's thread limit. Budget CPUs
 for `num_cores * threads_per_worker` and memory for each simultaneous station.
 The algorithm runs on CPU.
 
-For Slurm, submit from the repository root after activating the environment:
+## Slurm jobs
+
+Submit the dataset arrays from the repository root:
+
+```bash
+sbatch sbatch/sbatch_run_distmatch/run_distmatch_air.sbatch
+sbatch sbatch/sbatch_run_distmatch/run_distmatch_solar.sbatch
+sbatch sbatch/sbatch_run_distmatch/run_distmatch_sapflux.sbatch
+```
+
+Each array maps tasks `0`, `1`, and `2` to LR, LSTM, and Chronos. For example,
+`sbatch --array=1 sbatch/sbatch_run_distmatch/run_distmatch_air.sbatch` runs only
+air LSTM. Each task requests four CPUs, 16 GB of memory, and a 24-hour time limit.
+Logs use `%x_%A_%a.out` (job name, array job ID, task ID).
+
+For a single configuration, use the generic launcher:
 
 ```bash
 sbatch sbatch/sbatch_run_distmatch/run_distmatch.sbatch configs/distmatch_configs/distmatch_lr_air_config.yaml
 ```
 
-The portable job requests four CPUs and honors the YAML `num_cores` and
-`threads_per_worker`. Before loading the model, the CLI checks that their product
-fits `SLURM_CPUS_PER_TASK`. For example, eight workers with one thread each
+All launchers honor the YAML `num_cores` and `threads_per_worker`. Before loading
+the model, the CLI checks that their product fits `SLURM_CPUS_PER_TASK`.
+For example, eight workers with one thread each
 require `sbatch --cpus-per-task=8 ...`; an insufficient allocation returns an
 error without changing the configured worker count. The same check applies to
 explicit CLI overrides inside a Slurm allocation. Supply cluster-specific
-account/partition options to `sbatch` as needed. `RUNPATH` can override the
-submission directory.
+account/partition options to `sbatch` as needed.
+
+The scripts load `anaconda3` when the cluster provides a `module` command, then
+activate the `distmatch` environment. Create that environment first using the
+YAML above. Override the module with `DISTMATCH_CONDA_MODULE`, the environment
+with `DISTMATCH_ENV`, or the repository location with `DSCP_RUNPATH` (`RUNPATH`
+is also accepted). `DISTMATCH_SEED` overrides the configured seed. Dataset
+launchers forward additional arguments to the experiment CLI; the generic
+launcher takes the configuration path first, followed by CLI arguments.
 
 ## Experiment protocol
 
@@ -143,6 +165,21 @@ candidate passes the configured coverage condition, the tuner exports
 ```bash
 python -m sbatch.sbatch_run_distmatch.run_distmatch results/distmatch_tuning/best_config.yaml
 ```
+
+To tune all three air predictors through Slurm:
+
+```bash
+sbatch sbatch/sbatch_run_tuning/run_distmatch_air_tuning.sbatch
+```
+
+This uses the same array mapping and CPU settings as the dataset launchers.
+It checks configuration, artifact availability, and CPU allocation before
+tuning. Results are separated by job and predictor under
+`results/tuning/distmatch_air/job_<array_job_id>/<predictor>/`. Optional
+environment variables are `DISTMATCH_GRID_CONFIG`,
+`DISTMATCH_TUNING_OUTPUT_ROOT`, `DISTMATCH_TOP_K` (default `3`), and
+`DISTMATCH_SEED`. The tuning job evaluates validation only; run the exported
+`best_config.yaml` separately for final test results.
 
 ## Verify
 

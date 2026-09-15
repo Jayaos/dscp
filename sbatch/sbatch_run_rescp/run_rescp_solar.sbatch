@@ -16,7 +16,7 @@ cd "$RUNPATH"
 export PYTHONPATH="$RUNPATH:$RUNPATH/sbatch:${PYTHONPATH:-}"
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 module load anaconda3
-conda activate dscp
+conda activate "${RESCP_ENV:-rescp}"
 
 BASE_PREDICTORS=(lr lstm chronos)
 BASE_PREDICTOR="${BASE_PREDICTORS[${SLURM_ARRAY_TASK_ID:-0}]}"

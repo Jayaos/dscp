@@ -1,0 +1,38 @@
+# Ratios partition each saved forecast suffix chronologically.
+seed: 2026
+num_cores: 4
+threads_per_worker: 1
+
+data:
+  data_path: "./data/solar_prediction/lstm/lstm_nsdb-60m_data.pkl"
+  train_ratio: 0.5
+  valid_ratio: 0.16
+  test_ratio: 0.34
+  normalize: false
+
+model:
+  prediction_step: 1
+  target_quantiles:
+    - [0.05, 0.95]
+  past_window_len: 100
+  match_threshold: 0.1
+  n_trees: 10
+  bagging_ratio: 0.9
+  beta_bins: 10
+  qrf_n_estimators: 10
+  qrf_max_depth: 2
+  min_samples_per_node: 0
+  use_beta_search: true
+
+matching:
+  # null uses memory within the budget and temporary files above it; set a directory for reuse.
+  cache_dir: null
+  ks_block_size: 256
+  max_cache_memory_mb: 256
+
+plotting:
+  plotting: true
+  plotting_seq_len: 200
+
+saving_dir: "./results/distmatch_lstm_solar/seed_${seed}/"
+

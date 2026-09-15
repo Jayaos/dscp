@@ -127,7 +127,20 @@ homogeneous one-step forecasting comparison.
 
 ### Run and tune ResCP
 
-From the repository root, in the `dscp` environment:
+Create and activate the dedicated CPU environment from the repository root:
+
+```bash
+conda env create -f envs/env-rescp.yml
+conda activate rescp
+```
+
+[`envs/env-rescp.yml`](envs/env-rescp.yml) contains the dependencies for running
+and tuning ResCP on saved forecasts, including interval plots. Generate base
+predictor artifacts using their existing environments. The ResCP Slurm scripts
+activate `rescp` by default; use `--export=ALL,RESCP_ENV=dscp` to select the
+existing general environment instead.
+
+Then run an experiment:
 
 ```bash
 python -m sbatch.sbatch_run_rescp.run_rescp configs/rescp_configs/rescp_lstm_air_config.yaml

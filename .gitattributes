@@ -1,0 +1,3 @@
+# Keep DistMatch launchers compatible with Slurm after Windows checkouts.
+sbatch/sbatch_run_distmatch/*.sbatch text eol=lf
+sbatch/sbatch_run_tuning/run_distmatch_air_tuning.sbatch text eol=lf

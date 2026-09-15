@@ -1,0 +1,25 @@
+# Create: conda env create -f envs/env-rescp.yml
+# Activate: conda activate rescp
+# CPU environment for the DSCP ResCP runner, tuning, and plots on Linux/Windows.
+# Versions follow env-dscp.yml and the stack used for the ResCP adapter tests.
+name: rescp
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.9.13
+  - pip
+
+  - pip:
+      # Official CPU wheels; the +cpu pin avoids installing CUDA dependencies.
+      - --extra-index-url https://download.pytorch.org/whl/cpu
+      - torch==2.2.2+cpu
+
+      # Reservoir initialization, residual sampling, and numerical operations.
+      # Keep NumPy 1.x for compatibility with PyTorch 2.2.2.
+      - numpy==1.26.4
+      - scipy==1.13.1
+
+      # Experiment configuration and prediction-interval plots.
+      - omegaconf==2.3.0
+      - matplotlib==3.9.4
