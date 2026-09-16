@@ -1,4 +1,6 @@
 import copy
+from contextlib import closing
+from numbers import Integral
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +30,7 @@ from sbatch_run_tuning.common import (
     summarize_evaluation_results,
     write_trial_artifacts,
 )
+from sbatch_run_tuning.gpu_trial_pool import iter_parallel_trials
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score
 from utils.utils import generate_strided_feature, get_interval_quantile_indices, load_data
 
@@ -62,6 +65,33 @@ def resolve_tuning_inputs(base_config_path, tuning_cfg, save_dir):
             predictor = Path(str(base_config.data.data_path)).stem.split("_", 1)[0]
         save_dir_text = save_dir_text.replace("{base_predictor}", predictor)
     return base_config, resolved_base_config_path, Path(save_dir_text).resolve()
+
+
+def resolve_num_gpus(tuning_cfg, override=None):
+    """Resolve the number of trial workers; one retains the serial execution path."""
+    num_gpus = override if override is not None else (tuning_cfg or {}).get("num_gpus", 1)
+    if isinstance(num_gpus, bool) or not isinstance(num_gpus, Integral) or num_gpus < 1:
+        raise ValueError("tuning.num_gpus / --num-gpus must be a positive integer.")
+    return int(num_gpus)
+
+
+def resolve_worker_devices(base_config, grid, num_gpus):
+    """Validate a parallel CUDA request without changing single-worker behavior."""
+    if num_gpus == 1:
+        return []
+    if any(key == "device" or key.startswith("device.") for key in grid):
+        raise ValueError("Multi-GPU tuning assigns each worker's device; remove device from the grid.")
+    if not torch.cuda.is_available():
+        raise ValueError("Multi-GPU tuning requires CUDA, but CUDA is not available.")
+    if resolve_device(base_config.device).type != "cuda":
+        raise ValueError("Multi-GPU tuning requires a CUDA device in the base experiment config.")
+    visible_gpus = torch.cuda.device_count()
+    if visible_gpus < num_gpus:
+        raise ValueError(
+            f"Multi-GPU tuning requested {num_gpus} GPUs, but only {visible_gpus} are visible. "
+            "Request enough GPUs in the Slurm job or reduce tuning.num_gpus / --num-gpus."
+        )
+    return [f"cuda:{index}" for index in range(num_gpus)]
 
 
 def _build_model(config, dim_feature: int, dim_x: int):
@@ -287,6 +317,96 @@ def _run_single_trial(config, sequence_item, normalization_params):
     }
 
 
+def _run_grid_trial(
+    trial_index, trial_config, grid_values, selected_data, sequence_keys, seed, prepared_data_cache
+):
+    """Evaluate one configuration on every selected sequence, in their original order."""
+    print(
+        f"[qr_cp] starting trial {trial_index} on device={trial_config.get('device', 'default')} "
+        f"with grid_values={grid_values}",
+        flush=True,
+    )
+    set_global_seed(seed + trial_index)
+    model_selection_valid_ratio = float(
+        trial_config.tuning.get("model_selection_valid_ratio", 0.2)
+    )
+    data_cache_key = (
+        int(trial_config.model.window_size),
+        int(trial_config.model.prediction_step),
+        float(trial_config.data.train_ratio),
+        float(trial_config.data.valid_ratio),
+        model_selection_valid_ratio,
+        bool(trial_config.data.normalize),
+    )
+    trial_cpd = prepared_data_cache.get(data_cache_key)
+    if trial_cpd is None:
+        trial_cpd = ConformalPredictionData(copy.deepcopy(selected_data))
+        trial_cpd.prepare_quantile_regression_datasets(
+            trial_config.model.window_size,
+            trial_config.model.prediction_step,
+            trial_config.data.train_ratio,
+            trial_config.data.valid_ratio,
+            normalize=trial_config.data.normalize,
+            model_selection_valid_ratio=model_selection_valid_ratio,
+        )
+        prepared_data_cache[data_cache_key] = trial_cpd
+    sequence_results = {
+        sequence_key: _run_single_trial(
+            trial_config,
+            trial_cpd.dataset[sequence_key],
+            _normalization_params(trial_config, trial_cpd.data[sequence_key]),
+        )
+        for sequence_key in sequence_keys
+    }
+    result = aggregate_sequence_results(sequence_results, trial_config.model.target_quantiles)
+    result["mean_best_model_selection_valid_loss"] = result["mean_best_valid_loss"]
+    result["evaluation_split"] = "nominal_validation"
+    result["final_test_evaluated"] = False
+    return {
+        "trial_index": trial_index,
+        "sequence_keys": sequence_keys,
+        "grid_values": grid_values,
+        "evaluation_split": "nominal_validation",
+        "final_test_evaluated": False,
+        "result": result,
+        "resolved_config": plain_config(trial_config),
+    }
+
+
+_worker_device = None
+_worker_selected_data = None
+_worker_sequence_keys = None
+_worker_prepared_data_cache = None
+
+
+def _initialize_gpu_worker(device, selected_data, sequence_keys):
+    """Initialize one spawned worker, retaining CPU datasets between its trials."""
+    global _worker_device, _worker_selected_data, _worker_sequence_keys, _worker_prepared_data_cache
+    torch.set_num_threads(1)
+    torch.cuda.set_device(device)
+    _worker_device = device
+    _worker_selected_data = selected_data
+    _worker_sequence_keys = sequence_keys
+    _worker_prepared_data_cache = {}
+
+
+def _run_gpu_trial(task):
+    if _worker_device is None:
+        raise RuntimeError("The GPU trial worker has not been initialized.")
+    trial_index, config_values, grid_values, seed = task
+    trial_config = OmegaConf.create(config_values)
+    configured_device = trial_config.device
+    trial_config.device = _worker_device
+    record = _run_grid_trial(
+        trial_index, trial_config, grid_values, _worker_selected_data,
+        _worker_sequence_keys, seed, _worker_prepared_data_cache,
+    )
+    # Saved configurations remain reusable on a later single-GPU allocation.
+    record["resolved_config"]["device"] = configured_device
+    record["worker_device"] = _worker_device
+    return record
+
+
 def main():
     args = parse_args("qr_cp")
     grid, tuning_cfg = load_grid(args.grid_config)
@@ -295,67 +415,55 @@ def main():
     )
     num_sequences = resolve_num_sequences(tuning_cfg)
     delta_threshold = resolve_delta_threshold(tuning_cfg)
+    num_gpus = resolve_num_gpus(tuning_cfg, getattr(args, "num_gpus", None))
+    worker_devices = resolve_worker_devices(base_config, grid, num_gpus)
     base_config.tuning = dict(tuning_cfg)
+    base_config.tuning.num_gpus = num_gpus
 
     print(f"[qr_cp] base configuration: {base_config_path}", flush=True)
     print(f"[qr_cp] prediction artifact: {base_config.data.data_path}", flush=True)
     print(f"[qr_cp] saving results to: {save_dir}", flush=True)
+    if worker_devices:
+        print(f"[qr_cp] parallel trial workers: {worker_devices}", flush=True)
+    else:
+        print("[qr_cp] running trials sequentially", flush=True)
     data = load_data(base_config.data.data_path)
     sequence_keys = choose_sequence_keys(data, args.sequence_key, args.sequence_index, num_sequences)
     selected_data = {sequence_key: data[sequence_key] for sequence_key in sequence_keys}
     save_dir.mkdir(parents=True, exist_ok=True)
 
+    if worker_devices:
+        tasks = [
+            (trial_index, plain_config(trial_config), grid_values, args.seed)
+            for trial_index, (trial_config, grid_values)
+            in enumerate(iter_grid_configs(base_config, grid), start=1)
+        ]
+        trial_records = iter_parallel_trials(
+            tasks, worker_devices, _run_gpu_trial,
+            initializer=_initialize_gpu_worker, initargs=(selected_data, sequence_keys),
+        )
+    else:
+        prepared_data_cache = {}
+        trial_records = (
+            _run_grid_trial(
+                trial_index, trial_config, grid_values, selected_data,
+                sequence_keys, args.seed, prepared_data_cache,
+            )
+            for trial_index, (trial_config, grid_values)
+            in enumerate(iter_grid_configs(base_config, grid), start=1)
+        )
+
     trials = []
-    prepared_data_cache = {}
-    for trial_index, (trial_config, grid_values) in enumerate(iter_grid_configs(base_config, grid), start=1):
-        print(f"[qr_cp] starting trial {trial_index} with grid_values={grid_values}", flush=True)
-        set_global_seed(args.seed + trial_index)
-        model_selection_valid_ratio = float(
-            trial_config.tuning.get("model_selection_valid_ratio", 0.2)
-        )
-        data_cache_key = (
-            int(trial_config.model.window_size),
-            int(trial_config.model.prediction_step),
-            float(trial_config.data.train_ratio),
-            float(trial_config.data.valid_ratio),
-            model_selection_valid_ratio,
-            bool(trial_config.data.normalize),
-        )
-        trial_cpd = prepared_data_cache.get(data_cache_key)
-        if trial_cpd is None:
-            trial_cpd = ConformalPredictionData(copy.deepcopy(selected_data))
-            trial_cpd.prepare_quantile_regression_datasets(
-                trial_config.model.window_size,
-                trial_config.model.prediction_step,
-                trial_config.data.train_ratio,
-                trial_config.data.valid_ratio,
-                normalize=trial_config.data.normalize,
-                model_selection_valid_ratio=model_selection_valid_ratio,
+    # A failed artifact write must also stop any workers that are still running.
+    with closing(trial_records):
+        for record in trial_records:
+            trials.append(record)
+            write_trial_artifacts(
+                save_dir, record["trial_index"], OmegaConf.create(record["resolved_config"]), record
             )
-            prepared_data_cache[data_cache_key] = trial_cpd
-        sequence_results = {
-            sequence_key: _run_single_trial(
-                trial_config,
-                trial_cpd.dataset[sequence_key],
-                _normalization_params(trial_config, trial_cpd.data[sequence_key]),
-            )
-            for sequence_key in sequence_keys
-        }
-        result = aggregate_sequence_results(sequence_results, trial_config.model.target_quantiles)
-        result["mean_best_model_selection_valid_loss"] = result["mean_best_valid_loss"]
-        result["evaluation_split"] = "nominal_validation"
-        result["final_test_evaluated"] = False
-        record = {
-            "trial_index": trial_index,
-            "sequence_keys": sequence_keys,
-            "grid_values": grid_values,
-            "evaluation_split": "nominal_validation",
-            "final_test_evaluated": False,
-            "result": result,
-            "resolved_config": plain_config(trial_config),
-        }
-        trials.append(record)
-        write_trial_artifacts(save_dir, trial_index, trial_config, record)
+
+    # Completion order must not affect saved order or tie-breaking during ranking.
+    trials.sort(key=lambda record: record["trial_index"])
 
     positive_trials = [trial for trial in trials if trial["result"]["positive_delta_coverage"]]
     ranked_trials = sorted(positive_trials, key=lambda item: item["result"]["selection_score"])
@@ -373,6 +481,11 @@ def main():
         "top_k": args.top_k,
         "evaluation_split": "nominal_validation",
         "final_test_evaluated": False,
+        "execution": {
+            "mode": "parallel_trials" if worker_devices else "serial",
+            "num_gpus": num_gpus,
+            "worker_devices": worker_devices,
+        },
         "tuning_protocol": {
             "model_fit_dataset": "train_dataset",
             "checkpoint_selection_dataset": "model_selection_valid_dataset",

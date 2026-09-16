@@ -1,5 +1,26 @@
 # DSCP
 
+## SplitCP baseline
+
+SplitCP calibrates a fixed absolute-residual interval independently for each
+series using saved base forecasts. It follows the unweighted, unscaled
+procedure in Tibshirani's `conformalInference/R/split.R`, including the
+finite-sample quantile correction and infinite-radius small-sample case.
+Only calibration and test partitions are needed; there is no CP training or
+validation stage and no test-time calibration update.
+
+```bash
+python -m sbatch.sbatch_run_split_cp.run_split_cp --dataset air --base-predictor lr
+python -m sbatch.sbatch_run_split_cp.run_split_cp --dataset solar --base-predictor lstm --dry-run
+```
+
+Nine presets use 66% calibration / 34% test. Ratios are configurable, and exact
+per-series test-start indices can align comparisons despite differences in
+other methods' split rounding. The runner writes the existing log, summary,
+resolved-configuration, and plotting formats. See the
+[SplitCP guide](baselines/split_cp/README.md) and
+[reference notes](baselines/split_cp/UPSTREAM.md) for details.
+
 ## DistMatch baseline
 
 DistMatch reads saved base-predictor forecasts and estimates intervals from
@@ -596,12 +617,18 @@ be regenerated to adopt this past-only covariate protocol.
 
 ### Selecting the Air base predictor for QR-CP tuning
 
-Select the Air base predictor in the base experiment configuration. The tuning
-jobs use
-[`qr_rnn_chronos_air_config.yaml`](configs/qr_cp_configs/qr_rnn_chronos_air_config.yaml)
-or
-[`qr_transformer_chronos_air_config.yaml`](configs/qr_cp_configs/qr_transformer_chronos_air_config.yaml)
-by default. Edit the top-level field in the corresponding file:
+Each Air tuning job uses a three-task Slurm array, with one task per base
+predictor. The RNN and Transformer scripts select the corresponding
+`configs/qr_cp_configs/qr_<encoder>_<predictor>_air_config.yaml`:
+
+| Array task | Predictor |
+| --- | --- |
+| `0` | LR (`lr`) |
+| `1` | LSTM (`lstm`) |
+| `2` | Chronos (`chronos`) |
+
+Each base configuration declares its predictor at the top level. Keep this
+value consistent with the filename when running the arrays:
 
 ```yaml
 base_predictor: chronos # choices: lr, lstm, chronos
@@ -611,11 +638,20 @@ The base configuration's `data.data_path` and `saving_dir` refer to
 `${base_predictor}`, so changing this field updates their predictor component
 automatically. For example, `base_predictor: lstm` reads
 `data/air-10_prediction/lstm/lstm_air-10_data.pkl`; generate the selected
-predictor's artifact before submitting. Then submit the corresponding job:
+predictor's artifact before submitting. Submit both arrays to run six separate
+tuning tasks, using the same tuning grid for all three predictors of each
+encoder:
 
 ```bash
 sbatch sbatch/sbatch_run_tuning/run_qr_cp_rnn_air_tuning.sbatch
 sbatch sbatch/sbatch_run_tuning/run_qr_cp_transformer_air_tuning.sbatch
+```
+
+To submit only one predictor, override the array range. For example, this runs
+only RNN/LSTM tuning:
+
+```bash
+sbatch --array=1 sbatch/sbatch_run_tuning/run_qr_cp_rnn_air_tuning.sbatch
 ```
 
 The job's `--base-config` selects the experiment configuration. Changing
@@ -626,7 +662,55 @@ candidate hyperparameter values under `grid` and controls such as
 
 The tuning jobs automatically separate results under
 `results/tuning/qr_<encoder>_<predictor>_air/`, where `<encoder>` is `rnn` or
-`transformer`. The predictor comes from the selected base configuration.
+`transformer`. The predictor comes from the selected base configuration. Slurm
+logs use `Report-%x-%A_%a.out`, separating the job name, array job ID, and task
+ID.
+
+### Optional multi-GPU QR-CP tuning
+
+QR-CP can run independent hyperparameter trials on multiple GPUs. Set the
+number of GPU workers in the encoder's tuning YAML
+([RNN](configs/qr_cp_configs/qr_rnn_air_tuning_config.yaml) or
+[Transformer](configs/qr_cp_configs/qr_transformer_air_tuning_config.yaml)):
+
+```yaml
+tuning:
+  num_gpus: 1 # default; use 2 or more to parallelize trials
+```
+
+With `num_gpus: 1`, trials run sequentially on one GPU, with the existing CPU
+fallback when CUDA is unavailable. With a larger value, each GPU runs one
+worker process and takes the next available trial. Each trial still trains
+and evaluates all selected sequences in their existing order. Trial seeds
+are assigned independently of worker scheduling, and the parent process
+combines all trial results before ranking configurations.
+
+Request the matching GPUs from Slurm as well: a YAML setting cannot allocate
+cluster resources. The RNN script requests one GPU per task and uses the YAML
+worker count by default. The Transformer script requests two GPUs per task
+and passes `--num-gpus 2`, overriding the YAML default. Run both with two GPUs
+per task as follows:
+
+```bash
+sbatch --gres=gpu:2 --cpus-per-task=4 --mem=16G sbatch/sbatch_run_tuning/run_qr_cp_rnn_air_tuning.sbatch --num-gpus 2
+sbatch sbatch/sbatch_run_tuning/run_qr_cp_transformer_air_tuning.sbatch
+```
+
+For RNN, you can alternatively set `tuning.num_gpus: 2` and omit the final
+`--num-gpus 2` argument while retaining the Slurm resource options. Arguments
+after either script name override its worker count. To run Transformer trials
+sequentially on one GPU:
+
+```bash
+sbatch --gres=gpu:1 --cpus-per-task=2 --mem=8G sbatch/sbatch_run_tuning/run_qr_cp_transformer_air_tuning.sbatch --num-gpus 1
+```
+
+The three predictor array tasks remain separate. Two GPUs per task require
+up to six GPUs for one encoder's array, or twelve for both arrays when all
+tasks run concurrently. Workers have separate data and caches, so host-memory
+requirements grow with the worker count; adjust the example's `--mem=16G`
+allocation for your data. Multi-GPU mode fails clearly if fewer than the
+requested number of CUDA GPUs are visible.
 
 ### Selecting sequences for tuning
 

@@ -1,0 +1,18 @@
+# Chronological calibration/test split of the saved held-out forecasts.
+num_cores: 1
+
+data:
+  data_path: "./data/solar_prediction/lstm/lstm_nsdb-60m_data.pkl"
+  calibration_ratio: 0.66
+  test_ratio: 0.34
+
+model:
+  target_quantiles:
+    - [0.05, 0.95]
+  prediction_step: 1
+
+plotting:
+  plotting: true
+  plotting_seq_len: 200
+
+saving_dir: "./results/split_cp_lstm_solar/"

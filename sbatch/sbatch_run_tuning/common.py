@@ -69,6 +69,16 @@ def parse_args(method_name: str, include_num_cores: bool = False) -> argparse.Na
         default=42,
         help="Base random seed. Trial index is added to this value.",
     )
+    if method_name == "qr_cp":
+        parser.add_argument(
+            "--num-gpus",
+            type=int,
+            default=None,
+            help=(
+                "Override tuning.num_gpus: 1 runs trials sequentially; values "
+                "greater than 1 use one trial worker per visible GPU."
+            ),
+        )
     if include_num_cores:
         parser.add_argument(
             "--num-cores",
