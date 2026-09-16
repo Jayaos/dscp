@@ -1,5 +1,5 @@
 device: 0
-base_predictor: chronos # choices: lr, lstm, chronos
+base_predictor: lstm # choices: lr, lstm, chronos
 
 
 data:

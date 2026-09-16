@@ -666,6 +666,86 @@ The tuning jobs automatically separate results under
 logs use `Report-%x-%A_%a.out`, separating the job name, array job ID, and task
 ID.
 
+### Selecting the Air base predictor for IQN-CP tuning
+
+IQN-CP uses the same three-task predictor arrays as QR-CP: task `0` selects
+LR, task `1` selects LSTM, and task `2` selects Chronos. Submit both encoders
+to run six separate tuning tasks:
+
+```bash
+sbatch sbatch/sbatch_run_tuning/run_iqn_cp_rnn_air_tuning.sbatch
+sbatch sbatch/sbatch_run_tuning/run_iqn_cp_transformer_air_tuning.sbatch
+```
+
+Each task loads
+`configs/iqn_cp_configs/iqn_<encoder>_<predictor>_air_config.yaml` and uses the
+encoder's existing tuning grid. Each base configuration declares
+`base_predictor` and interpolates it into `data.data_path` and the ordinary
+run's `saving_dir`; the ordinary output also retains its prediction-head
+component. Generate the selected predictor's saved forecast artifact before
+submitting. The generic `iqn_<encoder>_air_config.yaml` configurations remain
+available and default to Chronos for compatibility.
+
+Tuning results are separated under
+`results/tuning/iqn_<encoder>_<predictor>_air/`, with the predictor resolved
+from the actual base configuration. Trial configurations preserve their
+prediction-head settings, and both encoders keep their existing tuning
+grids. Slurm logs use `Report-%x-%A_%a.out` to separate array tasks.
+
+To tune only LSTM with the RNN encoder, select task `1`. To run all predictors
+with at most one task active at a time, limit array concurrency:
+
+```bash
+sbatch --array=1 sbatch/sbatch_run_tuning/run_iqn_cp_rnn_air_tuning.sbatch
+sbatch --array=0-2%1 sbatch/sbatch_run_tuning/run_iqn_cp_transformer_air_tuning.sbatch
+```
+
+Each IQN-CP task requests two GPUs, two CPUs, 4 GB of host memory, and six
+hours, and passes `--num-gpus 2` to run two hyperparameter trials concurrently.
+Arguments after the script name can override the worker count. One full
+encoder array can use six GPUs, or both arrays can use twelve GPUs when all
+tasks run concurrently. Adjust the Slurm CPU, memory, and time limits for
+the search and data size.
+
+### Selecting the Air base predictor for Local-CP tuning
+
+Local-CP uses the same three-task predictor arrays as QR-CP: task `0` selects
+LR, task `1` selects LSTM, and task `2` selects Chronos. Submit both encoders
+to run six separate tuning tasks:
+
+```bash
+sbatch sbatch/sbatch_run_tuning/run_lcp_rnn_air_tuning.sbatch
+sbatch sbatch/sbatch_run_tuning/run_lcp_transformer_air_tuning.sbatch
+```
+
+Each task loads
+`configs/lcp_configs/lcp_<encoder>_<predictor>_air_config.yaml` and uses the
+encoder's existing tuning grid. The six base configurations declare
+`base_predictor` and interpolate it into `data.data_path` and `saving_dir`.
+Generate the selected predictor's saved forecast artifact before submitting.
+Model and training defaults are shared across the three predictors for each
+encoder; the grid overrides only its listed candidate settings.
+
+Results are separated under
+`results/tuning/lcp_<encoder>_<predictor>_air/`, with the predictor resolved
+from the actual base configuration. Explicit configurations with an existing
+predictor-specific `data.data_path` also remain supported. Slurm logs use
+`Report-%x-%A_%a.out` to separate array tasks.
+
+To tune only LSTM with the RNN encoder, select task `1`. To run all predictors
+with at most one task active at a time, limit array concurrency:
+
+```bash
+sbatch --array=1 sbatch/sbatch_run_tuning/run_lcp_rnn_air_tuning.sbatch
+sbatch --array=0-2%1 sbatch/sbatch_run_tuning/run_lcp_transformer_air_tuning.sbatch
+```
+
+Each Local-CP task requests two GPUs, two CPUs, 8 GB of host memory, and eight
+hours, and runs two hyperparameter trials concurrently. Predictor array tasks
+are separate from these GPU workers: one full encoder array can use six GPUs,
+or both arrays can use twelve GPUs when all tasks run concurrently. Adjust
+the Slurm CPU, memory, and time limits for the search and data size.
+
 ### Optional multi-GPU QR-CP tuning
 
 QR-CP can run independent hyperparameter trials on multiple GPUs. Set the
@@ -723,20 +803,27 @@ Their tuning YAMLs default to `tuning.num_gpus: 1`:
 | Local-CP | [RNN](configs/lcp_configs/lcp_rnn_air_tuning_config.yaml) | [Transformer](configs/lcp_configs/lcp_transformer_air_tuning_config.yaml) |
 
 Set `tuning.num_gpus: 2` to run two independent trials concurrently, or override
-the YAML with `--num-gpus 2`. Their four Slurm launchers request one GPU by
-default and forward arguments to the tuning runner. For two GPUs per job:
+the YAML with `--num-gpus 2`. The four Slurm launchers currently request two
+GPUs and pass `--num-gpus 2`, overriding the YAML default. Arguments after the
+script name can override that worker count. For example:
 
 ```bash
 sbatch --gres=gpu:2 --cpus-per-task=4 --mem=16G sbatch/sbatch_run_tuning/run_iqn_cp_rnn_air_tuning.sbatch --num-gpus 2
 sbatch --gres=gpu:2 --cpus-per-task=4 --mem=16G sbatch/sbatch_run_tuning/run_iqn_cp_transformer_air_tuning.sbatch --num-gpus 2
-sbatch --gres=gpu:2 --cpus-per-task=4 --mem=16G sbatch/sbatch_run_tuning/run_lcp_rnn_chronos_air_tuning.sbatch --num-gpus 2
-sbatch --gres=gpu:2 --cpus-per-task=4 --mem=16G sbatch/sbatch_run_tuning/run_lcp_transformer_chronos_air_tuning.sbatch --num-gpus 2
+sbatch --cpus-per-task=4 --mem=16G sbatch/sbatch_run_tuning/run_lcp_rnn_air_tuning.sbatch
+sbatch --cpus-per-task=4 --mem=16G sbatch/sbatch_run_tuning/run_lcp_transformer_air_tuning.sbatch
 ```
 
-When `num_gpus: 2` is already in the YAML, omit the final `--num-gpus 2` while
-retaining the Slurm resource options. Set `num_gpus: 1` and submit normally to
-return to sequential trials, or pass `--num-gpus 1` after the script name to
-override the YAML. Multi-GPU execution uses the first requested number of
+Both IQN-CP and Local-CP submissions launch one task per predictor. To run
+Local-CP trials sequentially on one GPU per predictor task, override both
+the Slurm allocation and worker count:
+
+```bash
+sbatch --gres=gpu:1 sbatch/sbatch_run_tuning/run_lcp_rnn_air_tuning.sbatch --num-gpus 1
+```
+
+The same resource and worker overrides apply to the IQN-CP launchers.
+Multi-GPU execution uses the first requested number of
 visible CUDA devices and fails before loading data if too few are available.
 Single-worker execution retains the existing CPU fallback.
 

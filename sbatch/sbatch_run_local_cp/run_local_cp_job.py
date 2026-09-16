@@ -66,6 +66,7 @@ def main(argv=None):
     )
 
     config = OmegaConf.load(template_path)
+    config.base_predictor = predictor
     config.model.prediction_step = 1
     config.data.data_path = str(artifact_path)
     config.saving_dir = str(output_dir)

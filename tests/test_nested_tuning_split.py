@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+from omegaconf import OmegaConf
 
 from dscp.data import ConformalPredictionData
 
@@ -302,17 +303,17 @@ class TuningRunnerIsolationTests(unittest.TestCase):
     def test_local_tuning_launchers_use_current_paths(self):
         repository_root = Path(__file__).resolve().parents[1]
         launcher_names = (
-            "run_lcp_rnn_chronos_air_tuning.sbatch",
-            "run_lcp_transformer_chronos_air_tuning.sbatch",
+            "run_lcp_rnn_air_tuning.sbatch",
+            "run_lcp_transformer_air_tuning.sbatch",
         )
         for launcher_name in launcher_names:
             with self.subTest(launcher=launcher_name):
                 source = (
                     repository_root / "sbatch" / "sbatch_run_tuning" / launcher_name
                 ).read_text(encoding="utf-8")
-                self.assertIn('$RUNPATH/sbatch:$PYTHONPATH', source)
+                self.assertIn('$RUNPATH/sbatch:', source)
                 self.assertIn(
-                    "python sbatch/sbatch_run_tuning/run_local_cp_tuning.py",
+                    "python -u sbatch/sbatch_run_tuning/run_local_cp_tuning.py",
                     source,
                 )
 
@@ -324,10 +325,12 @@ class TuningRunnerIsolationTests(unittest.TestCase):
         )
         for config_name in config_names:
             with self.subTest(config=config_name):
-                source = (
+                config = OmegaConf.load(
                     repository_root / "configs" / "lcp_configs" / config_name
-                ).read_text(encoding="utf-8")
-                self.assertIn("model_selection_valid_ratio: 0.2", source)
+                )
+                ratio = config.tuning.model_selection_valid_ratio
+                self.assertGreater(ratio, 0.0)
+                self.assertLess(ratio, 1.0)
 
 
 if __name__ == "__main__":

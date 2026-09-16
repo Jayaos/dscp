@@ -1,5 +1,5 @@
 device: 0
-base_predictor: chronos
+base_predictor: lstm
 
 
 data:
@@ -11,9 +11,9 @@ data:
 
 
 model:
-  rnn_type: "lstm"
-  shared_dim: &shared_dim 16
+  shared_dim: &shared_dim 32
   dim_model: *shared_dim
+  num_heads: 2
   num_layers: 2
   dropout: 0.
   use_current_feature: False
@@ -42,4 +42,4 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/iqn_rnn_${base_predictor}_air_${model.prediction_head}/"
+saving_dir: "./results/run_iqn_transformer_${base_predictor}_air_${model.prediction_head}/"
