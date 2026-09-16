@@ -22,12 +22,12 @@ saved forecasts sequentially and needs no GPU. Override resources using
 
 The jobs load `anaconda3` and activate `dscp` (see
 [`../../envs/env-dscp.yml`](../../envs/env-dscp.yml)).
-Set `NEXCP_ENV` or `NEXCP_CONDA_MODULE` to select another installed
-environment or module. The repository location defaults to the submission
+Set `NEXCP_CONDA_MODULE` to select another installed module.
+The repository location defaults to the submission
 directory; set `DSCP_RUNPATH` (or `RUNPATH`) when submitting elsewhere:
 
 ```bash
-sbatch --export=ALL,DSCP_RUNPATH=/path/to/dscp,NEXCP_ENV=dscp \
+sbatch --export=ALL,DSCP_RUNPATH=/path/to/dscp \
   sbatch/sbatch_run_nexcp/run_nexcp_air.sbatch
 ```
 

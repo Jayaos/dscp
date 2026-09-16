@@ -35,6 +35,6 @@ if type module >/dev/null 2>&1; then
   module load "${NEXCP_CONDA_MODULE:-anaconda3}"
 fi
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate "${NEXCP_ENV:-dscp}"
+conda activate dscp
 
 python -u -m sbatch.sbatch_run_nexcp.run_nexcp "$CONFIG_PATH"

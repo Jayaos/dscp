@@ -1,11 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=distmatch_air
+#SBATCH -J distmatch_air
+#SBATCH --account=gts-yxie77-paid
 #SBATCH --array=0-2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=24:00:00
+#SBATCH -t10
 #SBATCH --output=%x_%A_%a.out
 
 set -euo pipefail

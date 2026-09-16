@@ -1,5 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name=distmatch_solar
+#SBATCH -J distmatch_solar
+#SBATCH --account=gts-yxie77-paid
 #SBATCH --array=0-2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1

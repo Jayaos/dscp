@@ -1,5 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name=distmatch_sapflux
+#SBATCH -J distmatch_sapflux
+#SBATCH --account=gts-yxie77-paid
 #SBATCH --array=0-2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
