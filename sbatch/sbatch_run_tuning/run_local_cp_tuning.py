@@ -1,4 +1,5 @@
 import copy
+from contextlib import closing
 
 import numpy as np
 import torch
@@ -20,11 +21,14 @@ from sbatch_run_tuning.common import (
     plain_config,
     resolve_delta_threshold,
     resolve_device,
+    resolve_num_gpus,
     resolve_num_sequences,
+    resolve_worker_devices,
     set_global_seed,
     summarize_evaluation_results,
     write_trial_artifacts,
 )
+from sbatch_run_tuning.gpu_trial_pool import iter_parallel_trials
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score
 from utils.utils import (
     generate_strided_feature, get_interval_quantile_indices, load_data,
@@ -356,62 +360,140 @@ def _run_single_trial(config, sequence_item, normalization_params):
     }
 
 
+def _run_grid_trial(
+    trial_index, trial_config, grid_values, selected_data, sequence_keys, seed, prepared_data_cache
+):
+    """Evaluate one configuration on every selected sequence in the same order."""
+    print(
+        f"[local_cp] starting trial {trial_index} on device={trial_config.get('device', 'default')} "
+        f"with grid_values={grid_values}",
+        flush=True,
+    )
+    set_global_seed(seed + trial_index)
+    data_cache_key = _prepared_data_cache_key(trial_config)
+    trial_cpd = prepared_data_cache.get(data_cache_key)
+    if trial_cpd is None:
+        trial_cpd = _prepare_trial_data(selected_data, trial_config)
+        prepared_data_cache[data_cache_key] = trial_cpd
+    sequence_results = {
+        sequence_key: _run_single_trial(
+            trial_config,
+            trial_cpd.dataset[sequence_key],
+            _normalization_params(trial_config, trial_cpd.data[sequence_key]),
+        )
+        for sequence_key in sequence_keys
+    }
+    result = aggregate_sequence_results(sequence_results, trial_config.model.target_quantiles)
+    result["mean_best_model_selection_valid_loss"] = result["mean_best_valid_loss"]
+    result["calibration_split"] = "nominal_validation"
+    result["evaluation_split"] = "nominal_calibration"
+    result["final_test_evaluated"] = False
+    result["dataset_roles"] = {
+        "model_fit": "train_dataset",
+        "checkpoint_selection": "model_selection_valid_dataset",
+        "conformal_calibration": "calibration_dataset",
+        "hyperparameter_evaluation": "tuning_evaluation_dataset",
+    }
+    return {
+        "trial_index": trial_index,
+        "sequence_keys": sequence_keys,
+        "grid_values": grid_values,
+        "calibration_split": "nominal_validation",
+        "evaluation_split": "nominal_calibration",
+        "final_test_evaluated": False,
+        "result": result,
+        "resolved_config": plain_config(trial_config),
+    }
+
+
+_worker_device = None
+_worker_selected_data = None
+_worker_sequence_keys = None
+_worker_prepared_data_cache = None
+
+
+def _initialize_gpu_worker(device, selected_data, sequence_keys):
+    """Initialize one spawned worker and retain its CPU datasets between trials."""
+    global _worker_device, _worker_selected_data, _worker_sequence_keys, _worker_prepared_data_cache
+    torch.set_num_threads(1)
+    torch.cuda.set_device(device)
+    _worker_device = device
+    _worker_selected_data = selected_data
+    _worker_sequence_keys = sequence_keys
+    _worker_prepared_data_cache = {}
+
+
+def _run_gpu_trial(task):
+    if _worker_device is None:
+        raise RuntimeError("The GPU trial worker has not been initialized.")
+    trial_index, config_values, grid_values, seed = task
+    trial_config = OmegaConf.create(config_values)
+    configured_device = trial_config.device
+    trial_config.device = _worker_device
+    record = _run_grid_trial(
+        trial_index, trial_config, grid_values, _worker_selected_data,
+        _worker_sequence_keys, seed, _worker_prepared_data_cache,
+    )
+    # Saved configurations remain reusable on a later single-GPU allocation.
+    record["resolved_config"]["device"] = configured_device
+    record["worker_device"] = _worker_device
+    return record
+
+
 def main():
     args = parse_args("local_cp")
     save_dir = args.save_dir.resolve()
-    save_dir.mkdir(parents=True, exist_ok=True)
 
     base_config = OmegaConf.load(args.base_config)
     grid, tuning_cfg = load_grid(args.grid_config)
-
-    data = load_data(base_config.data.data_path)
     num_sequences = resolve_num_sequences(tuning_cfg)
     delta_threshold = resolve_delta_threshold(tuning_cfg)
+    num_gpus = resolve_num_gpus(tuning_cfg, getattr(args, "num_gpus", None))
+    worker_devices = resolve_worker_devices(base_config, grid, num_gpus)
     base_config.tuning = dict(tuning_cfg)
+    base_config.tuning.num_gpus = num_gpus
+
+    if worker_devices:
+        print(f"[local_cp] parallel trial workers: {worker_devices}", flush=True)
+    else:
+        print("[local_cp] running trials sequentially", flush=True)
+    data = load_data(base_config.data.data_path)
     sequence_keys = choose_sequence_keys(data, args.sequence_key, args.sequence_index, num_sequences)
     selected_data = {sequence_key: data[sequence_key] for sequence_key in sequence_keys}
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    if worker_devices:
+        tasks = [
+            (trial_index, plain_config(trial_config), grid_values, args.seed)
+            for trial_index, (trial_config, grid_values)
+            in enumerate(iter_grid_configs(base_config, grid), start=1)
+        ]
+        trial_records = iter_parallel_trials(
+            tasks, worker_devices, _run_gpu_trial,
+            initializer=_initialize_gpu_worker, initargs=(selected_data, sequence_keys),
+        )
+    else:
+        prepared_data_cache = {}
+        trial_records = (
+            _run_grid_trial(
+                trial_index, trial_config, grid_values, selected_data,
+                sequence_keys, args.seed, prepared_data_cache,
+            )
+            for trial_index, (trial_config, grid_values)
+            in enumerate(iter_grid_configs(base_config, grid), start=1)
+        )
 
     trials = []
-    prepared_data_cache = {}
-    for trial_index, (trial_config, grid_values) in enumerate(iter_grid_configs(base_config, grid), start=1):
-        print(f"[local_cp] starting trial {trial_index} with grid_values={grid_values}", flush=True)
-        set_global_seed(args.seed + trial_index)
-        data_cache_key = _prepared_data_cache_key(trial_config)
-        trial_cpd = prepared_data_cache.get(data_cache_key)
-        if trial_cpd is None:
-            trial_cpd = _prepare_trial_data(selected_data, trial_config)
-            prepared_data_cache[data_cache_key] = trial_cpd
-        sequence_results = {
-            sequence_key: _run_single_trial(
-                trial_config,
-                trial_cpd.dataset[sequence_key],
-                _normalization_params(trial_config, trial_cpd.data[sequence_key]),
+    # A failed artifact write must also stop any workers that are still running.
+    with closing(trial_records):
+        for record in trial_records:
+            trials.append(record)
+            write_trial_artifacts(
+                save_dir, record["trial_index"], OmegaConf.create(record["resolved_config"]), record
             )
-            for sequence_key in sequence_keys
-        }
-        result = aggregate_sequence_results(sequence_results, trial_config.model.target_quantiles)
-        result["mean_best_model_selection_valid_loss"] = result["mean_best_valid_loss"]
-        result["calibration_split"] = "nominal_validation"
-        result["evaluation_split"] = "nominal_calibration"
-        result["final_test_evaluated"] = False
-        result["dataset_roles"] = {
-            "model_fit": "train_dataset",
-            "checkpoint_selection": "model_selection_valid_dataset",
-            "conformal_calibration": "calibration_dataset",
-            "hyperparameter_evaluation": "tuning_evaluation_dataset",
-        }
-        record = {
-            "trial_index": trial_index,
-            "sequence_keys": sequence_keys,
-            "grid_values": grid_values,
-            "calibration_split": "nominal_validation",
-            "evaluation_split": "nominal_calibration",
-            "final_test_evaluated": False,
-            "result": result,
-            "resolved_config": plain_config(trial_config),
-        }
-        trials.append(record)
-        write_trial_artifacts(save_dir, trial_index, trial_config, record)
+
+    # Completion order must not affect saved order or tie-breaking during ranking.
+    trials.sort(key=lambda record: record["trial_index"])
 
     positive_trials = [trial for trial in trials if trial["result"]["positive_delta_coverage"]]
     ranked_trials = sorted(positive_trials, key=lambda item: item["result"]["selection_score"])
@@ -430,6 +512,11 @@ def main():
         "calibration_split": "nominal_validation",
         "evaluation_split": "nominal_calibration",
         "final_test_evaluated": False,
+        "execution": {
+            "mode": "parallel_trials" if worker_devices else "serial",
+            "num_gpus": num_gpus,
+            "worker_devices": worker_devices,
+        },
         "tuning_protocol": {
             "model_fit_dataset": "train_dataset",
             "checkpoint_selection_dataset": "model_selection_valid_dataset",

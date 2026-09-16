@@ -56,7 +56,7 @@ def iter_parallel_trials(tasks, devices, worker_fn, *, initializer=None, initarg
             process = context.Process(
                 target=_worker_entry,
                 args=(child, device, worker_fn, initializer, initargs),
-                name=f"qr-trial-{device}",
+                name=f"tuning-trial-{device}",
             )
             try:
                 process.start()

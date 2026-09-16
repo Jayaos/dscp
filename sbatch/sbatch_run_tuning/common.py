@@ -1,6 +1,7 @@
 import argparse
 import itertools
 import random
+from numbers import Integral
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -69,7 +70,7 @@ def parse_args(method_name: str, include_num_cores: bool = False) -> argparse.Na
         default=42,
         help="Base random seed. Trial index is added to this value.",
     )
-    if method_name == "qr_cp":
+    if method_name in {"qr_cp", "iqn_cp", "local_cp"}:
         parser.add_argument(
             "--num-gpus",
             type=int,
@@ -240,6 +241,33 @@ def resolve_device(raw_device):
         return torch.device("cpu")
 
     return torch.device("cpu")
+
+
+def resolve_num_gpus(tuning_cfg, override=None):
+    """Resolve the number of trial workers; one retains the serial execution path."""
+    num_gpus = override if override is not None else (tuning_cfg or {}).get("num_gpus", 1)
+    if isinstance(num_gpus, bool) or not isinstance(num_gpus, Integral) or num_gpus < 1:
+        raise ValueError("tuning.num_gpus / --num-gpus must be a positive integer.")
+    return int(num_gpus)
+
+
+def resolve_worker_devices(base_config, grid, num_gpus):
+    """Validate a parallel CUDA request without changing single-worker behavior."""
+    if num_gpus == 1:
+        return []
+    if any(key == "device" or key.startswith("device.") for key in grid):
+        raise ValueError("Multi-GPU tuning assigns each worker's device; remove device from the grid.")
+    if not torch.cuda.is_available():
+        raise ValueError("Multi-GPU tuning requires CUDA, but CUDA is not available.")
+    if resolve_device(base_config.device).type != "cuda":
+        raise ValueError("Multi-GPU tuning requires a CUDA device in the base experiment config.")
+    visible_gpus = torch.cuda.device_count()
+    if visible_gpus < num_gpus:
+        raise ValueError(
+            f"Multi-GPU tuning requested {num_gpus} GPUs, but only {visible_gpus} are visible. "
+            "Request enough GPUs in the Slurm job or reduce tuning.num_gpus / --num-gpus."
+        )
+    return [f"cuda:{index}" for index in range(num_gpus)]
 
 
 def summarize_evaluation_results(

@@ -712,6 +712,42 @@ requirements grow with the worker count; adjust the example's `--mem=16G`
 allocation for your data. Multi-GPU mode fails clearly if fewer than the
 requested number of CUDA GPUs are visible.
 
+### Optional multi-GPU IQN-CP and Local-CP tuning
+
+IQN-CP and Local-CP use the same per-trial GPU workers and controls as QR-CP.
+Their tuning YAMLs default to `tuning.num_gpus: 1`:
+
+| Method | RNN tuning config | Transformer tuning config |
+| --- | --- | --- |
+| IQN-CP | [RNN](configs/iqn_cp_configs/iqn_rnn_air_tuning_config.yaml) | [Transformer](configs/iqn_cp_configs/iqn_transformer_air_tuning_config.yaml) |
+| Local-CP | [RNN](configs/lcp_configs/lcp_rnn_air_tuning_config.yaml) | [Transformer](configs/lcp_configs/lcp_transformer_air_tuning_config.yaml) |
+
+Set `tuning.num_gpus: 2` to run two independent trials concurrently, or override
+the YAML with `--num-gpus 2`. Their four Slurm launchers request one GPU by
+default and forward arguments to the tuning runner. For two GPUs per job:
+
+```bash
+sbatch --gres=gpu:2 --cpus-per-task=4 --mem=16G sbatch/sbatch_run_tuning/run_iqn_cp_rnn_air_tuning.sbatch --num-gpus 2
+sbatch --gres=gpu:2 --cpus-per-task=4 --mem=16G sbatch/sbatch_run_tuning/run_iqn_cp_transformer_air_tuning.sbatch --num-gpus 2
+sbatch --gres=gpu:2 --cpus-per-task=4 --mem=16G sbatch/sbatch_run_tuning/run_lcp_rnn_chronos_air_tuning.sbatch --num-gpus 2
+sbatch --gres=gpu:2 --cpus-per-task=4 --mem=16G sbatch/sbatch_run_tuning/run_lcp_transformer_chronos_air_tuning.sbatch --num-gpus 2
+```
+
+When `num_gpus: 2` is already in the YAML, omit the final `--num-gpus 2` while
+retaining the Slurm resource options. Set `num_gpus: 1` and submit normally to
+return to sequential trials, or pass `--num-gpus 1` after the script name to
+override the YAML. Multi-GPU execution uses the first requested number of
+visible CUDA devices and fails before loading data if too few are available.
+Single-worker execution retains the existing CPU fallback.
+
+Each worker evaluates every selected sequence for its assigned trial, using
+the original trial seed and sequence order. The parent combines all results
+and selects the best configurations across the full grid. IQN-CP keeps its
+head and shared-dimension settings; Local-CP keeps its separate calibration
+partition and sequential rolling updates within each sequence. The reserved
+final test partition remains excluded from tuning. Host-memory requirements
+increase with the number of workers because each retains its own data cache.
+
 ### Selecting sequences for tuning
 
 QR-CP, IQN-CP, and Local-CP accept the same setting in their tuning YAML to

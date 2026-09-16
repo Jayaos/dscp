@@ -1,19 +1,21 @@
 grid:
-  model.dim_model: [16, 32]
+  model.dim_model: [32, 64]
   model.num_heads: [2, 4]
   model.num_layers: [2, 4]
   model.window_size: [100, 200]
   model.use_current_feature: [True, False]
   # Each candidate is a complete list of encoder-training quantile levels.
-  # model.training_quantiles: [[0.1, 0.5, 0.9], [0.05, 0.25, 0.5, 0.75, 0.95]]
+  model.training_quantiles: [[0.1, 0.5, 0.9]]
   model.calibration_size: [100, 500]
-  # model.rolling_calibration: [true, false]
+  model.rolling_calibration: [True]
   # Euclidean divides negative squared distance by temperature; others multiply similarity.
-  model.similarity_fn: ["dot_product", "cos_similarity", "euclidean"]
+  model.similarity_fn: ["cos_similarity", "euclidean"]
+  model.temperature: [0.1, 1.0, 10.0]
   data.strided_features: ["xr", "xry"]
 
 
 tuning:
-  num_sequences: 2 # positive integer or all
+  num_gpus: 1 # 1: sequential; >1: parallel trials (allocate matching GPUs in Slurm)
+  num_sequences: 3 # positive integer or all
   delta_threshold: -0.01
-  model_selection_valid_ratio: 0.2
+  model_selection_valid_ratio: 0.15

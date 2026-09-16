@@ -1,6 +1,5 @@
 import copy
 from contextlib import closing
-from numbers import Integral
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +24,9 @@ from sbatch_run_tuning.common import (
     plain_config,
     resolve_delta_threshold,
     resolve_device,
+    resolve_num_gpus,
     resolve_num_sequences,
+    resolve_worker_devices,
     set_global_seed,
     summarize_evaluation_results,
     write_trial_artifacts,
@@ -65,33 +66,6 @@ def resolve_tuning_inputs(base_config_path, tuning_cfg, save_dir):
             predictor = Path(str(base_config.data.data_path)).stem.split("_", 1)[0]
         save_dir_text = save_dir_text.replace("{base_predictor}", predictor)
     return base_config, resolved_base_config_path, Path(save_dir_text).resolve()
-
-
-def resolve_num_gpus(tuning_cfg, override=None):
-    """Resolve the number of trial workers; one retains the serial execution path."""
-    num_gpus = override if override is not None else (tuning_cfg or {}).get("num_gpus", 1)
-    if isinstance(num_gpus, bool) or not isinstance(num_gpus, Integral) or num_gpus < 1:
-        raise ValueError("tuning.num_gpus / --num-gpus must be a positive integer.")
-    return int(num_gpus)
-
-
-def resolve_worker_devices(base_config, grid, num_gpus):
-    """Validate a parallel CUDA request without changing single-worker behavior."""
-    if num_gpus == 1:
-        return []
-    if any(key == "device" or key.startswith("device.") for key in grid):
-        raise ValueError("Multi-GPU tuning assigns each worker's device; remove device from the grid.")
-    if not torch.cuda.is_available():
-        raise ValueError("Multi-GPU tuning requires CUDA, but CUDA is not available.")
-    if resolve_device(base_config.device).type != "cuda":
-        raise ValueError("Multi-GPU tuning requires a CUDA device in the base experiment config.")
-    visible_gpus = torch.cuda.device_count()
-    if visible_gpus < num_gpus:
-        raise ValueError(
-            f"Multi-GPU tuning requested {num_gpus} GPUs, but only {visible_gpus} are visible. "
-            "Request enough GPUs in the Slurm job or reduce tuning.num_gpus / --num-gpus."
-        )
-    return [f"cuda:{index}" for index in range(num_gpus)]
 
 
 def _build_model(config, dim_feature: int, dim_x: int):
