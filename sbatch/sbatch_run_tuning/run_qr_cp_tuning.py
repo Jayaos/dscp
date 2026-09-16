@@ -1,4 +1,5 @@
 import copy
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -29,6 +30,38 @@ from sbatch_run_tuning.common import (
 )
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score
 from utils.utils import generate_strided_feature, get_interval_quantile_indices, load_data
+
+
+def resolve_tuning_inputs(base_config_path, tuning_cfg, save_dir):
+    """Load the selected experiment and resolve its tuning output directory."""
+    if "base_predictor" in tuning_cfg:
+        raise ValueError(
+            "Move tuning.base_predictor to the top-level base_predictor field in "
+            "the base experiment config supplied via --base-config."
+        )
+
+    resolved_base_config_path = Path(base_config_path).resolve()
+    base_config = OmegaConf.load(base_config_path)
+    predictor = None
+
+    if "base_predictor" in base_config:
+        predictor = base_config.base_predictor
+        if not isinstance(predictor, str) or predictor.strip().lower() not in (
+            "chronos", "lr", "lstm"
+        ):
+            raise ValueError(
+                "base_predictor in the base experiment config must be one scalar "
+                "string: 'chronos', 'lr', or 'lstm'."
+            )
+        predictor = predictor.strip().lower()
+        base_config.base_predictor = predictor
+
+    save_dir_text = str(save_dir)
+    if "{base_predictor}" in save_dir_text:
+        if predictor is None:
+            predictor = Path(str(base_config.data.data_path)).stem.split("_", 1)[0]
+        save_dir_text = save_dir_text.replace("{base_predictor}", predictor)
+    return base_config, resolved_base_config_path, Path(save_dir_text).resolve()
 
 
 def _build_model(config, dim_feature: int, dim_x: int):
@@ -256,18 +289,21 @@ def _run_single_trial(config, sequence_item, normalization_params):
 
 def main():
     args = parse_args("qr_cp")
-    save_dir = args.save_dir.resolve()
-    save_dir.mkdir(parents=True, exist_ok=True)
-
-    base_config = OmegaConf.load(args.base_config)
     grid, tuning_cfg = load_grid(args.grid_config)
-
-    data = load_data(base_config.data.data_path)
+    base_config, base_config_path, save_dir = resolve_tuning_inputs(
+        args.base_config, tuning_cfg, args.save_dir
+    )
     num_sequences = resolve_num_sequences(tuning_cfg)
     delta_threshold = resolve_delta_threshold(tuning_cfg)
     base_config.tuning = dict(tuning_cfg)
+
+    print(f"[qr_cp] base configuration: {base_config_path}", flush=True)
+    print(f"[qr_cp] prediction artifact: {base_config.data.data_path}", flush=True)
+    print(f"[qr_cp] saving results to: {save_dir}", flush=True)
+    data = load_data(base_config.data.data_path)
     sequence_keys = choose_sequence_keys(data, args.sequence_key, args.sequence_index, num_sequences)
     selected_data = {sequence_key: data[sequence_key] for sequence_key in sequence_keys}
+    save_dir.mkdir(parents=True, exist_ok=True)
 
     trials = []
     prepared_data_cache = {}
@@ -327,7 +363,7 @@ def main():
 
     payload = {
         "method": "qr_cp",
-        "base_config_path": str(args.base_config.resolve()),
+        "base_config_path": str(base_config_path),
         "grid_config_path": str(args.grid_config.resolve()),
         "sequence_keys": sequence_keys,
         "num_sequences": len(sequence_keys),

@@ -9,6 +9,6 @@ grid:
 
 
 tuning:
-  num_sequences: 2
+  num_sequences: all # positive integer or all
   delta_threshold: -0.01
   model_selection_valid_ratio: 0.2

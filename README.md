@@ -594,6 +594,57 @@ the next block origin, observations from the preceding block have become
 historical and enter the new context window. Existing Chronos artifacts must
 be regenerated to adopt this past-only covariate protocol.
 
+### Selecting the Air base predictor for QR-CP tuning
+
+Select the Air base predictor in the base experiment configuration. The tuning
+jobs use
+[`qr_rnn_chronos_air_config.yaml`](configs/qr_cp_configs/qr_rnn_chronos_air_config.yaml)
+or
+[`qr_transformer_chronos_air_config.yaml`](configs/qr_cp_configs/qr_transformer_chronos_air_config.yaml)
+by default. Edit the top-level field in the corresponding file:
+
+```yaml
+base_predictor: chronos # choices: lr, lstm, chronos
+```
+
+The base configuration's `data.data_path` and `saving_dir` refer to
+`${base_predictor}`, so changing this field updates their predictor component
+automatically. For example, `base_predictor: lstm` reads
+`data/air-10_prediction/lstm/lstm_air-10_data.pkl`; generate the selected
+predictor's artifact before submitting. Then submit the corresponding job:
+
+```bash
+sbatch sbatch/sbatch_run_tuning/run_qr_cp_rnn_air_tuning.sbatch
+sbatch sbatch/sbatch_run_tuning/run_qr_cp_transformer_air_tuning.sbatch
+```
+
+The job's `--base-config` selects the experiment configuration. Changing
+`base_predictor` keeps the model and training defaults from that file; the
+selected tuning grid overrides only its listed candidate settings. Keep the
+candidate hyperparameter values under `grid` and controls such as
+`tuning.num_sequences` in the tuning YAML.
+
+The tuning jobs automatically separate results under
+`results/tuning/qr_<encoder>_<predictor>_air/`, where `<encoder>` is `rnn` or
+`transformer`. The predictor comes from the selected base configuration.
+
+### Selecting sequences for tuning
+
+QR-CP, IQN-CP, and Local-CP accept the same setting in their tuning YAML to
+include every available sequence:
+
+```yaml
+tuning:
+  num_sequences: all
+```
+
+`all` selects every sequence in sorted key order. A positive integer selects
+that many consecutive sorted keys starting at `--sequence-index` (default
+`0`). For example, `num_sequences: 2` selects two sequences. An explicit
+`--sequence-key KEY` takes precedence and selects only that sequence, including
+when `num_sequences: all`. With `all` and no explicit key, `--sequence-index`
+is ignored.
+
 ### Hyperparameter-tuning protocol
 
 QR-CP, IQN-CP, and Local-CP grid search use nested chronological splits so

@@ -10,7 +10,7 @@ model:
   max_depth: 2
   criterion: "squared_error"
   target_quantiles:
-    - [0.950, 0.05]
+    - [0.95, 0.05]
   prediction_step: 1
   window_size: 100
 

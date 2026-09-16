@@ -1,8 +1,9 @@
 device: 0
+base_predictor: chronos # choices: lr, lstm, chronos
 
 
 data:
-  data_path: "./data/air-10_prediction/chronos/chronos_air-10_data.pkl"
+  data_path: "./data/air-10_prediction/${base_predictor}/${base_predictor}_air-10_data.pkl"
   train_ratio: 0.5
   valid_ratio: 0.16
   normalize: True
@@ -34,5 +35,5 @@ plotting:
   plotting_seq_len: 200
   
 
-saving_dir: "./results/qr_transformer_chronos_air/"
+saving_dir: "./results/qr_transformer_${base_predictor}_air/"
 

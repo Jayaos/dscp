@@ -2,7 +2,7 @@ import argparse
 import itertools
 import random
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -46,13 +46,16 @@ def parse_args(method_name: str, include_num_cores: bool = False) -> argparse.Na
         "--sequence-key",
         type=str,
         default=None,
-        help="Explicit sequence key to tune on. If omitted, --sequence-index is used.",
+        help="Explicit sequence key to tune on; overrides tuning.num_sequences.",
     )
     parser.add_argument(
         "--sequence-index",
         type=int,
         default=0,
-        help="Sorted sequence index used when --sequence-key is not provided.",
+        help=(
+            "Starting sorted sequence index for numeric tuning.num_sequences; "
+            "ignored for 'all' or --sequence-key."
+        ),
     )
     parser.add_argument(
         "--top-k",
@@ -141,12 +144,21 @@ def choose_sequence_key(dataset: dict, sequence_key: Optional[str], sequence_ind
     return keys[sequence_index]
 
 
-def resolve_num_sequences(tuning_cfg) -> int:
+def resolve_num_sequences(tuning_cfg) -> Union[int, str]:
+    """Resolve a positive sequence count or the dataset-wide selection 'all'."""
     if tuning_cfg is None:
         tuning_cfg = {}
-    num_sequences = int(tuning_cfg.get("num_sequences", 1))
+    num_sequences = tuning_cfg.get("num_sequences", 1)
+    if isinstance(num_sequences, str) and num_sequences.strip().lower() == "all":
+        return "all"
+
+    error_message = "tuning.num_sequences must be a positive integer or 'all'."
+    try:
+        num_sequences = int(num_sequences)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(error_message) from exc
     if num_sequences <= 0:
-        raise ValueError("tuning.num_sequences must be a positive integer.")
+        raise ValueError(error_message)
     return num_sequences
 
 
@@ -160,8 +172,9 @@ def choose_sequence_keys(
     dataset: dict,
     sequence_key: Optional[str],
     sequence_index: int,
-    num_sequences: int,
+    num_sequences: Union[int, str],
 ) -> List[str]:
+    """Select an explicit key, all sorted keys, or a count from sequence_index."""
     keys = sorted(dataset.keys())
     if not keys:
         raise ValueError("No sequence keys were found in the prepared dataset.")
@@ -172,6 +185,9 @@ def choose_sequence_keys(
                 f"Sequence key `{sequence_key}` was not found. Available keys: {keys}"
             )
         return [sequence_key]
+
+    if num_sequences == "all":
+        return keys
 
     if not (0 <= sequence_index < len(keys)):
         raise ValueError(
