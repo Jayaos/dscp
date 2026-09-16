@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
-from scipy.optimize import minimize
+from scipy.optimize import brentq
 from scipy.spatial.distance import cdist
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.utils.validation import check_X_y, check_is_fitted
@@ -147,17 +147,44 @@ class WeightedNadarayaWatson(BaseEstimator, RegressorMixin):
 
     def get_p_t_values(self, x_query):
         check_is_fitted(self, ["X_", "y_"])
-        result = minimize(self.L, [0.1], args=(self.X_, x_query), method="L-BFGS-B")
-        lambda_value = 0.0 if not result.success else float(result.x[0])
+        kernel_values = np.asarray(
+            [self.kernel_function(x_query, row) for row in self.X_], dtype=float
+        )
+        coefficients = (self.X_[:, 0] - x_query[0]) * kernel_values
+        n_samples = len(coefficients)
+        uniform = np.full(n_samples, 1.0 / n_samples)
 
-        p_values = np.zeros(len(self.X_), dtype=float)
-        for idx, row in enumerate(self.X_):
-            kernel_value = self.kernel_function(x_query, row)
-            denominator = 1.0 - lambda_value * (row[0] - x_query[0]) * kernel_value
-            if denominator <= 1e-12:
-                denominator = 1e-12
-            p_values[idx] = 1.0 / len(self.X_) / denominator
-        return p_values
+        # L'(lambda) = sum(a / (1 - lambda*a)) is strictly increasing.
+        # A finite optimum requires coefficients of both signs. Otherwise
+        # retain the uncorrected kernel weights (the lambda=0 fallback).
+        if not (np.any(coefficients < 0.0) and np.any(coefficients > 0.0)):
+            return uniform
+
+        coefficients /= np.max(np.abs(coefficients))
+        score_at_zero = float(np.sum(coefficients))
+        if score_at_zero == 0.0:
+            return uniform
+
+        # Rescale lambda toward the relevant log-barrier boundary so that the
+        # root lies in (-1, 0) or (0, 1), independent of residual units. At the
+        # optimum p_i <= 1, so 1 - lambda*a_i >= 1/n bounds the search strictly
+        # inside the feasible domain. Move one float outward for roundoff.
+        edge = np.nextafter(1.0 - 1.0 / n_samples, 1.0)
+        if score_at_zero > 0.0:
+            scale = -float(np.min(coefficients))
+            lower, upper = -edge, 0.0
+        else:
+            scale = float(np.max(coefficients))
+            lower, upper = 0.0, edge
+
+        def probability_factors(value):
+            return scale / (scale - value * coefficients)
+
+        def score(value):
+            return float(np.sum(coefficients * probability_factors(value)))
+
+        root = brentq(score, lower, upper, xtol=1e-14, rtol=1e-14)
+        return probability_factors(root) / n_samples
 
     def get_weights(self, x_query):
         p_values = self.get_p_t_values(x_query)

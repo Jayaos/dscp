@@ -123,6 +123,9 @@ def validate_config(config, num_cores=None):
     config["threads_per_worker"] = positive_integer(
         config.get("threads_per_worker", 1), "threads_per_worker"
     )
+    config.setdefault("show_progress", True)
+    if not isinstance(config["show_progress"], bool):
+        raise ValueError("show_progress must be a boolean.")
     for section, defaults in (("model", MODEL_DEFAULTS), ("matching", MATCHING_DEFAULTS)):
         supplied = config.get(section, {})
         if not isinstance(supplied, dict):

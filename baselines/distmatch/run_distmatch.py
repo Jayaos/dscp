@@ -6,12 +6,14 @@ from importlib.metadata import version
 import multiprocessing
 from pathlib import Path
 import pickle
+import sys
 import time
 
 import numpy as np
 from omegaconf import OmegaConf
 from threadpoolctl import threadpool_limits
 import torch
+from tqdm import tqdm
 
 from baselines.distmatch.config import (
     MODEL_DEFAULTS,
@@ -21,6 +23,7 @@ from baselines.distmatch.config import (
 )
 from baselines.distmatch.data import prepare_sequence
 from baselines.distmatch.model import DistMatchResidualIntervalEstimator, UPSTREAM_COMMIT
+from baselines.distmatch.progress import SequenceProgress
 from utils.reporting import (
     compute_coverage,
     compute_interval_width,
@@ -32,6 +35,7 @@ from utils.reporting import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODEL_OPTIONS = set(MODEL_DEFAULTS) - {"prediction_step", "target_quantiles"}
+_PROGRESS_POSITION = 0
 
 
 def sequence_seed(seed, key):
@@ -55,7 +59,7 @@ def _resolve_paths(config):
     return config
 
 
-def _evaluate_sequence(key, item, config, split):
+def _evaluate_sequence(key, item, config, split, progress):
     prepared = prepare_sequence(item, config, split=split)
     pairs = target_quantiles(config)
     seed = sequence_seed(config["seed"], key)
@@ -65,11 +69,18 @@ def _evaluate_sequence(key, item, config, split):
         **config["matching"],
     )
     started = time.perf_counter()
-    estimator.fit(prepared["train_residuals"], normalize=config["data"]["normalize"])
+    estimator.fit(
+        prepared["train_residuals"], normalize=config["data"]["normalize"],
+        progress=progress.update if config["show_progress"] else None,
+    )
     training_seconds = time.perf_counter() - started
     started = time.perf_counter()
-    for residual in prepared["warmup_residuals"]:
+    replay_size = len(prepared["warmup_residuals"])
+    if replay_size:
+        progress.update("replay", 0, replay_size)
+    for index, residual in enumerate(prepared["warmup_residuals"], 1):
         estimator.observe(float(residual))
+        progress.update("replay", index, replay_size)
     replay_seconds = time.perf_counter() - started
     initial_memory_size = estimator.memory_size
     results = {pair: {
@@ -77,7 +88,9 @@ def _evaluate_sequence(key, item, config, split):
         "selected_beta_per_tree": [],
     } for pair in pairs}
     started = time.perf_counter()
-    for residual in prepared["residuals"]:
+    evaluation_size = len(prepared["residuals"])
+    progress.update(split, 0, evaluation_size)
+    for index, residual in enumerate(prepared["residuals"], 1):
         # All coverage levels share the same history. The current target is
         # supplied exactly once, only after every interval has been issued.
         intervals = estimator.predict_intervals([tuple(sorted(pair)) for pair in pairs])
@@ -87,6 +100,7 @@ def _evaluate_sequence(key, item, config, split):
             results[pair]["upper_residual_quantile"].append(float(upper))
             results[pair]["selected_beta_per_tree"].append([float(beta) for beta in betas])
         estimator.observe(float(residual))
+        progress.update(split, index, evaluation_size)
     evaluation_seconds = time.perf_counter() - started
 
     targets = torch.as_tensor(prepared["y"], dtype=torch.float64)
@@ -157,10 +171,21 @@ def evaluate_sequence(key, item, config, split="test"):
     previous_threads = torch.get_num_threads()
     try:
         torch.set_num_threads(threads)
-        with threadpool_limits(limits=threads):
-            return _evaluate_sequence(key, item, config, split)
+        with threadpool_limits(limits=threads), SequenceProgress(
+            key, enabled=config["show_progress"], position=_PROGRESS_POSITION,
+        ) as progress:
+            return _evaluate_sequence(key, item, config, split, progress)
     finally:
         torch.set_num_threads(previous_threads)
+
+
+def _initialize_worker_progress(lock, positions):
+    """Share the output lock and reserve one stable terminal row per worker."""
+    global _PROGRESS_POSITION
+    tqdm.set_lock(lock)
+    with positions.get_lock():
+        _PROGRESS_POSITION = positions.value
+        positions.value += 1
 
 
 def _worker(key, item, config, split):
@@ -187,15 +212,32 @@ def evaluate_sequences(data, config, split="test", num_cores=None):
     completed = {}
     # Explicit spawn is portable to Windows and avoids inheriting parent RNGs
     # or initialized native numerical thread pools on Linux.
-    with ProcessPoolExecutor(
-        max_workers=workers, mp_context=multiprocessing.get_context("spawn")
-    ) as executor:
-        futures = {executor.submit(_worker, key, item, config, split): key
-                   for key, item in data.items()}
-        for future in as_completed(futures):
-            key = futures[future]
-            completed[key] = future.result()
-            print(f"DistMatch: completed sequence {key!r} ({len(completed)}/{len(data)})", flush=True)
+    context = multiprocessing.get_context("spawn")
+    lock, positions = context.RLock(), context.Value("i", 0)
+    previous_lock = tqdm.get_lock()
+    tqdm.set_lock(lock)
+    try:
+        with ProcessPoolExecutor(
+            max_workers=workers, mp_context=context,
+            initializer=_initialize_worker_progress, initargs=(lock, positions),
+        ) as executor:
+            futures = {executor.submit(_worker, key, item, config, split): key
+                       for key, item in data.items()}
+            for future in as_completed(futures):
+                key = futures[future]
+                completed[key] = future.result()
+                # Parent tqdm cannot clear bars owned by child processes.
+                # Newlines during interactive rendering would shift their rows.
+                if not sys.stdout.isatty():
+                    tqdm.write(
+                        f"DistMatch: completed sequence {key!r} ({len(completed)}/{len(data)})",
+                        file=sys.stdout,
+                    )
+                    sys.stdout.flush()
+        if sys.stdout.isatty():
+            print(f"DistMatch: completed {len(completed)}/{len(data)} sequences", flush=True)
+    finally:
+        tqdm.set_lock(previous_lock)
     return {key: completed[key] for key in data}
 
 

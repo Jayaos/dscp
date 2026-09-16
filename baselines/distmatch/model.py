@@ -148,8 +148,12 @@ class DistMatchResidualIntervalEstimator:
             ) from exc
         return RandomForestQuantileRegressor
 
-    def fit(self, residuals, normalize=False):
-        """Build the initial partition; normalization statistics stay frozen."""
+    def fit(self, residuals, normalize=False, progress=None):
+        """Build the initial partition; normalization statistics stay frozen.
+
+        Optional ``progress(stage, completed, total)`` reports matching pair
+        comparisons and completed trees. Cached matching is skipped.
+        """
         if not isinstance(normalize, (bool, np.bool_)):
             raise ValueError("normalize must be a boolean.")
         residuals = np.asarray(residuals)
@@ -187,16 +191,24 @@ class DistMatchResidualIntervalEstimator:
         self._observed_updates = 0
         self._trees = []
         sorted_patches = np.sort(patches, axis=1)
-        with self._match_matrix(sorted_patches) as (mask, cache_info):
+        with self._match_matrix(sorted_patches, progress=progress) as (mask, cache_info):
+            if progress is not None:
+                progress("trees", 0, self.n_trees)
             for tree_index in range(self.n_trees):
                 rng = np.random.RandomState(self._seed_for(0, tree_index))
                 bootstrap = rng.choice(n_pairs, int(n_pairs * self.bagging_ratio), replace=True)
                 self._trees.append(self._build_tree(bootstrap, sorted_patches, mask))
+                if progress is not None:
+                    progress("trees", tree_index + 1, self.n_trees)
             self._cache_info = cache_info
         self._fitted = True
         return self
 
-    def _fill_match_matrix(self, mask, sorted_patches):
+    def _fill_match_matrix(self, mask, sorted_patches, progress=None):
+        total = len(sorted_patches) * (len(sorted_patches) + 1) // 2
+        completed = 0
+        if progress is not None:
+            progress("matching", completed, total)
         left_ranks, right_ranks = _tie_ranks(sorted_patches)
         for row_index, anchor in enumerate(sorted_patches):
             for start in range(row_index, len(sorted_patches), self.ks_block_size):
@@ -207,6 +219,9 @@ class DistMatchResidualIntervalEstimator:
                 matches = distances < self.match_threshold
                 mask[row_index, start:stop] = matches
                 mask[start:stop, row_index] = matches
+                if progress is not None:
+                    completed += stop - start
+                    progress("matching", completed, total)
 
     @staticmethod
     def _close_matrix(matrix):
@@ -214,7 +229,7 @@ class DistMatchResidualIntervalEstimator:
             matrix._mmap.close()
 
     @contextmanager
-    def _match_matrix(self, sorted_patches):
+    def _match_matrix(self, sorted_patches, progress=None):
         settings = dict(
             version=_CACHE_VERSION, window=self.past_window_len,
             threshold=self.match_threshold, mean=self.input_mean, std=self.input_std,
@@ -228,7 +243,7 @@ class DistMatchResidualIntervalEstimator:
         info = dict(fingerprint=fingerprint, bytes=byte_count, path=None, hit=False)
         if self.cache_dir is None and byte_count <= self.max_cache_memory_mb * 1024 ** 2:
             matrix = np.empty(shape, dtype=np.bool_)
-            self._fill_match_matrix(matrix, sorted_patches)
+            self._fill_match_matrix(matrix, sorted_patches, progress=progress)
             info["backend"] = "memory"
             yield matrix, info
             return
@@ -263,7 +278,7 @@ class DistMatchResidualIntervalEstimator:
                 os.close(descriptor)
                 partial_path = Path(filename)
                 matrix = np.lib.format.open_memmap(partial_path, mode="w+", dtype=np.bool_, shape=shape)
-                self._fill_match_matrix(matrix, sorted_patches)
+                self._fill_match_matrix(matrix, sorted_patches, progress=progress)
                 matrix.flush()
                 self._close_matrix(matrix)
                 matrix = None

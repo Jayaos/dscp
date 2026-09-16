@@ -44,6 +44,26 @@ Use `--data-path`, `--output-dir`, or `--seed` for launch-specific overrides.
 The launcher records the resolved settings in `launch_config.yaml` under the
 output directory.
 
+## Progress and remaining time
+
+Progress is enabled by default for both experiment runs and tuning. Each
+sequence shows its name, stage, completed/total work, elapsed time, and ETA:
+
+```text
+DistMatch 'station_1' test:  40%|########            | 400/1000 [02:00 elapsed, ETA 03:00, 3.33step/s]
+```
+
+Stages are `matching`, `trees`, `replay` (when validation history is replayed),
+and `test` or `validation`. The ETA refers to the **current stage**; during
+prediction it estimates the remaining prediction time for that sequence.
+It appears after work has completed and can change as the processing rate
+changes. A cached matching matrix skips the matching stage.
+
+Interactive terminals use a separate progress row per worker. Redirected
+output, including SLURM logs, uses flushed lines roughly every 10 seconds of
+completed work, plus stage starts and finishes. Set `show_progress: false`
+at the top level of the YAML config to disable these progress displays.
+
 ## CPU workers
 
 The default presets set `num_cores: 4` and `threads_per_worker: 1`. Sequence
@@ -184,7 +204,7 @@ environment variables are `DISTMATCH_GRID_CONFIG`,
 ## Verify
 
 ```bash
-python -m pytest tests/test_distmatch_model.py tests/test_distmatch_data_usage.py tests/test_distmatch_tuning.py tests/test_distmatch_cli.py
+python -m pytest tests/test_distmatch_model.py tests/test_distmatch_data_usage.py tests/test_distmatch_tuning.py tests/test_distmatch_cli.py tests/test_distmatch_progress.py
 ```
 
 These checks cover KS/reference agreement, causality, train-only normalization,
