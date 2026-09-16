@@ -4,3 +4,6 @@ sbatch/sbatch_run_tuning/run_distmatch_air_tuning.sbatch text eol=lf
 
 # Keep NexCP launchers compatible with Slurm after Windows checkouts.
 sbatch/sbatch_run_nexcp/*.sbatch text eol=lf
+
+# Keep KOWCPI launchers compatible with Slurm after Windows checkouts.
+sbatch/sbatch_run_kowcpi/*.sbatch text eol=lf
