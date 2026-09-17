@@ -40,7 +40,8 @@ BASE_PREDICTOR="${BASE_PREDICTORS[$TASK_ID]}"
 BASE_CONFIG="configs/distmatch_configs/distmatch_${BASE_PREDICTOR}_solar_config.yaml"
 GRID_CONFIG="${DISTMATCH_GRID_CONFIG:-configs/distmatch_configs/distmatch_solar_tuning_config.yaml}"
 OUTPUT_ROOT="${DISTMATCH_TUNING_OUTPUT_ROOT:-$RUNPATH/results/tuning/distmatch_solar}"
-EXTRA_ARGS=()
+# Match sequence workers to the allocation in both validation and tuning.
+EXTRA_ARGS=(--num-cores "${SLURM_CPUS_PER_TASK:-10}")
 if [[ -n "${DISTMATCH_SEED:-}" ]]; then
   EXTRA_ARGS+=(--seed "$DISTMATCH_SEED")
 fi
