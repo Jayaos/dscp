@@ -9,8 +9,8 @@ grid:
   model.calibration_size: [100, 500]
   model.rolling_calibration: [True]
   # Euclidean divides negative squared distance by temperature; others multiply similarity.
-  model.similarity_fn: ["cos_similarity", "euclidean"]
-  model.temperature: [0.1, 1.0, 10.0]
+  model.similarity_fn: ["cos_similarity"]
+  model.temperature: [1.0, 10.0]
   data.strided_features: ["xr", "xry"]
 
 
