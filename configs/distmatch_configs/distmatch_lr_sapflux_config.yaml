@@ -1,7 +1,7 @@
 # Template: generate the Sapflow LR forecast artifact before running this preset.
 # Ratios partition each saved forecast suffix chronologically.
 seed: 2026
-num_cores: 4
+num_cores: 12
 threads_per_worker: 1
 
 data:

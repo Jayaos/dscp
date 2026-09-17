@@ -3,11 +3,11 @@
 #SBATCH --account=gts-yxie77-paid
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --array=0-2
+#SBATCH --array=0
 #SBATCH --gres=gpu:1 -C V100
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH -t180
+#SBATCH -t360
 #SBATCH -qinferno
 #SBATCH -o Report-hopcpt-air-%A_%a.out
 #SBATCH --mail-type=ALL
