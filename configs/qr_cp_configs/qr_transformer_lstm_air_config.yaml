@@ -12,15 +12,15 @@ data:
 
 model:
   head_type: nondecreasing # choices: nondecreasing, independent
-  dim_model: 16
+  dim_model: 32
   num_heads: 2
-  num_layers: 2
+  num_layers: 4
   dropout: 0.
   use_current_feature: False
   target_quantiles:
     - [0.05, 0.95]
   prediction_step: 1
-  window_size: 200
+  window_size: 100
 
 
 training:

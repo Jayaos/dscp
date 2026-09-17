@@ -1,4 +1,4 @@
-"""Tune SPCI on a held-out fraction of its nominal training prefix."""
+"""Tune SPCI on a held-out fraction of its training prefix."""
 
 from numbers import Integral
 from pathlib import Path
@@ -125,7 +125,6 @@ def _run_single_trial(config, sequence_item, normalization_params):
         "num_model_selection_valid_samples": len(evaluation_dataset),
         "num_tuning_evaluation_samples": len(evaluation_dataset),
         "evaluation_split": EVALUATION_SPLIT,
-        "nominal_validation_evaluated": False,
         "final_test_evaluated": False,
         "pair_metrics": pair_metrics,
         "selection_score": selection_score,
@@ -145,7 +144,6 @@ def _run_grid_trial(
         trial_config.model.window_size,
         trial_config.model.prediction_step,
         trial_config.data.train_ratio,
-        trial_config.data.valid_ratio,
         trial_config.tuning.model_selection_valid_ratio,
         trial_config.data.normalize,
     )
@@ -163,7 +161,6 @@ def _run_grid_trial(
     result = aggregate_sequence_results(sequence_results, trial_config.model.target_quantiles)
     result.update({
         "evaluation_split": EVALUATION_SPLIT,
-        "nominal_validation_evaluated": False,
         "final_test_evaluated": False,
     })
     return {
@@ -172,7 +169,6 @@ def _run_grid_trial(
         "sequence_keys": sequence_keys,
         "grid_values": grid_values,
         "evaluation_split": EVALUATION_SPLIT,
-        "nominal_validation_evaluated": False,
         "final_test_evaluated": False,
         "result": result,
         "resolved_config": plain_config(trial_config),
@@ -218,7 +214,7 @@ def run_tuning(
     selected_data = {key: data[key] for key in sequence_keys}
     print(f"[spci] base configuration: {base_config_path}", flush=True)
     print(f"[spci] prediction artifact: {config.data.data_path}", flush=True)
-    print(f"[spci] tuning on the last {ratio:.1%} of the nominal training prefix", flush=True)
+    print(f"[spci] tuning on the last {ratio:.1%} of the training prefix", flush=True)
     print(f"[spci] {num_trials} trials on {len(sequence_keys)} sequences; output: {save_dir}", flush=True)
     save_dir.mkdir(parents=True, exist_ok=True)
     prepared_data_cache = {}
@@ -250,7 +246,6 @@ def run_tuning(
         "num_positive_delta_coverage_trials": len(eligible_trials),
         "top_k": top_k,
         "evaluation_split": EVALUATION_SPLIT,
-        "nominal_validation_evaluated": False,
         "final_test_evaluated": False,
         "execution": {"mode": "serial", "forest_n_jobs": config.model.get("n_jobs", -1)},
         "tuning_protocol": {
@@ -258,7 +253,7 @@ def run_tuning(
             "hyperparameter_evaluation_dataset": "model_selection_valid_dataset",
             "evaluation_split": EVALUATION_SPLIT,
             "model_selection_valid_ratio": float(ratio),
-            "nominal_validation_evaluated": False,
+            "train_ratio": float(config.data.train_ratio),
             "final_test_evaluated": False,
         },
         "top_trials": ranked_trials[:top_k],

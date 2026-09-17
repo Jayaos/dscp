@@ -86,7 +86,6 @@ class SPCITuningTests(unittest.TestCase):
             "data": {
                 "data_path": str(artifact),
                 "train_ratio": 0.5,
-                "valid_ratio": 0.16,
                 "normalize": True,
             },
             "model": {
@@ -219,7 +218,7 @@ class SPCITuningTests(unittest.TestCase):
                         self.assertTrue(np.isfinite(result["selection_score"]))
                     self.assertFalse(payload["final_test_evaluated"])
 
-    def test_reserved_nominal_validation_and_test_cannot_change_scores_or_forest_inputs(self):
+    def test_reserved_test_cannot_change_scores_or_forest_inputs(self):
         with tempfile.TemporaryDirectory() as directory:
             base_path, grid_path = self._configs(directory, num_sequences="all")
             base = OmegaConf.load(base_path)
@@ -286,10 +285,52 @@ class SPCITuningTests(unittest.TestCase):
                 self.assertEqual(Path(saved.saving_dir), trial_dir / "final_run")
                 self.assertFalse(Path(saved.saving_dir).exists())
                 self.assertEqual(saved.data.data_path, OmegaConf.load(base_path).data.data_path)
-                self.assertEqual((saved.data.train_ratio, saved.data.valid_ratio), (0.5, 0.16))
+                self.assertEqual(saved.data.train_ratio, 0.5)
+                self.assertNotIn("valid_ratio", saved.data)
                 self.assertEqual(saved.model.window_size, (3, 5)[index - 1])
                 with (trial_dir / "result.pkl").open("rb") as stream:
                     self.assertEqual(pickle.load(stream), record)
+
+    def test_exported_config_refits_full_training_prefix_and_scores_remaining_test(self):
+        from baselines.spci import run_spci as ordinary_runner
+
+        with tempfile.TemporaryDirectory() as directory:
+            base_path, grid_path = self._configs(directory, grid={"model.window_size": [3]})
+            output = Path(directory) / "tuning"
+            with self._forests() as tuning_forests, contextlib.redirect_stdout(io.StringIO()):
+                payload = tuning.run_tuning(base_path, grid_path, output)
+            self.assertEqual(len(tuning_forests[0].fit_targets), 37)
+            self.assertEqual(len(tuning_forests[0].prediction_features), 10)
+            self.assertNotIn("nominal_validation_evaluated", payload)
+            self.assertNotIn("nominal_validation_evaluated", payload["tuning_protocol"])
+            config_path = output / "trial_0001" / "resolved_config.yaml"
+            saved = OmegaConf.load(config_path)
+            self.assertEqual(saved.tuning.model_selection_valid_ratio, 0.2)
+            forests = []
+
+            def factory(config, n_train_samples, quantiles):
+                self.assertEqual(n_train_samples, 47)
+                forest = EmpiricalForest(quantiles)
+                forests.append(forest)
+                return forest
+
+            with patch.object(ordinary_runner, "build_quantile_forest", side_effect=factory), \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                ordinary_runner.run_spci_experiment(config_path)
+            artifact = _artifact()
+            self.assertEqual(len(forests), len(artifact))
+            with (Path(saved.saving_dir) / "log.pkl").open("rb") as stream:
+                log = pickle.load(stream)
+            self.assertEqual(list(log), list(artifact))
+            for forest, (key, sequence) in zip(forests, artifact.items()):
+                self.assertEqual(len(forest.fit_targets), 47)
+                self.assertEqual(len(forest.prediction_features), 50)
+                residuals = sequence["heldout_y"][:50] - sequence["heldout_predictions"][:50]
+                expected = residuals[3:] / (sequence["heldout_y"][:50].std() + 1e-8)
+                np.testing.assert_allclose(forest.fit_targets, expected, atol=1e-6)
+                result = log[key]["evaluation_results"][PAIR]
+                np.testing.assert_array_equal(result["target_y"], sequence["heldout_y"][50:])
+                self.assertEqual(len(result["coverage"]), 50)
 
     def test_coverage_filter_precedes_score_with_stable_ties_and_empty_selection(self):
         with tempfile.TemporaryDirectory() as directory:

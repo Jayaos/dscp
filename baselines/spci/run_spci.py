@@ -4,8 +4,8 @@ import random
 import torch
 import numpy as np
 from tqdm import tqdm
+from baselines.spci.data import prepare_spci_data
 from baselines.spci.model import build_quantile_forest
-from dscp.data import ConformalPredictionData
 from utils.utils import load_data, save_data, read_setup, get_interval_quantile_indices
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, summarize_evaluation_results
 from utils.plotting import plot_cp_prediction_intervals
@@ -25,12 +25,7 @@ def run_spci_experiment(config_path):
     # load data
     data = load_data(config.data.data_path) # load predictor results here
     base_predictor, data_type = read_setup(config.data.data_path)
-    cpd = ConformalPredictionData(data)
-    cpd.prepare_quantile_regression_datasets(config.model.window_size, 
-                                             config.model.prediction_step, 
-                                             config.data.train_ratio, 
-                                             config.data.valid_ratio, 
-                                             normalize=config.data.normalize)
+    cpd = prepare_spci_data(data, config)
 
     log = dict()
 
@@ -42,21 +37,17 @@ def run_spci_experiment(config_path):
     
     for key, item in tqdm(cpd.dataset.items(), desc="repetition over independent sequences"):
 
-        # SPCI does not need validation set, therefore combine train and validation set
         train_dataset = item["train_dataset"]
-        valid_dataset = item["valid_dataset"]
         test_dataset = item["test_dataset"]
         train_strided_x, train_strided_residual, train_strided_y, \
             train_target_x, train_target_residual, train_target_y, train_target_preds = train_dataset[:]
-        valid_strided_x, valid_strided_residual, valid_strided_y, \
-            valid_target_x, valid_target_residual, valid_target_y, valid_target_preds = valid_dataset[:]
-        strided_residual = torch.cat([train_strided_residual, valid_strided_residual], dim=0).numpy() # (data_size, window_size)
-        target_residual = torch.cat([train_target_residual, valid_target_residual], dim=0).flatten().numpy()  # (data_size, )
+        strided_residual = train_strided_residual.numpy() # (data_size, window_size)
+        target_residual = train_target_residual.flatten().numpy()  # (data_size, )
 
         # model init
         # target_quantiles must be sorted array
         qrf = build_quantile_forest(
-            config, len(train_dataset) + len(valid_dataset), target_quantiles
+            config, len(train_dataset), target_quantiles
         )
             
         # train Quantile Random Forest

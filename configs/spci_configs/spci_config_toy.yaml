@@ -1,7 +1,6 @@
 data:
   data_path: "C:/Users/jayao/Desktop/python_projects/DSCP/data/air-10_prediction/chronos/chronos_air-10_data.pkl"  
-  train_ratio: 0.6
-  valid_ratio: 0.2
+  train_ratio: 0.8
   normalize: True
 
 

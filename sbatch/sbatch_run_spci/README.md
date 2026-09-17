@@ -51,6 +51,25 @@ predictors, substituting the selected artifact path. These are starting
 hyperparameters, with no additional tuning for Solar or Sapflux combinations.
 The dispatcher sets `prediction_step: 1` to match the base-predictor jobs.
 
+## Training and test split
+
+`data.train_ratio` defines the complete training prefix of each saved
+predictor's held-out sequence. The rest is the final test suffix. The
+Air, Solar, and Sapflux configs use `train_ratio: 0.66` (about 66% training
+and 34% test); the toy config uses `0.8`. Final evaluation fits one forest
+on the whole training prefix and computes normalization statistics from
+that prefix.
+
+To migrate an older SPCI config, set the new `data.train_ratio` to the sum
+of its old `train_ratio` and `valid_ratio`, then remove `data.valid_ratio`.
+For example, `0.5 + 0.16` becomes `0.66`. This preserves approximately the
+same final test boundary; integer rounding can shift it by one observation.
+The runner rejects configs that still contain `data.valid_ratio`. Final
+normalization now uses the complete training prefix, instead of the old
+nominal training portion, so results can change after migration. SPCI has
+no separate outer validation region. Configure tuning validation with
+`tuning.model_selection_valid_ratio` as described below.
+
 ## Outputs and overrides
 
 Each task writes to `results/spci/{dataset}/{predictor}/`:
@@ -95,13 +114,14 @@ sbatch sbatch/sbatch_run_tuning/run_spci_sapflux_tuning.sbatch
 ```
 
 Tasks 0/1/2 select LR/LSTM/Chronos. Each task evaluates 27 configurations on
-three sequences, using the dataset's `spci_*_tuning_config.yaml` under
+three sequences for Air/Solar or five for Sapflux, using the dataset's
+`spci_*_tuning_config.yaml` under
 [`../../configs/spci_configs/`](../../configs/spci_configs/):
 
 ```yaml
 grid:
-  model.window_size: [100, 200, 300]
-  model.n_estimators: [10, 50, 100]
+  model.window_size: [100, 200, 500]
+  model.n_estimators: [10, 20, 50]
   model.max_depth: [2, 5, 10]
 
 tuning:
@@ -113,29 +133,31 @@ tuning:
 ### Fit and evaluation split
 
 `tuning.model_selection_valid_ratio` reserves the **last fraction of the
-nominal training set** for hyperparameter evaluation. The forest fits on
+training prefix** for hyperparameter evaluation. The forest fits on
 the preceding training observations. For a sequence of length `N`, the
-nominal training prefix ends at `floor(N * data.train_ratio)`; the
-evaluation region is a tail of that prefix. Normalization statistics come
+training prefix contains `floor(N * data.train_ratio)` observations; the
+evaluation region is a tail of that prefix. Its fitting boundary is
+`floor(nextafter(training_size * (1 - model_selection_valid_ratio), +inf))`.
+`nextafter` stabilizes integer boundaries against floating-point rounding.
+Normalization statistics come
 only from the forest-fitting portion, and all window sizes evaluate the
 same timestamps. Earlier observed residuals are available as lag features
 during evaluation.
 
-For example, with `data.train_ratio: 0.5` and
+For example, with `data.train_ratio: 0.66` and
 `tuning.model_selection_valid_ratio: 0.2`, the split is:
 
 | Region | Fraction of the saved predictor's held-out sequence | Tuning use |
 | --- | --- | --- |
-| Forest fitting | First 40% | Fit the quantile forest |
-| Model-selection validation | Next 10% | Evaluate hyperparameters |
-| Nominal outer validation | Next 16% (`data.valid_ratio: 0.16`) | Unused |
+| Forest fitting | First 52.8% | Fit the quantile forest |
+| Model-selection validation | Next 13.2% | Evaluate hyperparameters |
 | Final test | Last 34% | Unused |
 
 Percentages are approximate because split boundaries use integer indices.
-The supplied ratio of `0.15` instead fits on the first 42.5% and evaluates
-on the next 7.5%. `data.valid_ratio` defines the outer validation region;
-it does not determine the hyperparameter evaluation size. Set the ratio in
-the tuning YAML strictly between zero and one. Each sequence must have
+The supplied ratio of `0.15` instead fits on the first 56.1% and evaluates
+on the next 9.9%. The final test suffix is excluded from tuning. Set
+`model_selection_valid_ratio` in the tuning YAML strictly between zero and
+one. Each sequence must have
 enough fitting observations for the largest residual window in the grid.
 
 ### Selection and outputs
@@ -195,7 +217,7 @@ python -m sbatch.sbatch_run_spci.run_spci \
 ```
 
 The ordinary SPCI runner honors the saved seed, refits on the complete
-nominal training plus outer validation regions, and evaluates the final
+training prefix, including the tuning validation tail, and evaluates the final
 test region. Final outputs go to that trial's `final_run/` directory.
 Change `saving_dir` in a copy of the selected YAML to choose another final
 output directory. This tunes the current implementation, which fits one

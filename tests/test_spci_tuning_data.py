@@ -23,7 +23,7 @@ class SPCITuningDataTests(unittest.TestCase):
     def config(window=5, ratio=0.2, normalize=False):
         return OmegaConf.create({
             "model": {"window_size": window, "prediction_step": 1},
-            "data": {"train_ratio": 0.5, "valid_ratio": 0.16, "normalize": normalize},
+            "data": {"train_ratio": 0.5, "normalize": normalize},
             "tuning": {"model_selection_valid_ratio": ratio},
         })
 
@@ -54,7 +54,7 @@ class SPCITuningDataTests(unittest.TestCase):
                     evaluation.strided_residual[0].numpy(), np.arange(40 - window, 40)
                 )
 
-    def test_outer_validation_and_test_values_cannot_change_tuning_examples(self):
+    def test_reserved_test_values_cannot_change_tuning_examples(self):
         artifact = self.artifact()
         modified = copy.deepcopy(artifact)
         for name in ("heldout_x", "heldout_y", "heldout_predictions"):
@@ -71,6 +71,21 @@ class SPCITuningDataTests(unittest.TestCase):
                         getattr(baseline.dataset["series"][split], field).numpy(),
                         getattr(changed.dataset["series"][split], field).numpy(),
                     )
+
+    def test_reserved_test_values_are_not_processed_during_tuning(self):
+        artifact = self.artifact()
+        artifact["series"]["heldout_y"][50:] = np.inf
+        artifact["series"]["heldout_predictions"][50:] = np.inf
+        artifact["series"]["heldout_x"][50:] = np.nan
+        # Computing residuals on the full artifact would evaluate inf - inf.
+        with np.errstate(invalid="raise", over="raise"):
+            prepared = prepare_spci_tuning_data(artifact, self.config(normalize=True))
+        self.assertEqual(set(prepared.dataset["series"]), {
+            "train_dataset", "model_selection_valid_dataset",
+        })
+        for dataset in prepared.dataset["series"].values():
+            self.assertTrue(np.isfinite(dataset.strided_residual.numpy()).all())
+            self.assertTrue(np.isfinite(dataset.target_residual.numpy()).all())
 
     def test_normalization_uses_fit_prefix_and_input_is_not_mutated(self):
         artifact = self.artifact()
@@ -98,16 +113,16 @@ class SPCITuningDataTests(unittest.TestCase):
             with self.subTest(window=window), self.assertRaisesRegex(ValueError, "Insufficient data"):
                 prepare_spci_tuning_data(self.artifact(), self.config(window=window))
 
-    def test_invalid_horizon_outer_split_and_sequence_lengths_are_rejected(self):
+    def test_invalid_horizon_train_fraction_and_sequence_lengths_are_rejected(self):
         for horizon in (0, 2, True, 1.0):
             config = self.config()
             config.model.prediction_step = horizon
             with self.subTest(horizon=horizon), self.assertRaisesRegex(ValueError, "prediction_step=1"):
                 prepare_spci_tuning_data(self.artifact(), config)
-        for train_ratio, valid_ratio in ((0, 0.16), (0.5, np.inf), (0.8, 0.2)):
+        for train_ratio in (0, 1, -0.1, np.nan, np.inf, None, True):
             config = self.config()
-            config.data.train_ratio, config.data.valid_ratio = train_ratio, valid_ratio
-            with self.subTest(train=train_ratio, valid=valid_ratio), self.assertRaises(ValueError):
+            config.data.train_ratio = train_ratio
+            with self.subTest(train=train_ratio), self.assertRaisesRegex(ValueError, "train_ratio"):
                 prepare_spci_tuning_data(self.artifact(), config)
         with self.assertRaisesRegex(ValueError, "at least one sequence"):
             prepare_spci_tuning_data({}, self.config())
@@ -115,6 +130,15 @@ class SPCITuningDataTests(unittest.TestCase):
         artifact["series"]["heldout_predictions"] = np.zeros(99)
         with self.assertRaisesRegex(ValueError, "matching lengths"):
             prepare_spci_tuning_data(artifact, self.config())
+
+    def test_obsolete_validation_fraction_has_actionable_migration_error(self):
+        for old_value in (0, 0.16, None):
+            config = self.config()
+            config.data.valid_ratio = old_value
+            with self.subTest(value=old_value), self.assertRaises(ValueError) as raised:
+                prepare_spci_tuning_data(self.artifact(), config)
+            self.assertIn("valid_ratio", str(raised.exception))
+            self.assertIn("train_ratio", str(raised.exception))
 
 
 if __name__ == "__main__":

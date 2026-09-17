@@ -1,14 +1,13 @@
 data:
   data_path: "./data/air-10_prediction/lstm/lstm_air-10_data.pkl"
-  train_ratio: 0.5
-  valid_ratio: 0.16
-  # test = heldout * (1 - train_ratio - valid_ratio)
+  train_ratio: 0.66
+  # test = heldout * (1 - train_ratio)
   normalize: True
 
 
 model:
   n_estimators: 10
-  max_depth: 2
+  max_depth: 50
   criterion: "squared_error"
   target_quantiles:
     - [0.950, 0.05]

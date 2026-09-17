@@ -463,10 +463,12 @@ be used for this dataset.
 
 ### Common CP split construction
 
-QR-CP, IQN-CP, Local-CP, and SPCI call
+QR-CP, IQN-CP, and Local-CP call
 [`ConformalPredictionData.prepare_quantile_regression_datasets`](dscp/data.py).
-The ordinary QR-CP, IQN-CP, and SPCI runners use its legacy three-way split;
+The ordinary QR-CP and IQN-CP runners use its legacy three-way split;
 the nested QR-CP, IQN-CP, and Local-CP tuning variants are described below.
+SPCI uses a training prefix defined by `data.train_ratio` and a final test
+suffix, with its tuning validation tail described in the SPCI section below.
 For a saved held-out sequence of length `L`, the legacy split computes
 
 ```python
@@ -643,7 +645,7 @@ and `model.target_quantiles` (inference and evaluation).
 
 | Method | Split of the base-predictor held-out suffix | How each portion is used |
 | --- | --- | --- |
-| SPCI | 50% train / 16% validation / about 34% test | The nominal train and validation examples are combined to fit one quantile random forest. Its parameters stay fixed during test, although each test feature contains the available past residual window. |
+| SPCI | 66% train / about 34% test | `data.train_ratio` defines the full training prefix. Tuning reserves its last `model_selection_valid_ratio` fraction for evaluation; final runs fit normalization and one quantile forest on the full prefix. Its parameters stay fixed during test, although each test feature contains the available past residual window. |
 | HopCPT | 33% train / 33% validation / about 34% test | Train fits the Hopfield network. Validation is evaluated sequentially and selects the checkpoint by coverage and interval width. The selected network stays fixed in test, while its available context/residual memory advances through validation and prior test observations. |
 | NexCP | 66% initial calibration / about 34% test | There is no learned train/validation stage. The initial prefix provides residual history; with the current `max_past=200`, each interval uses at most the latest 200 available residuals, including prior test residuals as testing advances. |
 | KOWCPI | 50% nominal train / 16% nominal validation / about 34% test | Train and validation are combined into a 66% initial calibration prefix. With the current `update_with_test=true`, later intervals also use prior test residuals. If normalization is enabled, only the nominal training prefix determines its statistics. |
@@ -937,15 +939,28 @@ sbatch sbatch/sbatch_run_tuning/run_spci_sapflux_tuning.sbatch
 ```
 
 In the SPCI tuning YAML, `tuning.model_selection_valid_ratio` controls the
-**fraction of the nominal training prefix reserved for hyperparameter evaluation**.
-For example, with `data.train_ratio: 0.5` and
-`tuning.model_selection_valid_ratio: 0.2`, the first 40% of the saved predictor's
-held-out sequence fits the forest, and the next 10% evaluates candidates.
-Normalization statistics come only from the fitting prefix. The ordinary
-validation and final test regions are excluded from tuning. The shipped SPCI
-grids use `model_selection_valid_ratio: 0.15`, reserving the last 15% of nominal
-training for evaluation. SPCI uses this subset to rank forest hyperparameters;
-it has no epoch or checkpoint-selection stage.
+**fraction of the training prefix reserved for hyperparameter evaluation**.
+`data.train_ratio` defines the full training prefix, and the remaining suffix
+is the final test set. For example, with `data.train_ratio: 0.66` and
+`tuning.model_selection_valid_ratio: 0.2`, the first 52.8% of the saved
+predictor's held-out sequence fits the forest, the next 13.2% evaluates
+candidates, and the last 34% remains reserved for test. Normalization
+statistics come only from the fitting prefix. There is no separate outer
+validation region. The shipped grids use `model_selection_valid_ratio: 0.15`,
+giving approximately 56.1% fitting and 9.9% tuning evaluation. SPCI uses this
+subset to rank forest hyperparameters; it has no epoch or checkpoint-selection
+stage.
+
+For an older SPCI config, replace `data.train_ratio` with the sum of its old
+`train_ratio` and `valid_ratio`, then remove `data.valid_ratio`. The checked-in
+dataset configs now use `0.66` (previously `0.5 + 0.16`), and the toy config
+uses `0.8` (previously `0.6 + 0.2`). This preserves approximately the same
+final test boundary, with a possible one-observation shift from integer
+rounding. The runner rejects configs that still contain `data.valid_ratio`.
+Final evaluation refits on the full training prefix, including the tuning
+validation tail, and evaluates the remaining test suffix. Normalization now
+uses the full training prefix instead of the old nominal training portion,
+so migration can change the results.
 
 The grids search residual-window length, tree count, and tree depth. Each trial
 must pass the coverage threshold on every selected sequence and confidence pair;

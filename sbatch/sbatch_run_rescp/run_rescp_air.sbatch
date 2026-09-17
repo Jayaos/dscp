@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH -t10
+#SBATCH -t240
 #SBATCH --output=%x_%A_%a.out
 
 # Submit from the repository root, or set DSCP_RUNPATH explicitly.

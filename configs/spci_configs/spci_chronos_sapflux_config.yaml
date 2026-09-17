@@ -1,7 +1,6 @@
 data:
   data_path: "./data/sapflux-solo3-large/chronos/chronos_sapflux-solo3-large_data.pkl"
-  train_ratio: 0.5
-  valid_ratio: 0.16
+  train_ratio: 0.66
   normalize: true
 
 model:

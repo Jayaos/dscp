@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:1 -C V100
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH -t10
+#SBATCH -t60
 #SBATCH -qinferno
 #SBATCH -o Report-qr-cp-air-%A_%a.out
 #SBATCH --mail-type=ALL

@@ -7,7 +7,7 @@ data:
   train_ratio: 0.5
   valid_ratio: 0.16
   normalize: True
-  strided_features: "xr"
+  strided_features: "xry"
 
 
 model:
@@ -16,11 +16,11 @@ model:
   dim_model: 32
   num_layers: 2
   dropout: 0.
-  use_current_feature: False
+  use_current_feature: True
   target_quantiles:
     - [0.05, 0.95]
   prediction_step: 1
-  window_size: 100
+  window_size: 200
 
 
 training:
