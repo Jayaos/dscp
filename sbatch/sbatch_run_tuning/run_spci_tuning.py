@@ -119,6 +119,7 @@ def _run_single_trial(config, sequence_item, normalization_params):
     )
     return {
         "estimator": type(forest).__name__,
+        "num_repaired_leaves": getattr(forest, "n_repaired_leaves_", 0),
         "seed": int(config.seed),
         "num_train_samples": len(train_dataset),
         "num_model_selection_valid_samples": len(evaluation_dataset),

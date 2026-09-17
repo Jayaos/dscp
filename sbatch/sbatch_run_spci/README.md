@@ -200,3 +200,14 @@ test region. Final outputs go to that trial's `final_run/` directory.
 Change `saving_dir` in a copy of the selected YAML to choose another final
 output directory. This tunes the current implementation, which fits one
 forest per sequence and uses the configured fixed quantile levels.
+
+### Sampled-forest numerical stability
+
+Above 10,000 fitting samples, both tuning and final evaluation use the
+sampled quantile forest. In `sklearn_quantile==0.1.1`, float32 accumulation
+can leave a sampled leaf value as NaN even when the training residuals are
+finite. The shared SPCI model repairs affected leaves using their original
+seeded draws and normalized float64 weights over that leaf's training
+residuals. A repair emits a warning; each sequence's tuning result records
+`num_repaired_leaves`. Leaves without valid training support still raise an
+error, and validation predictions must remain finite.

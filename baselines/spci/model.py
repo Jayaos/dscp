@@ -1,12 +1,77 @@
 """Quantile-forest construction shared by SPCI evaluation and tuning."""
 
 from numbers import Integral
+import warnings
 
 import numpy as np
+from sklearn.utils import check_random_state
 from sklearn_quantile import (
     RandomForestQuantileRegressor,
     SampleRandomForestQuantileRegressor,
 )
+
+
+def _repair_sampled_leaves(estimator):
+    """Finish upstream leaf draws that float32 weight accumulation left unset."""
+    values = estimator.tree_.value[:, 0, 0]
+    bad_leaves = np.flatnonzero(
+        (estimator.tree_.children_left == -1) & ~np.isfinite(values)
+    )
+    if not bad_leaves.size:
+        return 0
+
+    # Recreate sklearn_quantile's per-node draws, including its float32 cast.
+    # Only the CDF calculation changes; finite sampled leaves stay untouched.
+    draws = check_random_state(estimator.random_state).random_sample(
+        estimator.tree_.node_count
+    ).astype(np.float32)
+    for leaf in bad_leaves:
+        in_leaf = estimator.y_train_leaves_ == leaf
+        weights = np.asarray(estimator.y_weights_[in_leaf], dtype=np.float64)
+        residuals = estimator.y_train_[in_leaf, 0]
+        positive = weights > 0
+        if (
+            not positive.any()
+            or not np.isfinite(weights).all()
+            or (weights < 0).any()
+            or not np.isfinite(residuals[positive]).all()
+        ):
+            raise ValueError(
+                f"Cannot repair sampled quantile-forest leaf {leaf}: "
+                "expected finite training residuals and positive sampling weights."
+            )
+        # Normalizing in float64 and fixing the endpoint ensures every uniform
+        # draw selects an observed, positive-weight residual from this leaf.
+        cdf = np.cumsum(weights[positive], dtype=np.float64)
+        cdf /= cdf[-1]
+        cdf[-1] = 1.0
+        index = np.searchsorted(cdf, draws[leaf], side="left")
+        values[leaf] = residuals[positive][index]
+    return int(bad_leaves.size)
+
+
+class RobustSampleRandomForestQuantileRegressor(SampleRandomForestQuantileRegressor):
+    """Sampled forest with a numerical repair for unresolved training-leaf draws.
+
+    sklearn_quantile 0.1.1 subtracts float32 weights from each uniform draw.
+    Rounding can leave a terminal value as NaN even with finite training data;
+    np.quantile then propagates that NaN to every requested quantile. Repair
+    those leaves using their original draws and normalized float64 weights.
+    """
+
+    def fit(self, X, y, sample_weight=None):
+        super().fit(X, y, sample_weight=sample_weight)
+        self.n_repaired_leaves_ = sum(
+            _repair_sampled_leaves(estimator) for estimator in self.estimators_
+        )
+        if self.n_repaired_leaves_:
+            warnings.warn(
+                f"Repaired {self.n_repaired_leaves_} nonfinite sampled quantile-forest "
+                "leaf value(s) using their training residuals and normalized weights.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        return self
 
 
 def _positive_integer(value, name):
@@ -46,7 +111,7 @@ def build_quantile_forest(config, n_train_samples, quantiles):
         raise ValueError("quantiles must be a nonempty, strictly increasing array in [0, 1].")
 
     forest_type = (
-        SampleRandomForestQuantileRegressor
+        RobustSampleRandomForestQuantileRegressor
         if n_train_samples > 10_000
         else RandomForestQuantileRegressor
     )
