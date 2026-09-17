@@ -1,9 +1,10 @@
 grid:
-  # model.prediction_head: [partially_monotonic, cosine_embedding] # uncomment to compare both
+  model.prediction_head: [partially_monotonic] # uncomment to compare both
   model.shared_dim: [32, 64]
-  model.num_layers: [1, 2, 4]
+  model.num_layers: [1, 2]
   model.use_current_feature: [True, False]
   model.window_size: [100, 200]
+  model.monotonic_num_layers: [1, 2]
   data.strided_features: ["xr", "xry"]
   training.learning_rate: [0.001]
   training.epochs: [50]
@@ -11,7 +12,7 @@ grid:
 
 
 tuning:
-  num_gpus: 1 # 1: sequential; >1: parallel trials (allocate matching GPUs in Slurm)
+  num_gpus: 2 # 1: sequential; >1: parallel trials (allocate matching GPUs in Slurm)
   num_sequences: 3 # positive integer or all
   delta_threshold: -0.01
   model_selection_valid_ratio: 0.15
