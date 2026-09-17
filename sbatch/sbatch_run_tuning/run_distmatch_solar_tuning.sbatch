@@ -4,9 +4,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --array=0-2
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
-#SBATCH -t720
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=64G
+#SBATCH -t1080
 #SBATCH -qinferno
 #SBATCH -o Report-distmatch-solar-tuning-%A_%a.out
 #SBATCH --mail-type=ALL
