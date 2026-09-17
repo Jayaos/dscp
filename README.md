@@ -69,64 +69,115 @@ sampling code at commit `1d8e560`; see
 recurrence, recency weighting, numerical choices, and documented corrections.
 The upstream MIT notice is retained alongside the adapter.
 
-### Calibration, validation, and test sizes
+### Calibration/test sizes and tuning validation
 
-All three split ratios are explicit configuration settings:
+Ordinary runs split each saved base-predictor held-out sequence into calibration
+and test using two configuration settings:
 
 ```yaml
 data:
   data_path: ./data/air-10_prediction/lstm/lstm_air-10_data.pkl
-  calibration_ratio: 0.50
-  validation_ratio: 0.16
+  calibration_ratio: 0.66
   test_ratio: 0.34
   normalize: true
 ```
 
-These are fractions of each saved base-predictor held-out sequence. They must
-be finite and sum to one; calibration and test must be positive. Validation can
-be zero when running fixed hyperparameters, for example `0.66 / 0.0 / 0.34`.
-Hyperparameter tuning requires a positive validation ratio.
+Both ratios must be finite, positive, and sum to one. For a sequence of length
+`T`, the nominal calibration size is `C = floor(T * calibration_ratio)` and
+test contains the remaining `T - C` observations. Floating-point values close
+to integer boundaries are rounded before the outer floor. Empty partitions
+are rejected. No strided windows are constructed, so every evaluation target
+is scored.
 
-For a sequence of length `T`, the chronological partition sizes are
-`floor(T * calibration_ratio)`, `ceil(T * validation_ratio)`, and the remainder
-for test. Floating-point values near integer boundaries are rounded before
-floor/ceil. An empty calibration or test partition is rejected. No strided
-windows are constructed, so every validation and test target is evaluated.
+The Sapflux tuning YAML reserves a tail of that nominal calibration prefix
+for hyperparameter selection:
 
-| Region | Use |
+```yaml
+tuning:
+  model_selection_valid_ratio: 0.2
+```
+
+This ratio is relative to the calibration prefix, not the full held-out
+sequence. It must be finite and strictly between zero and one; it defaults to
+`0.2`. Tuning initializes on
+`floor(nextafter(C * (1 - model_selection_valid_ratio), +inf))` observations
+and evaluates the rest of calibration. `nextafter` nudges a floating-point
+product toward the next representable value to stabilize integer boundaries.
+Both inner regions must be nonempty. The final test suffix is excluded from
+tuning.
+
+| Run stage | Use |
 | --- | --- |
-| Calibration | Fit optional residual-input normalization and replay the prefix to initialize reservoir state and residual memory. |
-| Validation | Evaluate candidate hyperparameters sequentially during tuning. Earlier revealed validation residuals may enter later intervals. |
-| Test | Evaluate the selected fixed settings. Initialization replays calibration and validation, retaining the scaler fitted on calibration alone. |
+| Tuning initialization | Fit optional residual-input normalization on the earlier calibration prefix and initialize reservoir state and residual memory. |
+| Tuning validation | Evaluate candidates sequentially on the remaining calibration tail. Earlier revealed validation residuals may enter later intervals. |
+| Final test | Initialize a fresh estimator and fit normalization on the full nominal calibration prefix, then evaluate the test suffix with the selected fixed settings. The tuning ratio is ignored. |
 
-`data.calibration_ratio` controls the initial data partition.
+For `T = 10000` with `0.66 / 0.34` and a tuning ratio of `0.2`, tuning uses
+5280 initialization observations and 1320 validation targets, reserving 3400
+test observations. The final run uses all 6600 calibration observations and
+evaluates those same 3400 test targets.
+
+`data.calibration_ratio` controls the nominal calibration partition.
 `model.calibration_size` independently caps the number of state/residual pairs
 kept in rolling memory; set it to `null` for expanding memory. With
 `sampling_num: null`, the fixed Monte Carlo sample count is the memory cap,
 or the initial calibration length when memory is uncapped.
 
-The default `0.50 / 0.16 / 0.34` split aligns with the ordinary QR-CP/SPCI/KOWCPI
-target boundaries. Use `0.60 / 0.20 / 0.20` for the IQN/Local-CP final suffix.
+The default `0.66 / 0.34` split reserves approximately the same test suffix as
+ordinary QR-CP/SPCI/KOWCPI. Use `0.80 / 0.20` for the IQN/Local-CP final suffix.
 Compare the saved exact `target_indices` within a common artifact, since other
-baselines can round boundaries differently. Split settings stay fixed during
-a tuning search; changing the evaluation timestamps between candidates would
-make their scores incomparable.
+baselines can round boundaries differently. For example, at `T = 101`, the
+new default starts test at index 66; the previous `0.50 / 0.16 / 0.34` split
+started at 67. All split settings, including the tuning validation ratio,
+stay fixed outside the candidate grid so candidates evaluate identical targets.
+
+To migrate an old ResCP config, combine its calibration and validation ratios
+into `data.calibration_ratio`, retain `data.test_ratio`, and remove
+`data.validation_ratio`. The old validation key is rejected. Configure tuning
+validation separately with `tuning.model_selection_valid_ratio` if needed.
 
 ### Online data use and method settings
 
 At timestamp `t`, the query state contains residuals only through `t-1`. Each
 stored residual `r_j` is paired with the state before `r_j` was observed.
 ResCP emits the interval before adding `r_t` and advancing the reservoir.
-State continues across split boundaries and is independent for each series.
+State advances through initialization and evaluation within each run and is
+independent for each series.
 The adapter accepts scalar targets/predictions in `[T]` or `[T, 1]` format and
 supports unequal sequence lengths. It does not require `heldout_x`.
 
 Normalization affects reservoir inputs only. The sampling pool, logged
 residual quantiles, final interval endpoints, widths, and Winkler scores remain
-in original units. Normalization is never refitted on validation or test.
+in original units. Normalization is fitted once per run: on the earlier
+initialization prefix during tuning, or on the full calibration prefix for
+final test. It remains frozen throughout that run's evaluation.
 
-Starting settings are reservoir size 512, connectivity 0.2, spectral radius
-1.2, leak 0.9, input scaling 0.25, temperature 0.1, and memory cap 3800.
+All presets use reservoir size 512 and connectivity 0.2. Solar and Air use
+the fixed selected ResCP hyperparameters from
+[Table 4 of the paper](https://arxiv.org/pdf/2510.05060#page=20), with the
+experiment mapping RNN -> DSCP LSTM, Transformer -> Chronos, and ARIMA -> LR.
+Air uses the paper's Beijing settings.
+
+| Dataset | DSCP predictor | Paper predictor | Spectral radius | Leak rate | Input scaling | Temperature | Memory cap |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Solar | LSTM (RNN) | RNN | 0.9 | 0.75 | 0.7 | 0.1 | 3900 |
+| Solar | Chronos | Transformer | 0.9 | 0.8 | 0.4 | 0.1 | 7600 |
+| Solar | LR | ARIMA | 1.0 | 0.8 | 0.2 | 0.1 | 1500 |
+| Air | LSTM (RNN) | RNN | 1.3 | 0.95 | 0.25 | 0.1 | 3200 |
+| Air | Chronos | Transformer | 1.0 | 0.8 | 0.25 | 0.1 | 10500 |
+| Air | LR | ARIMA | 1.45 | 0.65 | 0.75 | 0.15 | 3800 |
+
+Solar and Air runs use these presets directly without hyperparameter tuning,
+initializing on the full calibration prefix. These are transfers of the
+published ResCP settings to DSCP's base forecasts; the base predictors and data
+partitions follow the DSCP experiment.
+
+Only Sapflux is tuned, separately for each base predictor. Its starting
+settings are spectral radius 1.2, leak 0.9, input scaling 0.25, temperature 0.1,
+and memory cap 3800. The Sapflux tuning grid searches 576 joint combinations
+of spectral radius, leak rate, input scaling, temperature, and memory cap,
+using five sequences by default (`tuning.num_sequences: 5`).
+
 `recurrence: upstream` preserves the executable upstream update, whose tanh
 term has no additional leak multiplier. `decay: linear` uses upstream's
 oldest-first ramp `[0, ..., n-1]`; `none` and `exponential` are also supported.
@@ -176,22 +227,44 @@ runs its three base predictors. CLI `--seed` and `--output-dir` overrides
 support separate experiment runs. `threads_per_worker` defaults to one to
 avoid oversubscribing CPUs when processing independent series in parallel.
 
+For Sapflux, tune on the reserved calibration tail and then run the exported
+`best_config.yaml` directly for final test:
+
 ```bash
 python -m sbatch.sbatch_run_tuning.run_rescp_tuning \
-  --base-config configs/rescp_configs/rescp_lstm_air_config.yaml \
-  --grid-config configs/rescp_configs/rescp_tuning_config.yaml \
-  --save-dir results/rescp_tuning/air_lstm
+  --base-config configs/rescp_configs/rescp_lstm_sapflux_config.yaml \
+  --grid-config configs/rescp_configs/rescp_sapflux_tuning_config.yaml \
+  --save-dir results/rescp_tuning/sapflux_lstm
 
-python -m sbatch.sbatch_run_rescp.run_rescp results/rescp_tuning/air_lstm/best_config.yaml
+python -m sbatch.sbatch_run_rescp.run_rescp results/rescp_tuning/sapflux_lstm/best_config.yaml
 ```
+
+Repeat with the LR and Chronos Sapflux presets, using separate output folders
+`results/rescp_tuning/sapflux_lr` and `results/rescp_tuning/sapflux_chronos`.
+
+To tune all three Sapflux base predictors on Slurm, submit from the repository root:
+
+```bash
+sbatch sbatch/sbatch_run_tuning/run_rescp_sapflux_tuning.sbatch
+```
+
+Array tasks 0/1/2 tune LR/LSTM/Chronos with four CPU workers per task in the
+`rescp` environment. The job reads the current Sapflux tuning YAML, including
+`tuning.model_selection_valid_ratio` and `tuning.num_sequences`. Results go to
+`results/tuning/rescp_sapflux/job_<array-job-id>/<predictor>/`; run the exported
+`best_config.yaml` there for final test. Environment overrides include
+`DSCP_RUNPATH`, `RESCP_ENV`, `RESCP_SEED`, `RESCP_GRID_CONFIG`, and
+`RESCP_TUNING_OUTPUT_ROOT`. Additional script arguments are forwarded to the tuner.
 
 Tuning evaluates only validation. Candidates use the same seeds and are ranked
 by mean per-series/per-interval Winkler score, optionally filtered by
 `tuning.delta_threshold` for coverage gap (set it to `null` to disable the
 filter). The tuner writes trial artifacts, `tuning_results.pkl`, and
 `best_config.yaml` when an eligible candidate exists. It does not run test;
-the second command performs that final evaluation. If no candidate passes the
-coverage threshold, the results record that outcome without selecting one.
+the second command initializes afresh on full calibration and performs final
+test evaluation, ignoring the saved tuning validation ratio. If no candidate
+passes the coverage threshold, the results record that outcome without
+selecting one.
 
 Ordinary runs save `resolved_config.yaml`, `log.pkl`, `summary_results.pkl`,
 and optional `plots/`. Logs use the current DSCP schema: `lower_interval` and
@@ -574,7 +647,7 @@ and `model.target_quantiles` (inference and evaluation).
 | HopCPT | 33% train / 33% validation / about 34% test | Train fits the Hopfield network. Validation is evaluated sequentially and selects the checkpoint by coverage and interval width. The selected network stays fixed in test, while its available context/residual memory advances through validation and prior test observations. |
 | NexCP | 66% initial calibration / about 34% test | There is no learned train/validation stage. The initial prefix provides residual history; with the current `max_past=200`, each interval uses at most the latest 200 available residuals, including prior test residuals as testing advances. |
 | KOWCPI | 50% nominal train / 16% nominal validation / about 34% test | Train and validation are combined into a 66% initial calibration prefix. With the current `update_with_test=true`, later intervals also use prior test residuals. If normalization is enabled, only the nominal training prefix determines its statistics. |
-| ResCP | 50% initial calibration / 16% validation / about 34% test | Calibration supplies residual normalization and reservoir memory. Validation selects hyperparameters in the separate tuner. The final test runner replays calibration and validation with the frozen scaler, then updates memory after each test observation. All three split ratios are configurable. |
+| ResCP | 66% calibration / about 34% test | Fixed Air/Solar runs initialize on full calibration. Sapflux tuning reserves the last 20% of calibration for validation; final runs initialize afresh and fit normalization on full calibration. Memory updates after each evaluated observation. Both outer ratios and the tuning validation fraction are configurable. |
 
 The active ratios and method-specific settings are in:
 
@@ -852,6 +925,37 @@ that many consecutive sorted keys starting at `--sequence-index` (default
 when `num_sequences: all`. With `all` and no explicit key, `--sequence-index`
 is ignored.
 
+### SPCI hyperparameter tuning
+
+SPCI uses the same grid, sequence-selection, coverage-filtering, and Winkler-score
+ranking conventions as QR-CP. Submit the CPU arrays for LR/LSTM/Chronos with:
+
+```bash
+sbatch sbatch/sbatch_run_tuning/run_spci_air_tuning.sbatch
+sbatch sbatch/sbatch_run_tuning/run_spci_solar_tuning.sbatch
+sbatch sbatch/sbatch_run_tuning/run_spci_sapflux_tuning.sbatch
+```
+
+In the SPCI tuning YAML, `tuning.model_selection_valid_ratio` controls the
+**fraction of the nominal training prefix reserved for hyperparameter evaluation**.
+For example, with `data.train_ratio: 0.5` and
+`tuning.model_selection_valid_ratio: 0.2`, the first 40% of the saved predictor's
+held-out sequence fits the forest, and the next 10% evaluates candidates.
+Normalization statistics come only from the fitting prefix. The ordinary
+validation and final test regions are excluded from tuning. The shipped SPCI
+grids use `model_selection_valid_ratio: 0.15`, reserving the last 15% of nominal
+training for evaluation. SPCI uses this subset to rank forest hyperparameters;
+it has no epoch or checkpoint-selection stage.
+
+The grids search residual-window length, tree count, and tree depth. Each trial
+must pass the coverage threshold on every selected sequence and confidence pair;
+eligible trials are ranked by mean Winkler score. Results include per-trial
+resolved YAMLs and `tuning_results.pkl`, with the same `all_trials` and `top_trials`
+structure as QR-CP. Run a selected resolved YAML through the ordinary SPCI runner
+for final refitting and test evaluation. See the
+[SPCI job documentation](sbatch/sbatch_run_spci/README.md#hyperparameter-tuning)
+for grids, overrides, the exact split, and final-run commands.
+
 ### Hyperparameter-tuning protocol
 
 QR-CP, IQN-CP, and Local-CP grid search use nested chronological splits so
@@ -904,8 +1008,8 @@ protocol and evaluate the previously untouched final test suffix once.
 Grid-search output itself is a validation result, not the final test result.
 
 This nested protocol currently applies to the QR-CP, IQN-CP, and Local-CP
-tuning runners. ResCP uses its calibration/validation/test split and likewise
-reserves test during tuning. Legacy tuners under
+tuning runners. ResCP reserves a validation tail within its nominal calibration
+prefix and likewise excludes the final test suffix during tuning. Legacy tuners under
 [`sbatch/sbatch_run_tuning/`](sbatch/sbatch_run_tuning/) may still evaluate or
 rank candidates on their test partition and should not be assumed to provide
 an untouched final evaluation. All methods in a final comparison should use

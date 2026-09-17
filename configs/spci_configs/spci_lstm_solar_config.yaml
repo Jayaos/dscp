@@ -1,0 +1,20 @@
+data:
+  data_path: "./data/solar_prediction/lstm/lstm_nsdb-60m_data.pkl"
+  train_ratio: 0.5
+  valid_ratio: 0.16
+  normalize: true
+
+model:
+  n_estimators: 10
+  max_depth: 2
+  criterion: "squared_error"
+  target_quantiles:
+    - [0.95, 0.05]
+  prediction_step: 1
+  window_size: 100
+
+plotting:
+  plotting: true
+  plotting_seq_len: 200
+
+saving_dir: "./results/spci_lstm_solar/"

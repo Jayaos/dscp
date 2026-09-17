@@ -1,10 +1,10 @@
+# Fixed ResCP Table 4 settings: Solar RNN -> DSCP LSTM (RNN).
 # Ratios partition the saved forecast suffix in chronological order.
 seed: 2026
 
 data:
   data_path: "./data/solar_prediction/lstm/lstm_nsdb-60m_data.pkl"
-  calibration_ratio: 0.5
-  validation_ratio: 0.16
+  calibration_ratio: 0.66
   test_ratio: 0.34
   normalize: true
 
@@ -13,12 +13,12 @@ model:
     - [0.05, 0.95]
   prediction_step: 1
   reservoir_size: 512
-  spectral_radius: 1.2
-  leak_rate: 0.9
-  input_scaling: 0.25
+  spectral_radius: 0.9
+  leak_rate: 0.75
+  input_scaling: 0.7
   connectivity: 0.2
   temperature: 0.1
-  calibration_size: 3800
+  calibration_size: 3900
   # null defaults the Monte Carlo sample count to calibration_size.
   sampling_num: null
   use_beta_search: true

@@ -1,9 +1,18 @@
 # Keep DistMatch launchers compatible with Slurm after Windows checkouts.
 sbatch/sbatch_run_distmatch/*.sbatch text eol=lf
-sbatch/sbatch_run_tuning/run_distmatch_air_tuning.sbatch text eol=lf
+sbatch/sbatch_run_tuning/run_distmatch_*_tuning.sbatch text eol=lf
 
 # Keep NexCP launchers compatible with Slurm after Windows checkouts.
 sbatch/sbatch_run_nexcp/*.sbatch text eol=lf
+sbatch/sbatch_run_tuning/run_nexcp_*_tuning.sbatch text eol=lf
 
 # Keep KOWCPI launchers compatible with Slurm after Windows checkouts.
 sbatch/sbatch_run_kowcpi/*.sbatch text eol=lf
+sbatch/sbatch_run_tuning/run_kowcpi_*_tuning.sbatch text eol=lf
+
+# Keep SPCI launchers compatible with Slurm after Windows checkouts.
+sbatch/sbatch_run_spci/*.sbatch text eol=lf
+sbatch/sbatch_run_tuning/run_spci_*_tuning.sbatch text eol=lf
+
+# Keep ResCP tuning launchers compatible with Slurm after Windows checkouts.
+sbatch/sbatch_run_tuning/run_rescp_*_tuning.sbatch text eol=lf

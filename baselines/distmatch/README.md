@@ -170,32 +170,42 @@ history.
 
 ## Tune on validation
 
-The supplied grid contains thresholds `[0.025, 0.05, 0.1]` and windows
-`[25, 50, 100]`:
+The air, solar, and sapflux tuning grids each search thresholds
+`[0.005, 0.01, 0.025, 0.05, 0.075, 0.1]` and windows `[100, 200]`, giving
+12 combinations per base predictor. The grids evaluate 3 air sequences,
+10 solar sequences, and 5 sapflux sequences, respectively. For example,
+run the air grid with the LR air base configuration:
 
 ```bash
 python -m sbatch.sbatch_run_tuning.run_distmatch_tuning --base-config configs/distmatch_configs/distmatch_lr_air_config.yaml --grid-config configs/distmatch_configs/distmatch_air_tuning_config.yaml --save-dir results/distmatch_tuning
 ```
 
-Candidates use the same split boundaries and seed. Selection uses validation
-coverage and Winkler score; final test evaluation is a separate command. If a
-candidate passes the configured coverage condition, the tuner exports
-`best_config.yaml`:
+Use the matching dataset's base configuration and tuning grid for solar or
+sapflux. Candidates use the same split boundaries and seed. All three grids
+set `delta_threshold: -0.01`: coverage must exceed nominal coverage minus 0.01
+for every selected sequence and confidence level. The eligible candidate with
+the lowest mean validation Winkler score is exported as `best_config.yaml`.
+If no candidate qualifies, no best configuration is exported. Final test
+evaluation is a separate command:
 
 ```bash
 python -m sbatch.sbatch_run_distmatch.run_distmatch results/distmatch_tuning/best_config.yaml
 ```
 
-To tune all three air predictors through Slurm:
+To tune LR, LSTM, and Chronos through Slurm for each dataset:
 
 ```bash
 sbatch sbatch/sbatch_run_tuning/run_distmatch_air_tuning.sbatch
+sbatch sbatch/sbatch_run_tuning/run_distmatch_solar_tuning.sbatch
+sbatch sbatch/sbatch_run_tuning/run_distmatch_sapflux_tuning.sbatch
 ```
 
-This uses the same array mapping and CPU settings as the dataset launchers.
-It checks configuration, artifact availability, and CPU allocation before
-tuning. Results are separated by job and predictor under
-`results/tuning/distmatch_air/job_<array_job_id>/<predictor>/`. Optional
+Each launcher uses its dataset's base configurations and tuning grid. Array
+tasks `0`, `1`, and `2` select LR, LSTM, and Chronos, respectively, with four
+CPUs per task. The launcher checks configuration, artifact availability, and
+CPU allocation before tuning. Results are separated by dataset, job, and
+predictor under
+`results/tuning/distmatch_<dataset>/job_<array_job_id>/<predictor>/`. Optional
 environment variables are `DISTMATCH_GRID_CONFIG`,
 `DISTMATCH_TUNING_OUTPUT_ROOT`, `DISTMATCH_TOP_K` (default `3`), and
 `DISTMATCH_SEED`. The tuning job evaluates validation only; run the exported

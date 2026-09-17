@@ -1,0 +1,12 @@
+# 27 trials; the same evaluation timestamps are used for every window size.
+grid:
+  model.window_size: [100, 200, 500]
+  model.n_estimators: [10, 20, 50]
+  model.max_depth: [2, 5, 10]
+
+tuning:
+  num_sequences: 5
+  delta_threshold: -0.01
+  # Reserve this fraction of data.train_ratio for hyperparameter evaluation.
+  # With train_ratio=0.5 and ratio=0.2, fit 40% and evaluate the next 10%.
+  model_selection_valid_ratio: 0.15

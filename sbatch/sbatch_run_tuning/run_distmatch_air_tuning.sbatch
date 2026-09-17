@@ -1,12 +1,16 @@
 #!/bin/bash
-#SBATCH --job-name=distmatch_air_tuning
-#SBATCH --array=0-2
+#SBATCH -J distmatch_air_tuning
+#SBATCH --account=gts-yxie77-paid
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
+#SBATCH --array=0-2
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=24:00:00
-#SBATCH --output=%x_%A_%a.out
+#SBATCH -t720
+#SBATCH -qinferno
+#SBATCH -o Report-distmatch-air-tuning-%A_%a.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=jlee3541@gatech.edu
 
 set -euo pipefail
 
@@ -23,7 +27,7 @@ fi
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "${DISTMATCH_ENV:-distmatch}"
 
-# Array tasks 0/1/2 use LR/LSTM/Chronos forecasts, respectively.
+# Tune air validation data; array tasks 0/1/2 use LR/LSTM/Chronos forecasts.
 TASK_ID="${SLURM_ARRAY_TASK_ID:-0}"
 case "$TASK_ID" in
   0|1|2) ;;
@@ -51,4 +55,3 @@ python -u -m sbatch.sbatch_run_tuning.run_distmatch_tuning \
   --save-dir "$OUTPUT_ROOT/job_${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-local}}/$BASE_PREDICTOR" \
   --top-k "${DISTMATCH_TOP_K:-3}" \
   "${EXTRA_ARGS[@]}"
-

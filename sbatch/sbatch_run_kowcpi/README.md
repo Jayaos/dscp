@@ -51,6 +51,14 @@ the dispatcher substitutes the selected artifact path and sets
 The templates retain their normalization settings (off for Air/Solar, on
 for Sapflux).
 
+The normal templates set `data.calibration_ratio: 0.66`, reserving 66% of the
+saved heldout forecasts for calibration. The remaining `1 - calibration_ratio`
+(34%) is used for final testing; no separate test ratio is needed.
+Hyperparameter validation is configured only in the tuning YAML through
+`tuning.model_selection_valid_ratio`, which holds out a tail of the calibration
+prefix. See the [baseline split documentation](../../baselines/kowcpi/README.md)
+for the tuning protocol and migration from the old `train_ratio`/`valid_ratio` keys.
+
 Each task writes to `results/kowcpi/{dataset}/{predictor}/`:
 
 ```text
@@ -84,4 +92,49 @@ or prediction artifacts. The existing config-file launcher remains available:
 ```bash
 python -m sbatch.sbatch_run_kowcpi.run_kowcpi \
   configs/kowcpi_configs/kowcpi_chronos_air_config.yaml --num-cores 4
+```
+
+## Hyperparameter tuning arrays
+
+Submit the dataset arrays from the repository root:
+
+```bash
+sbatch sbatch/sbatch_run_tuning/run_kowcpi_air_tuning.sbatch
+sbatch sbatch/sbatch_run_tuning/run_kowcpi_solar_tuning.sbatch
+sbatch sbatch/sbatch_run_tuning/run_kowcpi_sapflux_tuning.sbatch
+```
+
+Each array uses task IDs `0=lr`, `1=lstm`, `2=chronos`. Each task requests
+12 CPUs, 48 GB memory, and 120 minutes in the `dscp` environment, matching the
+existing KOWCPI tuning job. Independent sequences run in parallel within each
+grid trial; the trials run sequentially. Job logs include both the array job
+and task IDs.
+
+The tuning dispatcher uses the same artifact paths and base templates as the
+normal arrays, with `kowcpi_{dataset}_tuning_config.yaml` supplying the grid and
+validation fraction. It writes a resolved base config and tuning artifacts to
+`results/tuning/kowcpi/{dataset}/{predictor}/`. Final-test observations are
+excluded from tuning, following the [baseline split protocol](../../baselines/kowcpi/README.md).
+
+Preview any task locally without writing files or loading forecast artifacts:
+
+```bash
+python -m sbatch.sbatch_run_tuning.run_kowcpi_tuning_job solar --task-id 2 --dry-run
+```
+
+The preview needs only `omegaconf` beyond the Python standard library. To tune
+only Chronos on Solar, for example:
+
+```bash
+sbatch --array=2 sbatch/sbatch_run_tuning/run_kowcpi_solar_tuning.sbatch
+```
+
+Set `KOWCPI_TUNING_OUTPUT_ROOT`, `KOWCPI_SEED`, or `KOWCPI_TOP_K` through
+`sbatch --export=ALL,...` to override their defaults (`results/tuning/kowcpi`,
+`2026`, and `3`). Set a distinct output root to retain repeated runs. Additional
+dispatcher options may follow the script path, such as `--sequence-key`,
+`--sequence-index`, `--grid-config`, or `--base-config`:
+
+```bash
+sbatch sbatch/sbatch_run_tuning/run_kowcpi_air_tuning.sbatch --sequence-index 3
 ```

@@ -1,9 +1,10 @@
 from omegaconf import OmegaConf
 import os
+import random
 import torch
 import numpy as np
 from tqdm import tqdm
-from sklearn_quantile import RandomForestQuantileRegressor, SampleRandomForestQuantileRegressor
+from baselines.spci.model import build_quantile_forest
 from dscp.data import ConformalPredictionData
 from utils.utils import load_data, save_data, read_setup, get_interval_quantile_indices
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, summarize_evaluation_results
@@ -13,6 +14,10 @@ from utils.plotting import plot_cp_prediction_intervals
 def run_spci_experiment(config_path):
 
     config = OmegaConf.load(config_path)
+    if config.get("seed", None) is not None:
+        random.seed(config.seed)
+        np.random.seed(config.seed)
+        torch.manual_seed(config.seed)
     os.makedirs(config.saving_dir, exist_ok=True)
     sorted_quantiles, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
     target_quantiles = np.array(sorted_quantiles)
@@ -50,18 +55,9 @@ def run_spci_experiment(config_path):
 
         # model init
         # target_quantiles must be sorted array
-        if len(train_dataset) + len(valid_dataset) > 10000:
-            qrf = SampleRandomForestQuantileRegressor(n_estimators=config.model.n_estimators,
-                                                      max_depth=config.model.max_depth,
-                                                      criterion=config.model.criterion,
-                                                      n_jobs=-1,
-                                                      q=target_quantiles)
-        else:
-            qrf = RandomForestQuantileRegressor(n_estimators=config.model.n_estimators,
-                                                max_depth=config.model.max_depth,
-                                                criterion=config.model.criterion,
-                                                n_jobs=-1,
-                                                q=target_quantiles)
+        qrf = build_quantile_forest(
+            config, len(train_dataset) + len(valid_dataset), target_quantiles
+        )
             
         # train Quantile Random Forest
         qrf.fit(strided_residual, target_residual)

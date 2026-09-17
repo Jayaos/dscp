@@ -22,8 +22,12 @@ not be silently replaced by the paper's recurrence or inverse-age weighting.
 
 DSCP-specific corrections and choices:
 
-- Prediction and observation are separate operations. The scaler is fitted
-  once on the initial calibration prefix; the residual pool stays in raw units.
+- Prediction and observation are separate operations. During tuning, the tail
+  of nominal calibration is reserved using `tuning.model_selection_valid_ratio`;
+  only the earlier prefix fits the scaler and initializes the reservoir. Final
+  test runs initialize afresh and fit the scaler on the full nominal calibration
+  prefix. The scaler stays frozen during evaluation and the residual pool stays
+  in raw units.
 - The calibration buffer holds at most the configured number of pairs. The
   Monte Carlo sample count stays fixed (default: cap, or initial prefix length
   for unbounded memory), correcting upstream growth at the cap boundary.

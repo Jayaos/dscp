@@ -6,6 +6,7 @@ import torch
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
+from baselines.kowcpi.data import prepare_sequence
 from baselines.kowcpi.model import KOWCPIResidualIntervalEstimator
 from utils.plotting import plot_cp_prediction_intervals
 from utils.reporting import (
@@ -15,28 +16,6 @@ from utils.reporting import (
     summarize_evaluation_results,
 )
 from utils.utils import load_data, read_setup, save_data
-
-
-def _flatten(values):
-    return np.asarray(values, dtype=float).reshape(-1)
-
-
-def _normalization_params(y, train_size):
-    train_y = np.asarray(y[:train_size], dtype=float)
-    mean = train_y.mean(axis=0)
-    std = train_y.std(axis=0) + 1e-8
-    return mean, std
-
-
-def _normalize(values, mean, std):
-    return (np.asarray(values, dtype=float) - mean) / std
-
-
-def _scalar_std(std):
-    std_arr = np.asarray(std, dtype=float).reshape(-1)
-    if std_arr.size != 1:
-        raise ValueError("KOWCPI baseline expects a univariate target.")
-    return float(std_arr[0])
 
 
 def _bandwidth_range_from_config(config):
@@ -86,19 +65,6 @@ def _evaluation_result_template(target_quantiles):
     }
 
 
-def _split_sizes(n, train_ratio, valid_ratio):
-    train_size = int(np.floor(n * train_ratio))
-    valid_size = int(np.ceil(n * valid_ratio))
-    test_size = n - train_size - valid_size
-    if train_size <= 0 or valid_size < 0 or test_size <= 0:
-        raise ValueError(
-            "Invalid split sizes for n={}: train={}, valid={}, test={}.".format(
-                n, train_size, valid_size, test_size
-            )
-        )
-    return train_size, valid_size, test_size
-
-
 def _validate_num_cores(num_cores):
     if num_cores is None:
         return 1
@@ -119,35 +85,14 @@ def _run_kowcpi_sequence_worker(args):
 
 
 def _run_kowcpi_sequence(key, item, config, target_quantiles):
-    raw_y = _flatten(item["heldout_y"])
-    raw_predictions = _flatten(item["heldout_predictions"])
-    if len(raw_y) != len(raw_predictions):
-        raise ValueError(
-            "{} has mismatched heldout_y and heldout_predictions lengths: {} != {}".format(
-                key, len(raw_y), len(raw_predictions)
-            )
-        )
-
-    train_size, valid_size, test_size = _split_sizes(
-        len(raw_y),
-        float(config.data.train_ratio),
-        float(config.data.valid_ratio),
-    )
-    calibration_size = train_size + valid_size
-
-    if bool(config.data.normalize):
-        y_mean, y_std = _normalization_params(item["heldout_y"], train_size)
-        y_for_residuals = _flatten(_normalize(item["heldout_y"], y_mean, y_std))
-        predictions_for_residuals = _flatten(_normalize(item["heldout_predictions"], y_mean, y_std))
-        residual_normalized_std = _scalar_std(y_std)
-        residual_normalization_params = (0.0, residual_normalized_std)
-    else:
-        y_for_residuals = raw_y
-        predictions_for_residuals = raw_predictions
-        residual_normalized_std = None
-        residual_normalization_params = None
-
-    residuals = y_for_residuals - predictions_for_residuals
+    prepared = prepare_sequence(item, config, split="test")
+    residuals = prepared["residuals"]
+    raw_y = prepared["raw_y"]
+    raw_predictions = prepared["raw_predictions"]
+    calibration_size = prepared["calibration_size"]
+    test_size = prepared["evaluation_size"]
+    residual_normalized_std = prepared["residual_normalized_std"]
+    residual_normalization_params = prepared["residual_normalization_params"]
     target_residual = torch.tensor(residuals[calibration_size:], dtype=torch.float32)
     target_y = torch.tensor(raw_y[calibration_size:], dtype=torch.float32)
     target_predictions = torch.tensor(raw_predictions[calibration_size:], dtype=torch.float32)
@@ -252,7 +197,15 @@ def _run_kowcpi_sequence(key, item, config, target_quantiles):
         result["avg_interval_width"] = avg_interval_width
         result["avg_winkler_score"] = avg_winkler_score
 
-    return {"evaluation_results": evaluation_results}
+    return {
+        "evaluation_results": evaluation_results,
+        "metadata": {
+            "evaluation_split": "test",
+            "evaluation_start": prepared["evaluation_start"],
+            "evaluation_end": prepared["evaluation_end"],
+            "boundaries": prepared["boundaries"],
+        },
+    }
 
 
 def run_kowcpi(config_path, num_cores=1):

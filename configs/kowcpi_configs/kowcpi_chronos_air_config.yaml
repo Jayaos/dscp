@@ -1,7 +1,7 @@
 data:
   data_path: "./data/air-10_prediction/chronos/chronos_air-10_data.pkl"
-  train_ratio: 0.5
-  valid_ratio: 0.16
+  # Fractions of the saved heldout forecasts, not point-predictor training data.
+  calibration_ratio: 0.66 # Test uses the remaining 1 - calibration_ratio.
   normalize: False
 
 
@@ -13,7 +13,7 @@ model:
   # in the original KOWCPI_Codes implementation.
   past_window: 5
 
-  # If null, use all calibration residuals available before each test point.
+  # If null, use a rolling residual history with the calibration length.
   history_window: null
 
   kernel: "epanechnikov"

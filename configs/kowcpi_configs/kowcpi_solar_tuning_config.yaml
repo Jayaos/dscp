@@ -1,0 +1,10 @@
+grid:
+  model.kernel: ["epanechnikov"]
+  model.past_window: [5, 10, 20, 50, 100]
+
+
+tuning:
+  num_sequences: 10
+  delta_threshold: -0.01
+  # Reserve the last 15% of the calibration prefix for model selection.
+  model_selection_valid_ratio: 0.15

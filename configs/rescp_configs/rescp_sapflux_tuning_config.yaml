@@ -1,0 +1,20 @@
+# Sapflux-only experiment grid; Solar and Air use fixed published settings.
+# Use separately with each rescp_{lr,lstm,chronos}_sapflux_config.yaml preset.
+# Validation-only search. The saved final-test suffix is never scored here.
+# 576 joint candidates across the five paper-tuned hyperparameters.
+grid:
+  model.spectral_radius: [0.5, 0.9, 1.2, 1.5]
+  model.leak_rate: [0.5, 0.8, 1.0]
+  model.input_scaling: [0.1, 0.25, 0.75, 1.5]
+  model.temperature: [0.03, 0.1, 0.3]
+  model.calibration_size: [100, 500, 1500, 4000]
+
+tuning:
+  # Reserve the last 20% of the nominal calibration prefix for model selection.
+  # This stays fixed across trials; final test runs use the full calibration prefix.
+  model_selection_valid_ratio: 0.15
+  # Sorted sequence subset; null uses all sequences from --sequence-index.
+  num_sequences: 5
+  # Each sequence/pair must exceed target coverage plus this threshold.
+  # null disables the coverage filter and ranks every trial by Winkler score.
+  delta_threshold: -0.01

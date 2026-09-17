@@ -4,7 +4,7 @@ grid:
 
 
 tuning:
-  num_sequences: 2
+  num_sequences: 3
   delta_threshold: -0.01
 
 

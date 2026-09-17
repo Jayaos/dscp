@@ -149,8 +149,11 @@ main(sys.argv[1:])
                     )
                     self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_checked_in_presets_and_grid_have_portable_paths(self):
-        for name in ("lr_air", "lstm_air", "chronos_air", "lr_solar", "lstm_sapflux"):
+    def test_checked_in_presets_and_grids_have_portable_paths(self):
+        names = (f"{predictor}_{dataset}"
+                 for dataset in ("air", "solar", "sapflux")
+                 for predictor in ("lr", "lstm", "chronos"))
+        for name in names:
             with self.subTest(name=name):
                 path = REPO_ROOT / "configs/distmatch_configs" / f"distmatch_{name}_config.yaml"
                 args = cli.build_parser().parse_args([str(path)])
@@ -160,9 +163,16 @@ main(sys.argv[1:])
                 self.assertFalse(config.data.normalize)
                 self.assertEqual(config.model.past_window_len, 100)
                 self.assertTrue(Path(config.data.data_path).is_relative_to(REPO_ROOT))
-        grid = OmegaConf.load(REPO_ROOT / "configs/distmatch_configs/distmatch_air_tuning_config.yaml")
-        self.assertEqual(list(grid.grid["model.match_threshold"]), [0.025, 0.05, 0.1])
-        self.assertEqual(list(grid.grid["model.past_window_len"]), [25, 50, 100])
+        for dataset, num_sequences in (("air", 3), ("solar", 10), ("sapflux", 5)):
+            with self.subTest(dataset=dataset):
+                grid = OmegaConf.load(
+                    REPO_ROOT / "configs/distmatch_configs" / f"distmatch_{dataset}_tuning_config.yaml"
+                )
+                self.assertEqual(list(grid.grid["model.match_threshold"]),
+                                 [0.005, 0.01, 0.025, 0.05, 0.075, 0.1])
+                self.assertEqual(list(grid.grid["model.past_window_len"]), [100, 200])
+                self.assertEqual(grid.tuning.num_sequences, num_sequences)
+                self.assertEqual(grid.tuning.delta_threshold, -0.01)
 
 
 if __name__ == "__main__":

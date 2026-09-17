@@ -52,6 +52,11 @@ class WeightedNadarayaWatson(BaseEstimator, RegressorMixin):
         self._squared_distances = self._distances * self._distances
 
     def _aic_for_bandwidths_fast(self, y, bandwidths):
+        """Use the normalized-kernel AIC from KOWCPI_Codes' active fit path.
+
+        Bandwidth selection does not use the empirical-likelihood correction;
+        that correction is applied by get_weights when predicting quantiles.
+        """
         n = len(y)
         y = y.reshape(-1, 1)
         aics = []
@@ -74,7 +79,11 @@ class WeightedNadarayaWatson(BaseEstimator, RegressorMixin):
             rss = float((resid * resid).sum())
             trace_ss = float((weights * weights).sum())
             denominator = max(n - (trace_ss + 2.0), 1e-8)
-            aics.append(np.log(max(rss, 1e-12)) + (n + trace_ss) / denominator)
+            # Preserve the source's log(RSS) for every positive RSS. An
+            # absolute floor (e.g. 1e-12) changes bandwidth rankings when
+            # residuals are small. Guard only zero RSS against log(0).
+            log_rss = np.log(rss if rss > 0.0 else np.finfo(float).tiny)
+            aics.append(log_rss + (n + trace_ss) / denominator)
 
         return np.asarray(aics)
 

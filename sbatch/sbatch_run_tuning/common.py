@@ -16,10 +16,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def parse_args(method_name: str, include_num_cores: bool = False) -> argparse.Namespace:
+    grid_example = (
+        "grid: {model.window_size: [100, 200], model.n_estimators: [10, 50]}"
+        if method_name == "spci"
+        else "grid: {model.dim_model: [32, 64], training.learning_rate: [0.001, 0.0003]}"
+    )
     parser = argparse.ArgumentParser(
         description=(
             f"Run hyperparameter tuning for {method_name}. "
-            "Candidates are filtered by positive avg_delta_coverage and ranked by avg_winkler_score."
+            "Candidates are filtered by the configured coverage-gap threshold "
+            "and ranked by avg_winkler_score."
         )
     )
     parser.add_argument(
@@ -34,7 +40,7 @@ def parse_args(method_name: str, include_num_cores: bool = False) -> argparse.Na
         required=True,
         help=(
             "Grid config YAML. Expected format: "
-            "grid: {model.dim_model: [32, 64], training.learning_rate: [0.001, 0.0003]}"
+            f"{grid_example}"
         ),
     )
     parser.add_argument(
@@ -62,7 +68,7 @@ def parse_args(method_name: str, include_num_cores: bool = False) -> argparse.Na
         "--top-k",
         type=int,
         default=3,
-        help="Number of top-ranked positive-coverage configs to keep.",
+        help="Number of top-ranked coverage-eligible configs to keep.",
     )
     parser.add_argument(
         "--seed",
@@ -346,12 +352,15 @@ def aggregate_sequence_results(sequence_results: dict, target_quantiles: list) -
             ),
         }
 
-    return {
+    result = {
         "num_sequences_evaluated": len(sequence_results),
         "sequence_results": sequence_results,
-        "mean_best_valid_loss": float(np.mean([item["best_valid_loss"] for item in ordered_results])),
-        "mean_best_epoch": float(np.mean([item["best_epoch"] for item in ordered_results])),
         "pair_metrics": pair_metrics,
         "selection_score": float(np.mean([item["selection_score"] for item in ordered_results])),
         "positive_delta_coverage": all(item["positive_delta_coverage"] for item in ordered_results),
     }
+    # Forests have no epoch/checkpoint selection; neural runners retain these fields.
+    for metric in ("best_valid_loss", "best_epoch"):
+        if all(metric in item for item in ordered_results):
+            result[f"mean_{metric}"] = float(np.mean([item[metric] for item in ordered_results]))
+    return result

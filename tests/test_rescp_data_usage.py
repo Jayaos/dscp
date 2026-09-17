@@ -9,17 +9,17 @@ from baselines.rescp.run_rescp import evaluate_sequence, evaluate_sequences
 from utils.plotting import _resolve_logged_interval_endpoints
 
 
-def _config(calibration_ratio=0.5, validation_ratio=0.2, test_ratio=0.3):
+def _config(calibration_ratio=0.7, test_ratio=0.3, model_selection_valid_ratio=0.2):
     return OmegaConf.create(
         {
             "seed": 17,
             "device": "cpu",
             "data": {
                 "calibration_ratio": calibration_ratio,
-                "validation_ratio": validation_ratio,
                 "test_ratio": test_ratio,
                 "normalize": True,
             },
+            "tuning": {"model_selection_valid_ratio": model_selection_valid_ratio},
             "model": {
                 "reservoir_size": 8,
                 "spectral_radius": 0.8,
@@ -76,23 +76,22 @@ class ResCPScalarSequenceTests(unittest.TestCase):
 
 
 class ResCPSplitTests(unittest.TestCase):
-    def test_split_rounding_matches_existing_cp_target_boundaries(self):
+    def test_ordinary_split_uses_all_calibration_and_preserves_every_target(self):
         for length, ratios, expected in (
-            (100, (0.5, 0.16, 0.34), (50, 66, 34)),
-            (101, (0.5, 0.16, 0.34), (50, 67, 34)),
-            (100, (0.6, 0.2, 0.2), (60, 80, 20)),
-            (100, (0.29, 0.14, 0.57), (29, 43, 57)),
+            (100, (0.66, 0.34), (66, 34)),
+            (101, (0.66, 0.34), (66, 35)),
+            (100, (0.8, 0.2), (80, 20)),
+            (100, (0.29, 0.71), (29, 71)),
         ):
             with self.subTest(length=length, ratios=ratios):
                 result = split_boundaries(length, *ratios)
-                calibration_end, validation_end, test_size = expected
+                calibration_end, test_size = expected
                 self.assertEqual(result["calibration_end"], calibration_end)
-                self.assertEqual(result["validation_end"], validation_end)
+                self.assertEqual(result["validation_end"], calibration_end)
                 self.assertEqual(result["test_size"], test_size)
                 self.assertEqual(result["calibration_size"], calibration_end)
-                self.assertEqual(
-                    result["validation_size"], validation_end - calibration_end
-                )
+                self.assertEqual(result["nominal_calibration_size"], calibration_end)
+                self.assertEqual(result["validation_size"], 0)
                 self.assertEqual(
                     sum(result[key] for key in (
                         "calibration_size", "validation_size", "test_size"
@@ -100,28 +99,48 @@ class ResCPSplitTests(unittest.TestCase):
                     length,
                 )
 
-    def test_zero_validation_is_available_for_fixed_hyperparameters(self):
-        result = split_boundaries(101, 0.66, 0.0, 0.34)
-        self.assertEqual(result["calibration_end"], 66)
-        self.assertEqual(result["validation_end"], 66)
-        self.assertEqual(result["validation_size"], 0)
-        self.assertEqual(result["test_size"], 35)
+    def test_nested_split_uses_qr_iqn_rounding_inside_nominal_calibration(self):
+        for length, ratios, inner_ratio, expected in (
+            (100, (0.66, 0.34), 0.2, (52, 14, 34)),
+            (101, (0.66, 0.34), 0.2, (52, 14, 35)),
+            (100, (0.6, 0.4), 0.2, (48, 12, 40)),
+            (100, (0.5, 0.5), 0.2, (40, 10, 50)),
+            (100, (0.7, 0.3), 0.1, (63, 7, 30)),
+        ):
+            with self.subTest(length=length, ratios=ratios, inner_ratio=inner_ratio):
+                result = split_boundaries(
+                    length, *ratios, model_selection_valid_ratio=inner_ratio
+                )
+                fit_size, valid_size, test_size = expected
+                self.assertEqual(result["calibration_size"], fit_size)
+                self.assertEqual(result["validation_start"], fit_size)
+                self.assertEqual(result["validation_size"], valid_size)
+                self.assertEqual(result["validation_end"], fit_size + valid_size)
+                self.assertEqual(result["test_start"], fit_size + valid_size)
+                self.assertEqual(result["nominal_calibration_size"], fit_size + valid_size)
+                self.assertEqual(result["test_size"], test_size)
 
     def test_invalid_ratios_and_empty_partitions_are_rejected(self):
         for length, ratios in (
-            (100, (0.0, 0.2, 0.8)),
-            (100, (-0.1, 0.2, 0.9)),
-            (100, (0.5, -0.1, 0.6)),
-            (100, (0.5, 0.5, 0.0)),
-            (100, (0.5, 0.2, 0.4)),
-            (100, (np.nan, 0.2, 0.3)),
-            (100, (0.5, np.inf, 0.3)),
-            (0, (0.5, 0.2, 0.3)),
-            (2, (0.1, 0.2, 0.7)),
-            (2, (0.5, 0.4, 0.1)),
+            (100, (0.0, 1.0)),
+            (100, (-0.1, 1.1)),
+            (100, (1.1, -0.1)),
+            (100, (1.0, 0.0)),
+            (100, (0.5, 0.4)),
+            (100, (np.nan, 0.5)),
+            (100, (0.5, np.inf)),
+            (0, (0.5, 0.5)),
+            (2, (0.1, 0.9)),
         ):
             with self.subTest(length=length, ratios=ratios), self.assertRaises(ValueError):
                 split_boundaries(length, *ratios)
+
+    def test_invalid_inner_ratios_and_empty_nested_partitions_are_rejected(self):
+        for ratio in (0.0, 1.0, -0.1, np.nan, np.inf, "0.2", True):
+            with self.subTest(ratio=ratio), self.assertRaises(ValueError):
+                split_boundaries(100, 0.66, 0.34, model_selection_valid_ratio=ratio)
+        with self.assertRaisesRegex(ValueError, "Empty nested"):
+            split_boundaries(2, 0.5, 0.5, model_selection_valid_ratio=0.2)
 
 
 class ResCPPreparationTests(unittest.TestCase):
@@ -130,25 +149,25 @@ class ResCPPreparationTests(unittest.TestCase):
         result = prepare_sequence(item, _config(), split="validation")
         expected_residuals = item["heldout_y"] - item["heldout_predictions"][:, 0]
         np.testing.assert_array_equal(
-            result["calibration_residuals"], expected_residuals[:50]
+            result["calibration_residuals"], expected_residuals[:56]
         )
-        np.testing.assert_array_equal(result["residuals"], expected_residuals[50:70])
-        np.testing.assert_array_equal(result["y"], item["heldout_y"][50:70])
+        np.testing.assert_array_equal(result["residuals"], expected_residuals[56:70])
+        np.testing.assert_array_equal(result["y"], item["heldout_y"][56:70])
         np.testing.assert_array_equal(
-            result["predictions"], item["heldout_predictions"][50:70, 0]
+            result["predictions"], item["heldout_predictions"][56:70, 0]
         )
-        np.testing.assert_array_equal(result["target_indices"], np.arange(50, 70))
+        np.testing.assert_array_equal(result["target_indices"], np.arange(56, 70))
         self.assertEqual(np.asarray(result["warmup_residuals"]).size, 0)
 
-    def test_test_prefix_replays_validation_without_resplitting(self):
+    def test_test_initialization_uses_the_full_nominal_calibration_prefix(self):
         item = _artifact(101)
-        config = _config(0.5, 0.16, 0.34)
+        config = _config(0.66, 0.34)
         result = prepare_sequence(item, config, split="test")
         residuals = item["heldout_y"] - item["heldout_predictions"][:, 0]
-        np.testing.assert_array_equal(result["calibration_residuals"], residuals[:50])
-        np.testing.assert_array_equal(result["warmup_residuals"], residuals[50:67])
-        np.testing.assert_array_equal(result["residuals"], residuals[67:])
-        np.testing.assert_array_equal(result["target_indices"], np.arange(67, 101))
+        np.testing.assert_array_equal(result["calibration_residuals"], residuals[:66])
+        self.assertEqual(np.asarray(result["warmup_residuals"]).size, 0)
+        np.testing.assert_array_equal(result["residuals"], residuals[66:])
+        np.testing.assert_array_equal(result["target_indices"], np.arange(66, 101))
 
     def test_reserved_test_values_and_nans_cannot_change_validation_data(self):
         item = _artifact()
@@ -184,13 +203,31 @@ class ResCPPreparationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     prepare_sequence(item, _config(), split="validation")
 
-    def test_zero_validation_evaluates_test_and_rejects_validation(self):
-        config = _config(0.7, 0.0, 0.3)
+    def test_ordinary_config_needs_only_calibration_and_test_ratios(self):
+        config = _config()
+        del config.tuning
         result = prepare_sequence(_artifact(), config, split="test")
         np.testing.assert_array_equal(result["target_indices"], np.arange(70, 100))
         self.assertEqual(np.asarray(result["warmup_residuals"]).size, 0)
-        with self.assertRaises(ValueError):
-            prepare_sequence(_artifact(), config, split="validation")
+        tuning_result = prepare_sequence(_artifact(), config, split="validation")
+        np.testing.assert_array_equal(tuning_result["target_indices"], np.arange(56, 70))
+
+    def test_obsolete_outer_validation_ratio_is_rejected(self):
+        config = _config()
+        config.data.validation_ratio = 0.0
+        with self.assertRaisesRegex(ValueError, "data.validation_ratio"):
+            prepare_sequence(_artifact(), config, split="test")
+
+    def test_test_partition_ignores_model_selection_settings(self):
+        baseline = prepare_sequence(_artifact(), _config(), split="test")
+        for inner_ratio in (0.1, 0.8, None, np.nan):
+            with self.subTest(inner_ratio=inner_ratio):
+                actual = prepare_sequence(
+                    _artifact(), _config(model_selection_valid_ratio=inner_ratio), split="test"
+                )
+                self.assertEqual(actual["boundaries"], baseline["boundaries"])
+                for field in ("calibration_residuals", "residuals", "target_indices"):
+                    np.testing.assert_array_equal(actual[field], baseline[field])
 
     def test_preparation_uses_only_required_base_artifact_fields(self):
         item = _artifact()
@@ -238,13 +275,13 @@ class ResCPRunnerDataUsageTests(unittest.TestCase):
         # including the interval for the first altered observation itself.
         self._assert_same_endpoints(baseline, actual, count=5)
 
-    def test_encoder_normalization_uses_only_calibration_prefix(self):
+    def test_final_encoder_normalization_uses_full_calibration_prefix(self):
         item = _artifact(50)
         baseline = evaluate_sequence("station", item, _config(), split="test")
         changed = copy.deepcopy(item)
-        changed["heldout_y"][25:] += 20_000.0
+        changed["heldout_y"][35:] += 20_000.0
         actual = evaluate_sequence("station", changed, _config(), split="test")
-        residuals = item["heldout_y"][:25] - item["heldout_predictions"][:25, 0]
+        residuals = item["heldout_y"][:35] - item["heldout_predictions"][:35, 0]
         self.assertAlmostEqual(baseline["metadata"]["input_mean"], residuals.mean())
         self.assertAlmostEqual(baseline["metadata"]["input_std"], residuals.std())
         self.assertEqual(
@@ -253,6 +290,39 @@ class ResCPRunnerDataUsageTests(unittest.TestCase):
         self.assertEqual(
             actual["metadata"]["input_std"], baseline["metadata"]["input_std"]
         )
+
+    def test_selection_tail_cannot_influence_tuning_normalization(self):
+        item = _artifact(50)
+        baseline = evaluate_sequence("station", item, _config(), split="validation")
+        changed = copy.deepcopy(item)
+        # Nominal calibration is [0, 35); only [0, 28) initializes tuning.
+        changed["heldout_y"][28:35] += 20_000.0
+        changed["heldout_y"][35:] = np.nan
+        actual = evaluate_sequence("station", changed, _config(), split="validation")
+        residuals = item["heldout_y"][:28] - item["heldout_predictions"][:28, 0]
+        self.assertAlmostEqual(baseline["metadata"]["input_mean"], residuals.mean())
+        self.assertAlmostEqual(baseline["metadata"]["input_std"], residuals.std())
+        self.assertEqual(actual["metadata"]["input_mean"], baseline["metadata"]["input_mean"])
+        self.assertEqual(actual["metadata"]["input_std"], baseline["metadata"]["input_std"])
+        # Even the first validation target is unavailable when its interval is issued.
+        self._assert_same_endpoints(baseline, actual, count=1)
+        np.testing.assert_array_equal(actual["metadata"]["target_indices"], np.arange(28, 35))
+
+    def test_final_evaluation_refits_scaler_on_selection_tail_and_ignores_inner_ratio(self):
+        item = _artifact(50)
+        item["heldout_y"][28:35] += 100.0
+        tuning = evaluate_sequence("station", item, _config(), split="validation")
+        final = evaluate_sequence("station", item, _config(), split="test")
+        final_with_other_ratio = evaluate_sequence(
+            "station", item, _config(model_selection_valid_ratio=0.8), split="test"
+        )
+        residuals = item["heldout_y"][:35] - item["heldout_predictions"][:35, 0]
+        self.assertAlmostEqual(final["metadata"]["input_mean"], residuals.mean())
+        self.assertAlmostEqual(final["metadata"]["input_std"], residuals.std())
+        self.assertNotEqual(final["metadata"]["input_mean"], tuning["metadata"]["input_mean"])
+        self._assert_same_endpoints(final, final_with_other_ratio)
+        self.assertEqual(final["metadata"]["input_mean"], final_with_other_ratio["metadata"]["input_mean"])
+        self.assertEqual(final["metadata"]["input_std"], final_with_other_ratio["metadata"]["input_std"])
 
     def test_normalized_reservoir_reports_raw_quantiles_and_endpoints(self):
         index = np.arange(50, dtype=np.float64)
@@ -308,7 +378,7 @@ class ResCPRunnerDataUsageTests(unittest.TestCase):
             len(next(iter(together[key]["evaluation_results"].values()))["lower_interval"])
             for key in data
         ]
-        self.assertEqual(lengths, [15, 18])
+        self.assertEqual(lengths, [15, 19])
 
     def test_reversed_quantile_pairs_keep_their_result_key(self):
         config = _config()

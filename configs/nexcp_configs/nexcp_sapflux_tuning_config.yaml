@@ -1,0 +1,8 @@
+grid:
+  model.rho: [0.90, 0.95, 0.99, 0.999]
+  model.max_past: [100, 200, 500]
+
+
+tuning:
+  num_sequences: 5
+  delta_threshold: -0.01

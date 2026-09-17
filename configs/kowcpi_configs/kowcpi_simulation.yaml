@@ -1,9 +1,6 @@
 data:
   data_path: "C:/Users/jayao/Desktop/python_projects/DSCP/data/kowcpi_sim_data.pkl"
-  train_ratio: 0.8
-  # valid split is not used for model selection
-  # train_ratio + valid_ratio will be used as calibration set
-  valid_ratio: 0.0
+  calibration_ratio: 0.8 # Test uses the remaining 1 - calibration_ratio.
   normalize: False
 
 

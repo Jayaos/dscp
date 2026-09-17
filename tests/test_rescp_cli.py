@@ -54,9 +54,9 @@ class ResCPCLITests(unittest.TestCase):
                     self.assertEqual(config.seed, 71)
                     self.assertIn("seed_71", config.saving_dir)
                     self.assertEqual(config.model.prediction_step, 1)
+                    self.assertNotIn("validation_ratio", config.data)
                     self.assertAlmostEqual(
-                        config.data.calibration_ratio + config.data.validation_ratio
-                        + config.data.test_ratio, 1.0,
+                        config.data.calibration_ratio + config.data.test_ratio, 1.0,
                     )
                     outputs.add(config.saving_dir)
         self.assertEqual(len(outputs), 9)
@@ -127,7 +127,11 @@ class ResCPCLITests(unittest.TestCase):
 class ResCPTuningTests(unittest.TestCase):
     def _configs(self, directory, threshold=-0.01):
         base = OmegaConf.load(REPO_ROOT / "configs/rescp_configs/rescp_lr_air_config.yaml")
+        base.data.calibration_ratio = 0.66
+        base.data.test_ratio = 0.34
+        base.data.pop("validation_ratio", None)
         base.model.reservoir_size = 4
+        base.model.temperature = 0.1
         base.model.calibration_size = 8
         base.model.beta_bins = 4
         base.model.connectivity = 1.0
@@ -148,7 +152,8 @@ class ResCPTuningTests(unittest.TestCase):
         self.assertEqual([float(config.label) for config, _ in configs], [0.2, 0.3])
         self.assertEqual(base.model.temperature, 0.1)
         for key in ("data.calibration_ratio", "data.validation_ratio", "data.test_ratio",
-                    "data.data_path", "model.target_quantiles", "model.prediction_step", "seed"):
+                    "data.data_path", "model.target_quantiles", "model.prediction_step", "seed",
+                    "tuning.model_selection_valid_ratio"):
             with self.subTest(key=key):
                 with self.assertRaisesRegex(ValueError, "Keep the artifact"):
                     list(tuning.iter_trial_configs(base, {key: [1]}))
@@ -162,6 +167,43 @@ class ResCPTuningTests(unittest.TestCase):
                         tuning.run_tuning(base_path, grid_path, Path(directory) / "output", seed=seed)
                     load.assert_not_called()
 
+    def test_tuning_rejects_invalid_inner_ratio_before_loading_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base_path, grid_path = self._configs(directory)
+            for ratio in (0, 1, -0.1, 1.1, float("nan"), float("inf"), True, "0.2", None):
+                grid_config = OmegaConf.load(grid_path)
+                grid_config.tuning.model_selection_valid_ratio = ratio
+                OmegaConf.save(grid_config, grid_path)
+                with self.subTest(ratio=ratio), patch.object(tuning, "load_data") as load:
+                    with self.assertRaisesRegex(ValueError, "model_selection_valid_ratio"):
+                        tuning.run_tuning(base_path, grid_path, Path(directory) / "output")
+                    load.assert_not_called()
+
+    def test_inner_ratio_is_resolved_once_and_grid_tuning_overrides_base_options(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base_path, grid_path = self._configs(directory)
+            base_config = OmegaConf.load(base_path)
+            base_config.tuning = {
+                "model_selection_valid_ratio": "${model.temperature}",
+                "num_sequences": 5,
+            }
+            OmegaConf.save(base_config, base_path)
+            ratios = []
+
+            def evaluate(data, config, split, num_cores):
+                ratios.append(float(config.tuning.model_selection_valid_ratio))
+                self.assertEqual(config.tuning.num_sequences, 1)
+                return {"series": _evaluation()}
+
+            with patch.object(tuning, "load_data", return_value={"series": {}}), \
+                    patch.object(tuning, "evaluate_sequences", side_effect=evaluate), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                payload = tuning.run_tuning(base_path, grid_path, Path(directory) / "output")
+            self.assertEqual(ratios, [0.1, 0.1])
+            self.assertEqual(payload["model_selection_valid_ratio"], 0.1)
+            best = OmegaConf.load(payload["best_config_path"])
+            self.assertEqual(best.tuning.model_selection_valid_ratio, 0.1)
+
     def test_validation_only_search_uses_same_seed_and_exports_best_config(self):
         with tempfile.TemporaryDirectory() as directory:
             base_path, grid_path = self._configs(directory)
@@ -169,6 +211,7 @@ class ResCPTuningTests(unittest.TestCase):
 
             def evaluate(data, config, split, num_cores):
                 calls.append((split, int(config.seed), str(config.run_label), num_cores))
+                self.assertEqual(config.tuning.model_selection_valid_ratio, 0.2)
                 return {"series": _evaluation(score=3.0 - float(config.model.temperature))}
 
             with patch.object(tuning, "load_data", return_value={"series": {}}), \
@@ -182,14 +225,45 @@ class ResCPTuningTests(unittest.TestCase):
                 ("validation", 17, "temperature_0.2", 2),
             ])
             self.assertEqual(payload["selection_status"], "selected")
+            self.assertEqual(payload["evaluation_region"], "calibration_tail")
+            self.assertFalse(payload["final_test_evaluated"])
+            self.assertEqual(payload["model_selection_valid_ratio"], 0.2)
             best = OmegaConf.load(output / "best_config.yaml")
             self.assertEqual(best.model.temperature, 0.2)
             self.assertEqual(best.seed, 17)
+            self.assertEqual(best.tuning.model_selection_valid_ratio, 0.2)
+            self.assertNotIn("validation_ratio", best.data)
             self.assertEqual(Path(best.saving_dir), output / "final_test")
             self.assertFalse((output / "final_test").exists())
             for relative in ("tuning_results.pkl", "trial_0001/result.pkl",
                              "trial_0001/resolved_config.yaml", "trial_0002/result.pkl"):
                 self.assertTrue((output / relative).is_file(), relative)
+
+    def test_outer_split_and_quantile_interpolations_stay_fixed_across_trials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base_path, grid_path = self._configs(directory)
+            base_config = OmegaConf.load(base_path)
+            base_config.data.calibration_ratio = "${model.temperature}"
+            base_config.data.test_ratio = 0.9
+            base_config.model.target_quantiles = [["${model.temperature}", 0.95]]
+            OmegaConf.save(base_config, base_path)
+            captured = []
+
+            def evaluate(data, config, split, num_cores):
+                captured.append((
+                    float(config.data.calibration_ratio),
+                    float(config.model.target_quantiles[0][0]),
+                    float(config.model.temperature),
+                ))
+                result = _evaluation()
+                result["evaluation_results"][(0.1, 0.95)] = result["evaluation_results"].pop((0.05, 0.95))
+                return {"series": result}
+
+            with patch.object(tuning, "load_data", return_value={"series": {}}), \
+                    patch.object(tuning, "evaluate_sequences", side_effect=evaluate), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                tuning.run_tuning(base_path, grid_path, Path(directory) / "output")
+            self.assertEqual(captured, [(0.1, 0.1, 0.1), (0.1, 0.1, 0.2)])
 
     def test_no_eligible_trial_reports_every_result_and_clears_stale_selection(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -231,7 +305,7 @@ class ResCPTuningTests(unittest.TestCase):
             for variant in ("original", "test_nan"):
                 data = {"series": {key: value.copy() for key, value in original["series"].items()}}
                 if variant == "test_nan":
-                    # floor(100 * .5) + ceil(100 * .16) = 66.
+                    # The outer calibration prefix has floor(100 * .66) = 66 rows.
                     for values in data["series"].values():
                         values[66:] = np.nan
                 artifact = Path(directory) / (variant + ".pkl")
@@ -244,6 +318,16 @@ class ResCPTuningTests(unittest.TestCase):
                     payloads.append(tuning.run_tuning(
                         base_path, grid_path, Path(directory) / variant, seed=17,
                     ))
+            selection_metadata = payloads[0]["all_trials"][0]["result"]["sequence_results"]["series"]["metadata"]
+            self.assertEqual(selection_metadata["target_indices"], list(range(52, 66)))
+            # The exported final-run config retains its tuning provenance but
+            # consumes all 66 calibration rows when the ordinary runner is used.
+            from baselines.rescp.data import prepare_sequence
+            best = OmegaConf.load(payloads[0]["best_config_path"])
+            final_data = prepare_sequence(original["series"], best, split="test")
+            np.testing.assert_array_equal(final_data["target_indices"], np.arange(66, 100))
+            self.assertEqual(len(final_data["calibration_residuals"]), 66)
+            self.assertEqual(len(final_data["warmup_residuals"]), 0)
             for left, right in zip(payloads[0]["all_trials"], payloads[1]["all_trials"]):
                 for metric in ("pair_metrics", "selection_score", "coverage_eligible"):
                     self.assertEqual(left["result"][metric], right["result"][metric])

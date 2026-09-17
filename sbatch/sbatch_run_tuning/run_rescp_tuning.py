@@ -1,4 +1,4 @@
-"""Tune ResCP on the chronological validation region, reserving final test."""
+"""Tune ResCP on a held-out tail of calibration, reserving final test."""
 
 import argparse
 import itertools
@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 import numpy as np
 from omegaconf import OmegaConf
 
+from baselines.rescp.data import validate_model_selection_valid_ratio
 from sbatch.sbatch_run_tuning.common import (
     choose_sequence_keys,
     finalize_and_save_results,
@@ -60,7 +61,7 @@ def load_data(path):
 def build_parser():
     parser = argparse.ArgumentParser(
         description=(
-            "Tune ResCP using validation coverage and mean Winkler score. "
+            "Tune ResCP using coverage and mean Winkler score on the tail of calibration. "
             "Export the best config for a separate final-test run."
         )
     )
@@ -149,6 +150,8 @@ def aggregate_validation_results(log, target_quantiles, delta_threshold=-0.01):
     eligible = all(result["coverage_eligible"] for result in sequence_results.values())
     return {
         "evaluation_split": "validation",
+        "evaluation_region": "calibration_tail",
+        "final_test_evaluated": False,
         "num_sequences_evaluated": len(sequence_results),
         "sequence_results": sequence_results,
         "pair_metrics": pair_metrics,
@@ -182,15 +185,27 @@ def run_tuning(base_config_path, grid_config_path, save_dir, *, sequence_key=Non
     # Validate grid keys before loading potentially large forecast artifacts.
     first_candidate = next(iter_trial_configs(base_config, grid))
     del first_candidate
-    delta_threshold = tuning_config.get("delta_threshold", -0.01)
+    # The model grid must not move comparison targets indirectly through
+    # interpolations that reference a swept model parameter.
+    base_config.data = OmegaConf.to_container(base_config.data, resolve=True)
+    base_config.model.target_quantiles = OmegaConf.to_container(
+        base_config.model.target_quantiles, resolve=True
+    )
+    base_config.tuning = OmegaConf.merge(base_config.get("tuning") or {}, tuning_config)
+    model_selection_valid_ratio = validate_model_selection_valid_ratio(
+        base_config.tuning.get("model_selection_valid_ratio", 0.2)
+    )
+    # Resolve once so model-grid updates cannot move the selection boundary,
+    # even if the base setting was expressed through an interpolation.
+    base_config.tuning.model_selection_valid_ratio = model_selection_valid_ratio
+    delta_threshold = base_config.tuning.get("delta_threshold", -0.01)
     if delta_threshold is not None:
         delta_threshold = float(delta_threshold)
         if not np.isfinite(delta_threshold):
             raise ValueError("tuning.delta_threshold must be finite or null.")
-    base_config.tuning = tuning_config
 
     data = load_data(base_config.data.data_path)
-    num_sequences = tuning_config.get("num_sequences", 1)
+    num_sequences = base_config.tuning.get("num_sequences", 1)
     if num_sequences is None:
         num_sequences = len(data) - sequence_index
     if int(num_sequences) != num_sequences or num_sequences < 1:
@@ -210,6 +225,9 @@ def run_tuning(base_config_path, grid_config_path, save_dir, *, sequence_key=Non
             "trial_index": trial_index,
             "sequence_keys": sequence_keys,
             "grid_values": grid_values,
+            "evaluation_split": "validation",
+            "evaluation_region": "calibration_tail",
+            "final_test_evaluated": False,
             "result": result,
             "resolved_config": plain_config(config),
         }
@@ -232,6 +250,9 @@ def run_tuning(base_config_path, grid_config_path, save_dir, *, sequence_key=Non
     payload = {
         "method": "rescp",
         "evaluation_split": "validation",
+        "evaluation_region": "calibration_tail",
+        "final_test_evaluated": False,
+        "model_selection_valid_ratio": model_selection_valid_ratio,
         "base_config_path": str(base_config_path),
         "grid_config_path": str(grid_config_path),
         "sequence_keys": sequence_keys,

@@ -91,11 +91,9 @@ def _evaluate_sequence(key, item, config, split):
     sampling_seed = _sampling_seed(seed, key)
     estimator = ResCPResidualIntervalEstimator(seed=seed, sampling_seed=sampling_seed, **options)
     start_time = time.perf_counter()
+    # Tuning initializes from the prefix before model-selection validation;
+    # final testing initializes afresh from the complete calibration prefix.
     estimator.fit(prepared["calibration_residuals"], normalize=normalize)
-    # Validation is available history at the first test timestamp. Replaying it
-    # does not refit the scaler or consume any sampling RNG draws.
-    for residual in prepared["warmup_residuals"]:
-        estimator.observe(float(residual))
     initial_memory_size = estimator.memory_size
     initialization_seconds = time.perf_counter() - start_time
 

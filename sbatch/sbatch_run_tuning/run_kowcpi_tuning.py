@@ -1,12 +1,21 @@
+"""Tune KOWCPI on a held-out tail of calibration, reserving final test."""
+
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
+import sys
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 import numpy as np
 import torch
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
+from baselines.kowcpi.data import prepare_sequence
 from baselines.kowcpi.model import KOWCPIResidualIntervalEstimator
-from sbatch_run_tuning.common import (
+from sbatch.sbatch_run_tuning.common import (
     choose_sequence_keys,
     finalize_and_save_results,
     iter_grid_configs,
@@ -24,41 +33,6 @@ from utils.utils import load_data
 
 
 ALLOWED_GRID_KEYS = {"model.kernel", "model.past_window"}
-
-
-def _flatten(values):
-    return np.asarray(values, dtype=float).reshape(-1)
-
-
-def _normalization_params(y, train_size):
-    train_y = np.asarray(y[:train_size], dtype=float)
-    mean = train_y.mean(axis=0)
-    std = train_y.std(axis=0) + 1e-8
-    return mean, std
-
-
-def _normalize(values, mean, std):
-    return (np.asarray(values, dtype=float) - mean) / std
-
-
-def _scalar_std(std):
-    std_arr = np.asarray(std, dtype=float).reshape(-1)
-    if std_arr.size != 1:
-        raise ValueError("KOWCPI tuning expects a univariate target.")
-    return float(std_arr[0])
-
-
-def _split_sizes(n, train_ratio, valid_ratio):
-    train_size = int(np.floor(n * train_ratio))
-    valid_size = int(np.ceil(n * valid_ratio))
-    test_size = n - train_size - valid_size
-    if train_size <= 0 or valid_size < 0 or test_size <= 0:
-        raise ValueError(
-            "Invalid split sizes for n={}: train={}, valid={}, test={}.".format(
-                n, train_size, valid_size, test_size
-            )
-        )
-    return train_size, valid_size, test_size
 
 
 def _bandwidth_range_from_config(config):
@@ -126,33 +100,14 @@ def _run_single_trial_worker(args):
 def _run_single_trial(config, sequence_data):
     delta_threshold = float(config.tuning.get("delta_threshold", 0.0))
     target_quantiles = _target_quantiles(config)
-    raw_y = _flatten(sequence_data["heldout_y"])
-    raw_predictions = _flatten(sequence_data["heldout_predictions"])
-    if len(raw_y) != len(raw_predictions):
-        raise ValueError("heldout_y and heldout_predictions must have the same length.")
-
-    train_size, valid_size, test_size = _split_sizes(
-        len(raw_y),
-        float(config.data.train_ratio),
-        float(config.data.valid_ratio),
-    )
-    calibration_size = train_size + valid_size
-
-    if bool(config.data.normalize):
-        y_mean, y_std = _normalization_params(sequence_data["heldout_y"], train_size)
-        y_for_residuals = _flatten(_normalize(sequence_data["heldout_y"], y_mean, y_std))
-        predictions_for_residuals = _flatten(
-            _normalize(sequence_data["heldout_predictions"], y_mean, y_std)
-        )
-        residual_normalized_std = _scalar_std(y_std)
-        residual_normalization_params = (0.0, residual_normalized_std)
-    else:
-        y_for_residuals = raw_y
-        predictions_for_residuals = raw_predictions
-        residual_normalized_std = None
-        residual_normalization_params = None
-
-    residuals = y_for_residuals - predictions_for_residuals
+    prepared = prepare_sequence(sequence_data, config, split="validation")
+    residuals = prepared["residuals"]
+    raw_y = prepared["raw_y"]
+    raw_predictions = prepared["raw_predictions"]
+    calibration_size = prepared["calibration_size"]
+    valid_size = prepared["evaluation_size"]
+    residual_normalized_std = prepared["residual_normalized_std"]
+    residual_normalization_params = prepared["residual_normalization_params"]
     target_residual = torch.tensor(residuals[calibration_size:], dtype=torch.float32)
     target_y = torch.tensor(raw_y[calibration_size:], dtype=torch.float32)
     target_predictions = torch.tensor(raw_predictions[calibration_size:], dtype=torch.float32)
@@ -201,7 +156,7 @@ def _run_single_trial(config, sequence_data):
         lo_values, hi_values = estimator.predict_residual_intervals(
             residuals=residuals,
             calibration_size=calibration_size,
-            test_size=test_size,
+            test_size=valid_size,
             alpha=alpha,
             block_size=block_size,
             history_window=history_window,
@@ -244,10 +199,14 @@ def _run_single_trial(config, sequence_data):
     )
 
     return {
-        "train_size": train_size,
+        "evaluation_split": "validation",
+        "final_test_evaluated": False,
+        "evaluation_start": prepared["evaluation_start"],
+        "evaluation_end": prepared["evaluation_end"],
+        "nominal_calibration_size": prepared["boundaries"]["nominal_calibration_size"],
         "valid_size": valid_size,
         "calibration_size": calibration_size,
-        "test_size": test_size,
+        "test_size": prepared["boundaries"]["test_size"],
         "kernel": OmegaConf.select(config, "model.kernel", default="epanechnikov"),
         "past_window": block_size,
         "history_window": history_window,
@@ -296,9 +255,13 @@ def _aggregate_sequence_results(sequence_results: dict, target_quantiles: list) 
         )
 
     return {
+        "evaluation_split": "validation",
+        "final_test_evaluated": False,
         "num_sequences_evaluated": len(sequence_results),
         "sequence_results": sequence_results,
-        "mean_train_size": float(np.mean([item["train_size"] for item in ordered_results])),
+        "mean_nominal_calibration_size": float(np.mean([
+            item["nominal_calibration_size"] for item in ordered_results
+        ])),
         "mean_valid_size": float(np.mean([item["valid_size"] for item in ordered_results])),
         "mean_calibration_size": float(np.mean([
             item["calibration_size"] for item in ordered_results
@@ -361,6 +324,8 @@ def main():
     num_sequences = resolve_num_sequences(tuning_cfg)
     delta_threshold = resolve_delta_threshold(tuning_cfg)
     base_config.tuning = dict(tuning_cfg)
+    if "model_selection_valid_ratio" not in base_config.tuning:
+        base_config.tuning.model_selection_valid_ratio = 0.15
     target_quantiles = _target_quantiles(base_config)
     sequence_keys = choose_sequence_keys(
         data,
@@ -402,6 +367,9 @@ def main():
 
     payload = {
         "method": "kowcpi",
+        "evaluation_split": "validation",
+        "final_test_evaluated": False,
+        "model_selection_valid_ratio": float(base_config.tuning.model_selection_valid_ratio),
         "base_config_path": str(args.base_config.resolve()),
         "grid_config_path": str(args.grid_config.resolve()),
         "sequence_keys": sequence_keys,
