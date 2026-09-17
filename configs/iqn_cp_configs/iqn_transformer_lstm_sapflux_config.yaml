@@ -2,8 +2,8 @@ device: 0
 
 data:
   data_path: "./data/sapflux-solo3-large/lstm/lstm_sapflux-solo3-large_data.pkl"
-  train_ratio: 0.6
-  valid_ratio: 0.2
+  train_ratio: 0.5
+  valid_ratio: 0.16
   normalize: True
   strided_features: "xry"
 
@@ -27,7 +27,7 @@ model:
   window_size: 100
 
 training:
-  batch_size: 64
+  batch_size: 32
   learning_rate: 0.001
   epochs: 50
   early_stop: 3

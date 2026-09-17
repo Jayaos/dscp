@@ -5,6 +5,7 @@ grid:
   model.use_current_feature: [True, False]
   model.window_size: [100, 200]
   model.monotonic_num_layers: [1, 2]
+  model.num_taus: [4, 16]
   data.strided_features: ["xr", "xry"]
   training.learning_rate: [0.001]
   training.epochs: [50]
