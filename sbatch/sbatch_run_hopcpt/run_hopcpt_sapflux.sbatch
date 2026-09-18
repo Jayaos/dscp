@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --array=0-2
-#SBATCH --gres=gpu:1 -C V100
+#SBATCH --gres=gpu:2 -C V100
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=04:00:00
@@ -16,6 +16,7 @@
 set -euo pipefail
 
 # Tasks 0/1/2: HopCPT on LR/LSTM/Chronos forecasts.
+# Two GPUs per task; override with --gres=gpu:1 <this-script> --num-gpus 1.
 RUNPATH="${RUNPATH:-/storage/project/r-yxie77-0/jlee3541/projects/dscp}"
 cd "$RUNPATH"
 
@@ -30,4 +31,6 @@ conda activate hopcpt
 python -u -m sbatch_run_hopcpt.run_hopcpt_job sapflux \
   --task-id "${SLURM_ARRAY_TASK_ID}" \
   --output-root "${HOPCPT_OUTPUT_ROOT:-$RUNPATH/results/hopcpt}" \
-  --seed "${HOPCPT_SEED:-2026}"
+  --seed "${HOPCPT_SEED:-2026}" \
+  --num-gpus 2 \
+  "$@"

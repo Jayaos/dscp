@@ -2,6 +2,8 @@ from omegaconf import OmegaConf
 import torch
 import os
 import copy
+import multiprocessing
+import random
 import numpy as np
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -31,16 +33,42 @@ def _parallel_devices(config):
         return None
 
     devices = OmegaConf.select(config, "parallel.devices", default=None)
-    if devices is not None:
-        return [_device_from_config(device) for device in devices]
+    if devices is None:
+        num_gpus = OmegaConf.select(config, "parallel.num_gpus", default=None)
+        if num_gpus is None:
+            num_gpus = torch.cuda.device_count()
+        if isinstance(num_gpus, bool) or not isinstance(num_gpus, int) or num_gpus <= 0:
+            raise ValueError("parallel.num_gpus must be a positive integer.")
+        devices = list(range(num_gpus))
+    if not (isinstance(devices, (list, tuple)) or OmegaConf.is_list(devices)) or not devices:
+        raise ValueError("parallel.devices must contain at least one device.")
 
-    num_gpus = OmegaConf.select(config, "parallel.num_gpus", default=None)
-    if num_gpus is None:
-        num_gpus = torch.cuda.device_count()
-    num_gpus = int(num_gpus)
-    if num_gpus <= 0:
-        raise ValueError("parallel.enabled=True requires at least one CUDA GPU.")
-    return ["cuda:{}".format(i) for i in range(num_gpus)]
+    resolved = []
+    for device in devices:
+        if isinstance(device, bool) or not isinstance(device, (int, str)):
+            raise ValueError("Invalid parallel device: {!r}".format(device))
+        try:
+            parsed = torch.device(_device_from_config(device))
+        except (ValueError, RuntimeError, TypeError) as error:
+            raise ValueError("Invalid parallel device: {!r}".format(device)) from error
+        if parsed.type == "cuda":
+            resolved.append("cuda:{}".format(parsed.index if parsed.index is not None else 0))
+        elif parsed.type == "cpu":
+            resolved.append("cpu")
+        else:
+            raise ValueError("HopCPT parallel devices must use CUDA or CPU.")
+    if len(set(resolved)) != len(resolved):
+        raise ValueError("parallel.devices must not contain duplicate devices.")
+
+    cuda_devices = [device for device in resolved if device.startswith("cuda:")]
+    if cuda_devices:
+        visible_gpus = torch.cuda.device_count()
+        if not torch.cuda.is_available() or any(
+                int(device.split(":")[1]) >= visible_gpus for device in cuda_devices):
+            raise ValueError(
+                "Requested parallel devices {} but only {} CUDA GPUs are visible.".format(
+                    cuda_devices, visible_gpus))
+    return resolved
 
 
 def _split_keys_by_device(keys, devices):
@@ -293,6 +321,20 @@ def _run_hopcpt_sequence_chunk(items, config, device):
     config = OmegaConf.create(config)
     if device != "cpu":
         torch.cuda.set_device(torch.device(device))
+    threads = OmegaConf.select(config, "parallel.threads_per_worker", default=None)
+    if threads is not None:
+        if isinstance(threads, bool) or not isinstance(threads, int) or threads <= 0:
+            raise ValueError("parallel.threads_per_worker must be a positive integer.")
+        torch.set_num_threads(threads)
+    # Spawned processes do not inherit the launcher's random generator states.
+    seed = OmegaConf.select(config, "seed", default=2026)
+    if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**32:
+        raise ValueError("seed must be an integer between 0 and 2**32 - 1.")
+    device_index = torch.device(device).index or 0
+    worker_seed = (seed + device_index) % 2**32
+    random.seed(worker_seed)
+    np.random.seed(worker_seed)
+    torch.manual_seed(worker_seed)
     chunk_log = {}
     for key, data in tqdm(items, desc="sequences on {}".format(device)):
         key, sequence_log = _run_hopcpt_sequence(key, data, config, device)
@@ -721,7 +763,9 @@ def run_hopcpt(config_path):
         print("Parallel HopCPT devices: {}".format(parallel_devices))
         key_chunks = _split_keys_by_device(list(cpd.data.keys()), parallel_devices)
         config_payload = OmegaConf.to_container(config, resolve=True)
-        with ProcessPoolExecutor(max_workers=len(key_chunks)) as executor:
+        # CUDA must start in a fresh process even if the launcher initialized it.
+        with ProcessPoolExecutor(max_workers=len(key_chunks),
+                                 mp_context=multiprocessing.get_context("spawn")) as executor:
             futures = []
             for chunk_device, chunk_keys in key_chunks.items():
                 items = [(key, cpd.data[key]) for key in chunk_keys]

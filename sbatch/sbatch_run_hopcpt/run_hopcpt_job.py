@@ -1,6 +1,7 @@
 """Run one HopCPT/base-predictor combination from a Slurm array."""
 
 import argparse
+import os
 from pathlib import Path
 
 
@@ -11,6 +12,13 @@ DATASET_ARTIFACTS = {
     "solar": ("solar_prediction", "nsdb-60m"),
     "sapflux": ("sapflux-solo3-large", "sapflux-solo3-large"),
 }
+
+
+def _positive_int(value):
+    value = int(value)
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return value
 
 
 def build_parser():
@@ -27,6 +35,12 @@ def build_parser():
         "--output-root", type=Path, default=REPO_ROOT / "results" / "hopcpt"
     )
     parser.add_argument("--seed", type=int, default=2026)
+    parser.add_argument(
+        "--num-gpus",
+        type=_positive_int,
+        default=1,
+        help="Number of visible GPUs to use for independent sequence workers.",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -55,15 +69,17 @@ def main(argv=None):
     config.model.prediction_step = 1
     config.data.data_path = str(artifact_path)
     config.saving_dir = str(output_dir)
-    # Each Slurm task has one visible GPU and processes its sequences serially.
+    # CUDA indices are local to the GPUs made visible to this Slurm task.
     config.device = 0
-    config.parallel.enabled = False
-    config.parallel.devices = [0]
+    config.parallel.enabled = args.num_gpus > 1
+    config.parallel.devices = list(range(args.num_gpus))
+    cpu_budget = int(os.environ.get("SLURM_CPUS_PER_TASK", args.num_gpus))
+    config.parallel.threads_per_worker = max(1, cpu_budget // args.num_gpus)
     config.seed = args.seed
 
     print(
         f"HopCPT task {args.task_id}: dataset={args.dataset}, "
-        f"base_predictor={predictor}, seed={args.seed}",
+        f"base_predictor={predictor}, seed={args.seed}, num_gpus={args.num_gpus}",
         flush=True,
     )
     print(f"Configuration template: {template_path}", flush=True)
@@ -77,13 +93,26 @@ def main(argv=None):
             "Run the corresponding base predictor before this HopCPT job."
         )
 
+    # Workers inherit these limits when spawned. Set them before loading NumPy/Torch.
+    os.environ["OMP_NUM_THREADS"] = str(config.parallel.threads_per_worker)
+    os.environ["MKL_NUM_THREADS"] = str(config.parallel.threads_per_worker)
+
+    import torch
+
+    available_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    if available_gpus < args.num_gpus:
+        parser.error(
+            f"Requested {args.num_gpus} GPUs, but only {available_gpus} CUDA GPUs "
+            "are visible. Match --num-gpus to the Slurm GPU allocation."
+        )
+
     import random
 
     import numpy as np
-    import torch
 
     from baselines.hopcpt.run_hopcpt import run_hopcpt
 
+    torch.set_num_threads(config.parallel.threads_per_worker)
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
