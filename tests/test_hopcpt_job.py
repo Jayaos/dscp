@@ -4,6 +4,8 @@ import contextlib
 import importlib
 import io
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import types
@@ -232,18 +234,75 @@ class HopCPTJobTests(unittest.TestCase):
                         str(config_path)
                     )
 
-    def test_sbatch_scripts_request_two_gpus_and_allow_cli_override(self):
-        directory = REPO_ROOT / "sbatch" / "sbatch_run_hopcpt"
+    def _launch_sbatch_script(self, dataset, num_gpus, *extra_args):
+        git_bash = Path("C:/Program Files/Git/bin/bash.exe")
+        bash = str(git_bash) if os.name == "nt" and git_bash.is_file() else shutil.which("bash")
+        if bash is None:
+            self.skipTest("Bash is required to exercise the Slurm launcher")
+
+        script_path = (
+            REPO_ROOT / "sbatch" / "sbatch_run_hopcpt" / f"run_hopcpt_{dataset}.sbatch"
+        )
+        environment = os.environ.copy()
+        environment.pop("BASH_ENV", None)
+        environment.pop("SLURM_GPUS_ON_NODE", None)
+        environment.update(
+            RUNPATH=REPO_ROOT.as_posix(),
+            SLURM_CPUS_PER_TASK="4",
+            SLURM_ARRAY_TASK_ID="1",
+        )
+        if num_gpus is not None:
+            environment["SLURM_GPUS_ON_NODE"] = str(num_gpus)
+
+        # Shell functions intercept cluster setup and capture Python arguments.
+        # Reading as text also normalizes Windows checkout line endings for Bash.
+        harness = (
+            "module() { :; }\n"
+            "conda() { :; }\n"
+            "python() { printf '%s\\0' \"$@\"; }\n"
+        )
+        return subprocess.run(
+            [bash, "--noprofile", "--norc", "-s", "--", *extra_args],
+            input=(harness + script_path.read_text(encoding="utf-8")).encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=REPO_ROOT,
+            env=environment,
+            timeout=15,
+            check=False,
+        )
+
+    def test_sbatch_scripts_use_the_actual_slurm_gpu_allocation(self):
+        for dataset in self.job.DATASET_ARTIFACTS:
+            for num_gpus in (1, 2, 3, 10):
+                with self.subTest(dataset=dataset, num_gpus=num_gpus):
+                    result = self._launch_sbatch_script(dataset, num_gpus)
+                    self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8"))
+                    arguments = result.stdout.decode("utf-8").split("\0")[:-1]
+                    self.assertEqual(
+                        arguments[:4],
+                        ["-u", "-m", "sbatch_run_hopcpt.run_hopcpt_job", dataset],
+                    )
+                    parsed = self.job.build_parser().parse_args(arguments[3:])
+                    self.assertEqual(parsed.num_gpus, num_gpus)
+                    self.assertEqual(parsed.task_id, 1)
+
+    def test_sbatch_scripts_allow_explicit_gpu_override(self):
         for dataset in self.job.DATASET_ARTIFACTS:
             with self.subTest(dataset=dataset):
-                content = (directory / f"run_hopcpt_{dataset}.sbatch").read_text(
-                    encoding="utf-8"
-                )
-                self.assertIn("#SBATCH --gres=gpu:2", content)
-                self.assertIn(f"sbatch_run_hopcpt.run_hopcpt_job {dataset}", content)
-                self.assertIn("--num-gpus 2", content)
-                self.assertIn('"$@"', content)
-                self.assertLess(content.index("--num-gpus 2"), content.index('"$@"'))
+                result = self._launch_sbatch_script(dataset, 2, "--num-gpus", "1")
+                self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8"))
+                arguments = result.stdout.decode("utf-8").split("\0")[:-1]
+                parsed = self.job.build_parser().parse_args(arguments[3:])
+                self.assertEqual(parsed.num_gpus, 1)
+
+    def test_sbatch_scripts_require_the_slurm_gpu_allocation_before_python(self):
+        for dataset in self.job.DATASET_ARTIFACTS:
+            with self.subTest(dataset=dataset):
+                result = self._launch_sbatch_script(dataset, None)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, b"")
+                self.assertIn(b"SLURM_GPUS_ON_NODE", result.stderr)
 
 
 if __name__ == "__main__":

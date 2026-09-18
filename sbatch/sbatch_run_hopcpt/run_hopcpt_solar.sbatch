@@ -16,7 +16,7 @@
 set -euo pipefail
 
 # Tasks 0/1/2: HopCPT on LR/LSTM/Chronos forecasts.
-# Two GPUs per task; override with --gres=gpu:1 <this-script> --num-gpus 1.
+# GPU workers follow the Slurm allocation; change #SBATCH --gres or sbatch --gres.
 RUNPATH="${RUNPATH:-/storage/project/r-yxie77-0/jlee3541/projects/dscp}"
 cd "$RUNPATH"
 
@@ -32,5 +32,5 @@ python -u -m sbatch_run_hopcpt.run_hopcpt_job solar \
   --task-id "${SLURM_ARRAY_TASK_ID}" \
   --output-root "${HOPCPT_OUTPUT_ROOT:-$RUNPATH/results/hopcpt}" \
   --seed "${HOPCPT_SEED:-2026}" \
-  --num-gpus 2 \
+  --num-gpus "${SLURM_GPUS_ON_NODE:?Slurm did not report the allocated GPU count}" \
   "$@"

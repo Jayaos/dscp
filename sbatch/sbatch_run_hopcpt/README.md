@@ -11,8 +11,8 @@ sbatch sbatch/sbatch_run_hopcpt/run_hopcpt_sapflux.sbatch
 Each task requests two V100 GPUs, four CPUs, and 16 GB host memory using the
 configured account and Inferno QoS. The scripts activate the `hopcpt` conda
 environment defined in [`../../envs/env-hopcpt.yml`](../../envs/env-hopcpt.yml),
-which includes `hopfield-layers`. Time limits are six hours for Air, twelve
-hours for Solar, and four hours for Sapflux. Adjust the limit with
+which includes `hopfield-layers`. Time limits are twelve hours for Air and
+Solar, and six hours for Sapflux. Adjust the limit with
 `sbatch --time=HH:MM:SS`; runtime depends on sequence count and length.
 
 ## Array tasks
@@ -32,13 +32,19 @@ sbatch --array=1 sbatch/sbatch_run_hopcpt/run_hopcpt_air.sbatch
 
 ## GPU count
 
-The submission scripts pass `--num-gpus 2` by default. Change both the Slurm
-GPU allocation and `--num-gpus` together:
+The submission scripts read `SLURM_GPUS_ON_NODE` and pass that allocation
+count to `--num-gpus`. Set the GPU count once, in `#SBATCH --gres=gpu:N`
+or through a submission override:
 
 ```bash
-sbatch --gres=gpu:1 sbatch/sbatch_run_hopcpt/run_hopcpt_solar.sbatch --num-gpus 1
-sbatch --gres=gpu:4 sbatch/sbatch_run_hopcpt/run_hopcpt_solar.sbatch --num-gpus 4
+sbatch --gres=gpu:1 sbatch/sbatch_run_hopcpt/run_hopcpt_solar.sbatch
+sbatch --gres=gpu:4 sbatch/sbatch_run_hopcpt/run_hopcpt_solar.sbatch
 ```
+
+Slurm reports the allocated GPU count after applying submission overrides,
+so changing `--gres` also changes the worker count automatically. The scripts
+fail if that allocation variable is missing, rather than assuming a GPU count.
+An explicit trailing `--num-gpus` argument can still select fewer GPUs.
 
 The runner starts one worker process per selected GPU and distributes
 independent sequences among the workers. Each worker trains a separate model
