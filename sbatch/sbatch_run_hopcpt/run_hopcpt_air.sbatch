@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:2 -C V100
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH -t360
+#SBATCH -t720
 #SBATCH -qinferno
 #SBATCH -o Report-hopcpt-air-%A_%a.out
 #SBATCH --mail-type=ALL
