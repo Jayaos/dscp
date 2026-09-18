@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --t120
+#SBATCH -t120
 #SBATCH -qinferno
 #SBATCH -o Report-rescp-sapflux-%A_%a.out
 #SBATCH --mail-type=ALL

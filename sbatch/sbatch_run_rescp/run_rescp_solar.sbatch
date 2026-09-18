@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --t120
+#SBATCH -t120
 #SBATCH -qinferno
 #SBATCH -o Report-rescp-solar-%A_%a.out
 #SBATCH --mail-type=ALL
