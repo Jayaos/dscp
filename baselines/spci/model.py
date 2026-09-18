@@ -11,6 +11,58 @@ from sklearn_quantile import (
 )
 
 
+class RobustRandomForestQuantileRegressor(RandomForestQuantileRegressor):
+    """Exact forest with endpoint quantiles taken from conditional support.
+
+    sklearn_quantile 0.1.1 accumulates its weighted CDF in float32. Its last
+    cumulative weight can fall short of one, leaving Q(1) unset. Q(0) can also
+    encounter a zero interpolation denominator. The endpoint quantiles are
+    exactly the minimum and maximum positive-weight residuals in the reached
+    leaves, so calculate those directly and leave interior quantiles unchanged.
+    """
+
+    def fit(self, X, y, sample_weight=None):
+        super().fit(X, y, sample_weight=sample_weight)
+        self.leaf_minima_ = []
+        self.leaf_maxima_ = []
+        for estimator in self.estimators_:
+            # The parent sorts these shared arrays together during fit.
+            leaves = estimator.y_train_leaves_
+            residuals = estimator.y_train_[:, 0]
+            positive = (leaves >= 0) & (estimator.y_weights_ > 0)
+            minima = np.full(estimator.tree_.node_count, np.inf, dtype=np.float32)
+            maxima = np.full(estimator.tree_.node_count, -np.inf, dtype=np.float32)
+            np.minimum.at(minima, leaves[positive], residuals[positive])
+            np.maximum.at(maxima, leaves[positive], residuals[positive])
+            self.leaf_minima_.append(minima)
+            self.leaf_maxima_.append(maxima)
+        return self
+
+    def predict(self, X):
+        predictions = super().predict(X)
+        quantiles = self.validate_quantiles()
+        lower_rows = quantiles == 0
+        upper_rows = quantiles == 1
+        if not (lower_rows.any() or upper_rows.any()):
+            return predictions
+
+        reached_leaves = self.apply(X)
+        lower = np.full(len(reached_leaves), np.inf, dtype=np.float32)
+        upper = np.full(len(reached_leaves), -np.inf, dtype=np.float32)
+        for index, leaves in enumerate(reached_leaves.T):
+            np.minimum(lower, self.leaf_minima_[index][leaves], out=lower)
+            np.maximum(upper, self.leaf_maxima_[index][leaves], out=upper)
+        if not (np.isfinite(lower).all() and np.isfinite(upper).all()):
+            raise ValueError("Exact quantile-forest leaves require finite positive-weight support.")
+
+        if quantiles.size == 1:
+            predictions[...] = lower if lower_rows[0] else upper
+        else:
+            predictions[lower_rows] = lower
+            predictions[upper_rows] = upper
+        return predictions
+
+
 def _repair_sampled_leaves(estimator):
     """Finish upstream leaf draws that float32 weight accumulation left unset."""
     values = estimator.tree_.value[:, 0, 0]
@@ -113,7 +165,7 @@ def build_quantile_forest(config, n_train_samples, quantiles):
     forest_type = (
         RobustSampleRandomForestQuantileRegressor
         if n_train_samples > 10_000
-        else RandomForestQuantileRegressor
+        else RobustRandomForestQuantileRegressor
     )
     return forest_type(
         n_estimators=n_estimators,

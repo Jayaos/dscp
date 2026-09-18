@@ -7,7 +7,11 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH -t240
-#SBATCH --output=%x_%A_%a.out
+#SBATCH -qinferno
+#SBATCH -o Report-rescp-air-%A_%a.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=jlee3541@gatech.edu
+
 
 # Submit from the repository root, or set DSCP_RUNPATH explicitly.
 # Array tasks 0, 1 and 2 run LR, LSTM and Chronos, respectively.

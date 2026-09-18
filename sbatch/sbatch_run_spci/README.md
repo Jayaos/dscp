@@ -70,6 +70,39 @@ nominal training portion, so results can change after migration. SPCI has
 no separate outer validation region. Configure tuning validation with
 `tuning.model_selection_valid_ratio` as described below.
 
+## Beta optimization
+
+The experiment configs enable the SPCI tail-allocation search:
+
+```yaml
+model:
+  optimize_beta: true
+  beta_bins: 5
+```
+
+For each configured target pair, `1 - alpha` is its nominal coverage:
+`max(pair) - min(pair)`. At each prediction time,
+the fitted forest estimates residual quantiles for five equally spaced
+`beta` values in `[0, alpha]`, including both endpoints. The chosen beta
+minimizes the predicted residual interval width
+`Q(1 - alpha + beta) - Q(beta)`. Adding those residual endpoints to the
+base prediction gives the prediction interval. Selection uses predicted
+widths and the available past residuals.
+
+For example, `[0.95, 0.05]` requests 90% nominal coverage. With five bins,
+the search compares `beta = [0, 0.025, 0.05, 0.075, 0.1]`. The configured
+pair specifies coverage; the selected lower and upper quantile levels can
+vary with prediction time. Increase `beta_bins` to use a finer search.
+
+The forest remains fixed after fitting. Tuning and final evaluation use
+the same beta-selection helper. Optimized intervals use standard Winkler
+scoring with the nominal miscoverage `alpha` and penalties `2 / alpha`.
+Selected beta values are saved with interval results for inspection.
+
+Set `model.optimize_beta: false`, or omit that setting, to retain fixed
+quantile endpoints and legacy scoring. The beta settings belong in the
+base experiment YAML and are inherited by every hyperparameter trial.
+
 ## Outputs and overrides
 
 Each task writes to `results/spci/{dataset}/{predictor}/`:
@@ -221,9 +254,16 @@ training prefix, including the tuning validation tail, and evaluates the final
 test region. Final outputs go to that trial's `final_run/` directory.
 Change `saving_dir` in a copy of the selected YAML to choose another final
 output directory. This tunes the current implementation, which fits one
-forest per sequence and uses the configured fixed quantile levels.
+forest per sequence and uses the base configuration's beta-optimization
+settings during both tuning and final evaluation.
 
-### Sampled-forest numerical stability
+### Quantile-forest numerical stability
+
+Beta optimization requests the 0th and 100th percentiles. In the exact
+`sklearn_quantile==0.1.1` forest, accumulated float32 weights can leave the
+100th percentile unset. The SPCI wrapper computes these two endpoints
+directly from the minimum and maximum positive-weight training residuals
+in the reached leaves. Interior quantile predictions are unchanged.
 
 Above 10,000 fitting samples, both tuning and final evaluation use the
 sampled quantile forest. In `sklearn_quantile==0.1.1`, float32 accumulation

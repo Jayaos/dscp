@@ -13,6 +13,7 @@ import numpy as np
 import torch
 from omegaconf import OmegaConf
 
+from baselines.spci.intervals import build_interval_plan, select_intervals
 from baselines.spci.model import build_quantile_forest
 from baselines.spci.tuning_data import prepare_spci_tuning_data
 from sbatch.sbatch_run_tuning.common import (
@@ -30,7 +31,7 @@ from sbatch.sbatch_run_tuning.common import (
     write_trial_artifacts,
 )
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score
-from utils.utils import get_interval_quantile_indices, load_data
+from utils.utils import load_data
 
 
 ALLOWED_GRID_KEYS = frozenset({
@@ -79,34 +80,30 @@ def _run_single_trial(config, sequence_item, normalization_params):
     """Fit on the inner training prefix and score its later validation suffix."""
     train_dataset = sequence_item["train_dataset"]
     evaluation_dataset = sequence_item["model_selection_valid_dataset"]
-    sorted_quantiles, pair_to_indices = get_interval_quantile_indices(
-        config.model.target_quantiles
-    )
-    if len(sorted_quantiles) < 2 or any(not 0 < q < 1 for q in sorted_quantiles):
-        raise ValueError("SPCI tuning requires interval quantiles strictly between 0 and 1.")
+    interval_plan = build_interval_plan(config.model)
     train = train_dataset[:]
     evaluation = evaluation_dataset[:]
-    forest = build_quantile_forest(config, len(train_dataset), np.asarray(sorted_quantiles))
+    forest = build_quantile_forest(config, len(train_dataset), interval_plan.quantiles)
     forest.fit(train[1].numpy(), train[4].flatten().numpy())
-    quantiles = torch.as_tensor(
-        forest.predict(evaluation[1].numpy()), dtype=torch.float32
+    quantiles = np.asarray(
+        forest.predict(evaluation[1].numpy()), dtype=np.float32
     )
-    if quantiles.shape != (len(sorted_quantiles), len(evaluation_dataset)):
+    if quantiles.shape != (len(interval_plan.quantiles), len(evaluation_dataset)):
         raise ValueError("The quantile forest returned an unexpected prediction shape.")
-    if not torch.isfinite(quantiles).all():
-        raise ValueError("The quantile forest returned nonfinite validation predictions.")
+    intervals = select_intervals(quantiles, interval_plan)
 
     residual_std = normalization_params[1] if normalization_params is not None else None
     evaluation_results = {}
     for pair in config.model.target_quantiles:
         pair_key = tuple(pair)
-        hi_idx, lo_idx = pair_to_indices[pair_key]
-        hi, lo = quantiles[hi_idx], quantiles[lo_idx]
+        interval = intervals[pair_key]
+        hi = torch.as_tensor(interval.upper, dtype=torch.float32)
+        lo = torch.as_tensor(interval.lower, dtype=torch.float32)
         metrics = {
             "coverage": compute_coverage(hi, lo, evaluation[4]),
             "interval_width": compute_interval_width(hi, lo, normalized_std=residual_std),
             "winkler_score": compute_winkler_score(
-                hi, lo, evaluation[5], evaluation[6], pair_key,
+                hi, lo, evaluation[5], evaluation[6], interval.score_quantiles,
                 normalized_params=normalization_params,
             ),
         }
@@ -127,6 +124,7 @@ def _run_single_trial(config, sequence_item, normalization_params):
         "evaluation_split": EVALUATION_SPLIT,
         "final_test_evaluated": False,
         "pair_metrics": pair_metrics,
+        "interval_selection": {str(pair): interval.metadata() for pair, interval in intervals.items()},
         "selection_score": selection_score,
         "positive_delta_coverage": eligible,
     }
@@ -208,6 +206,7 @@ def run_tuning(
     config.tuning = dict(tuning_cfg)
     config.tuning.model_selection_valid_ratio = float(ratio)
     config.tuning.delta_threshold = delta_threshold
+    interval_plan = build_interval_plan(config.model)
 
     data = load_data(config.data.data_path)
     sequence_keys = choose_sequence_keys(data, sequence_key, sequence_index, num_sequences)
@@ -254,6 +253,8 @@ def run_tuning(
             "evaluation_split": EVALUATION_SPLIT,
             "model_selection_valid_ratio": float(ratio),
             "train_ratio": float(config.data.train_ratio),
+            "optimize_beta": interval_plan.optimize_beta,
+            "beta_bins": interval_plan.beta_bins,
             "final_test_evaluated": False,
         },
         "top_trials": ranked_trials[:top_k],

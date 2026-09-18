@@ -4,6 +4,8 @@ data:
   normalize: True
 
 model:
+  optimize_beta: true
+  beta_bins: 5
   n_estimators: 10
   max_depth: 2
   criterion: "squared_error"

@@ -8,5 +8,5 @@ tuning:
   num_sequences: 5
   delta_threshold: -0.01
   # Reserve this tail fraction of the training prefix for tuning evaluation.
-  # With train_ratio=0.66 and ratio=0.2, fit 52.8%, evaluate 13.2%, test 34%.
+  # With train_ratio=0.66 and ratio=0.15, fit 56.1%, evaluate 9.9%, test 34%.
   model_selection_valid_ratio: 0.15

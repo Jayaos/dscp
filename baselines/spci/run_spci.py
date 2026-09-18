@@ -5,8 +5,9 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from baselines.spci.data import prepare_spci_data
+from baselines.spci.intervals import build_interval_plan, select_intervals
 from baselines.spci.model import build_quantile_forest
-from utils.utils import load_data, save_data, read_setup, get_interval_quantile_indices
+from utils.utils import load_data, save_data, read_setup
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, summarize_evaluation_results
 from utils.plotting import plot_cp_prediction_intervals
 
@@ -19,8 +20,7 @@ def run_spci_experiment(config_path):
         np.random.seed(config.seed)
         torch.manual_seed(config.seed)
     os.makedirs(config.saving_dir, exist_ok=True)
-    sorted_quantiles, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
-    target_quantiles = np.array(sorted_quantiles)
+    interval_plan = build_interval_plan(config.model)
 
     # load data
     data = load_data(config.data.data_path) # load predictor results here
@@ -45,9 +45,8 @@ def run_spci_experiment(config_path):
         target_residual = train_target_residual.flatten().numpy()  # (data_size, )
 
         # model init
-        # target_quantiles must be sorted array
         qrf = build_quantile_forest(
-            config, len(train_dataset), target_quantiles
+            config, len(train_dataset), interval_plan.quantiles
         )
             
         # train Quantile Random Forest
@@ -57,7 +56,10 @@ def run_spci_experiment(config_path):
         test_strided_x, test_strided_residual, test_strided_y, \
             test_target_x, test_target_residual, test_target_y, test_target_preds = test_dataset[:]
         test_strided_residual = test_strided_residual.numpy()
-        pred_quantile_values = torch.from_numpy(qrf.predict(test_strided_residual)).to(torch.float32) # (len(target_quantiles), test_size)
+        pred_quantile_values = np.asarray(qrf.predict(test_strided_residual), dtype=np.float32)
+        if pred_quantile_values.shape != (len(interval_plan.quantiles), len(test_dataset)):
+            raise ValueError("The quantile forest returned an unexpected prediction shape.")
+        intervals = select_intervals(pred_quantile_values, interval_plan)
 
         evaluation_results = {
             tuple(confidence_pair): {"coverage": [], 
@@ -77,9 +79,10 @@ def run_spci_experiment(config_path):
         # evaluation
         for confidence_pair in config.model.target_quantiles:
             tuple_confidence_pair = tuple(confidence_pair)
-            hi_idx, lo_idx = pair_to_indices[tuple_confidence_pair]
-            hi = pred_quantile_values[hi_idx, :] # (test_size,)
-            lo = pred_quantile_values[lo_idx, :] # (test_size,)
+            interval = intervals[tuple_confidence_pair]
+            hi = torch.as_tensor(interval.upper, dtype=torch.float32)
+            lo = torch.as_tensor(interval.lower, dtype=torch.float32)
+            evaluation_results[tuple_confidence_pair].update(interval.metadata())
 
             this_coverage = compute_coverage(hi, lo, test_target_residual)
 
@@ -91,7 +94,7 @@ def run_spci_experiment(config_path):
                                                            lo,
                                                            test_target_y,
                                                            test_target_preds,
-                                                           tuple_confidence_pair,
+                                                           interval.score_quantiles,
                                                            normalized_params=(residuals_noramlized_mu,
                                                                               residuals_noramlized_std))
             else:
@@ -102,7 +105,7 @@ def run_spci_experiment(config_path):
                                                            lo,
                                                            test_target_y,
                                                            test_target_preds,
-                                                           tuple_confidence_pair,
+                                                           interval.score_quantiles,
                                                            normalized_params=None)
 
             evaluation_results[tuple_confidence_pair]["upper_interval"].extend(hi.tolist())
