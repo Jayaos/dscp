@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:2 -C V100
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH -t20
+#SBATCH -t600
 #SBATCH -qinferno
 #SBATCH -o Report-hopcpt-solar-%A_%a.out
 #SBATCH --mail-type=ALL
