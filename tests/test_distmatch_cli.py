@@ -118,6 +118,7 @@ class DistMatchCLITests(unittest.TestCase):
             {"data.test_ratio": 0.5}, {"data.train_ratio": -0.5},
             {"num_cores": 0}, {"num_cores": True}, {"num_cores": 1.5},
             {"threads_per_worker": 0}, {"model.prediction_step": 2},
+            {"data.normalization_mode": "unknown"},
         )
         for updates in cases:
             with self.subTest(updates=updates), tempfile.TemporaryDirectory() as directory:
@@ -158,9 +159,11 @@ main(sys.argv[1:])
                 path = REPO_ROOT / "configs/distmatch_configs" / f"distmatch_{name}_config.yaml"
                 args = cli.build_parser().parse_args([str(path)])
                 _, config = cli.resolve_config(args)
-                self.assertEqual(config.num_cores, 4)
+                self.assertEqual(config.num_cores, OmegaConf.load(path).num_cores)
                 self.assertEqual(config.threads_per_worker, 1)
-                self.assertFalse(config.data.normalize)
+                self.assertEqual(config.data.normalize, name.startswith("lr_"))
+                self.assertEqual(config.data.normalization_mode,
+                                 "upstream_target" if name.startswith("lr_") else "residual_inputs")
                 self.assertEqual(config.model.past_window_len, 100)
                 self.assertTrue(Path(config.data.data_path).is_relative_to(REPO_ROOT))
         for dataset, num_sequences in (("air", 3), ("solar", 10), ("sapflux", 5)):
@@ -169,8 +172,8 @@ main(sys.argv[1:])
                     REPO_ROOT / "configs/distmatch_configs" / f"distmatch_{dataset}_tuning_config.yaml"
                 )
                 self.assertEqual(list(grid.grid["model.match_threshold"]),
-                                 [0.005, 0.01, 0.025, 0.05, 0.075, 0.1])
-                self.assertEqual(list(grid.grid["model.past_window_len"]), [100, 200])
+                                 [0.01, 0.1])
+                self.assertEqual(list(grid.grid["model.past_window_len"]), [100])
                 self.assertEqual(grid.tuning.num_sequences, num_sequences)
                 self.assertEqual(grid.tuning.delta_threshold, -0.01)
 

@@ -114,6 +114,12 @@ def validate_config(config, num_cores=None):
     data.setdefault("normalize", False)
     if not isinstance(data["normalize"], bool):
         raise ValueError("data.normalize must be a boolean.")
+    # Preserve the original boolean's input-only behavior for existing configs.
+    data.setdefault("normalization_mode", "residual_inputs")
+    if data["normalization_mode"] not in ("residual_inputs", "upstream_target"):
+        raise ValueError(
+            "data.normalization_mode must be 'residual_inputs' or 'upstream_target'."
+        )
     config["seed"] = positive_integer(config.get("seed", 2026), "seed", minimum=0)
     if config["seed"] >= 2**32:
         raise ValueError("seed must be smaller than 2**32.")

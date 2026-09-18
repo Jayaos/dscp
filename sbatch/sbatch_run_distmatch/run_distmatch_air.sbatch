@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
-#SBATCH --mem=48G
+#SBATCH --mem=64G
 #SBATCH -t360
 #SBATCH --output=%x_%A_%a.out
 

@@ -33,7 +33,8 @@ anchor in immediate-parent-to-root order, including bootstrap multiplicity.
 The partition remains fixed during sequential prediction.
 
 At a queried leaf, a fresh `sklearn_quantile.RandomForestQuantileRegressor`
-fits flattened windows and raw residual targets. Defaults match the official
+fits flattened windows and residual targets in the selected normalization
+units. Defaults match the official
 baseline: W=100, gamma=0.1, ten outer trees, bootstrap ratio 0.9, minimum node
 size zero, ten beta candidates, and ten QRF estimators of maximum depth two.
 For each requested mass, beta ranges from zero to alpha inclusively. Each tree
@@ -62,11 +63,30 @@ code details; it does not claim that the code and paper are interchangeable.
 - All requested quantile levels are evaluated with one leaf QRF fit per tree
   per `predict_intervals` call. Extra calls are deterministic and do not advance
   state. `observe` only appends a pair; the next prediction refits the leaf QRF.
-- Optional normalization freezes mean and standard deviation on calibration
-  residuals and scales input windows only. Targets and output endpoints remain
-  in original residual units. Constant calibration uses scale one. The default
-  is no additional normalization. Nonfinite inputs are rejected instead of
-  silently replaced with zero.
+- Normalization has two explicit modes. The default `residual_inputs` preserves
+  the earlier `normalize: true` behavior: frozen initial-training residual
+  statistics transform input windows only, while QRF targets remain in original
+  residual units. `normalize: false` disables scaling in either mode.
+- The LR presets enable `normalize: true` with
+  `normalization_mode: upstream_target`. This requires saved `train_y` and fits
+  target statistics on `train_y` plus the held-out prefix before the active
+  evaluation split: `heldout_y[:train_end]` for validation or
+  `heldout_y[:validation_end]` for final test. The target mean and sample
+  standard deviation (`ddof=1`) are frozen for that run; constant target history
+  uses scale one. Both residual windows and QRF targets are divided by the
+  target standard deviation. The mean cancels when subtracting a standardized
+  prediction from a standardized target. Predicted residual quantiles are
+  multiplied by the same scale before adding them to the original saved
+  forecasts, keeping all intervals and metrics in original units. Per-series
+  metadata records the statistics' source, mean, standard deviation, sample
+  count, and held-out cutoff.
+- This target mode follows the original residual normalization while retaining
+  DSCP's saved forecasts, alignment, and chronological splits. It does not
+  retrain the base predictor on the original standardized features and targets,
+  so it does not reproduce upstream's full forecasting experiment. LSTM and
+  Chronos presets keep normalization disabled; current Chronos artifacts lack
+  the `train_y` required for this mode. Nonfinite inputs are rejected instead
+  of silently replaced with zero.
 - Two-sample KS uses sorted equal-length windows and exact integer empirical
   CDF counts, including ties. Computation is blocked, and the pairwise cache is
   boolean. No quadratic floating-point distance matrix or tree-owned mask is

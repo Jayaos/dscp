@@ -66,8 +66,9 @@ at the top level of the YAML config to disable these progress displays.
 
 ## CPU workers
 
-The default presets set `num_cores: 4` and `threads_per_worker: 1`. Sequence
-workers are separate processes. The CLI preserves the YAML worker count when
+The presets configure worker counts with `num_cores` and use
+`threads_per_worker: 1`. Sequence workers are separate processes.
+The CLI preserves the YAML worker count when
 `--num-cores` is omitted; an explicit option overrides it:
 
 ```bash
@@ -148,10 +149,50 @@ windows, a strict KS-statistic threshold of 0.1, ten distribution trees with
 routed leaf. The beta search compares ten candidate endpoint pairs. The trees
 keep their initial partitions and all observed leaf members.
 
-The presets use residuals in their original units (`normalize: false`).
 Independent random streams make repeated predictions reproducible and isolate
 stations from worker scheduling. See the implementation's provenance notes for
 adaptations to the original wrapper.
+
+### Normalization
+
+The LR air, solar, and sapflux presets enable target-based residual scaling:
+
+```yaml
+data:
+  normalize: true
+  normalization_mode: upstream_target
+```
+
+This mode requires `train_y` in each saved forecast entry. For validation,
+target statistics use `train_y` followed by `heldout_y[:train_end]`. For final
+test, they use `train_y` followed by `heldout_y[:validation_end]`, including the
+observed validation history. The mean and sample standard deviation (`ddof=1`)
+are frozen before the active evaluation split; a constant target history uses
+scale one. Validation tuning therefore excludes validation targets from its
+statistics, and final-test runs exclude test targets.
+
+Both residual windows and quantile-forest targets are divided by this target
+standard deviation. The target mean cancels in
+`(y - mean) / std - (prediction - mean) / std`, so residuals are not centered
+on the target mean. Predicted residual quantiles are multiplied by the standard
+deviation before being added to the saved point forecasts. Interval endpoints,
+widths, and Winkler scores remain in the original target units. Per-series
+metadata records the normalization source, target mean, standard deviation,
+sample count, and held-out cutoff.
+
+`normalization_mode` defaults to `residual_inputs` for compatibility. With
+`normalize: true`, that mode retains the earlier behavior: fit residual mean
+and standard deviation on the initial training residuals and transform input
+windows only; QRF targets and predicted residual quantiles remain in original
+units. With `normalize: false`, scaling is disabled. LSTM and Chronos presets
+retain this disabled setting; current Chronos artifacts lack the `train_y`
+needed by `upstream_target`.
+
+`upstream_target` reproduces the residual scaling induced by the original
+target normalization within the saved-forecast workflow. It does not retrain
+the base predictor on standardized features and targets, and therefore does
+not reproduce the original forecasting pipeline. Artifact alignment and split
+boundaries are unchanged.
 
 ## Matching cache and memory
 
@@ -170,9 +211,9 @@ history.
 
 ## Tune on validation
 
-The air, solar, and sapflux tuning grids each search thresholds
-`[0.005, 0.01, 0.025, 0.05, 0.075, 0.1]` and windows `[100, 200]`, giving
-12 combinations per base predictor. The grids evaluate 3 air sequences,
+The air, solar, and sapflux tuning grids each search thresholds `[0.01, 0.1]`
+with window length fixed at `100`, giving two combinations per base predictor.
+The grids evaluate 3 air sequences,
 10 solar sequences, and 5 sapflux sequences, respectively. For example,
 run the air grid with the LR air base configuration:
 
@@ -214,10 +255,10 @@ environment variables are `DISTMATCH_GRID_CONFIG`,
 ## Verify
 
 ```bash
-python -m pytest tests/test_distmatch_model.py tests/test_distmatch_data_usage.py tests/test_distmatch_tuning.py tests/test_distmatch_cli.py tests/test_distmatch_progress.py
+python -m pytest tests/test_distmatch_model.py tests/test_distmatch_data_usage.py tests/test_distmatch_normalization.py tests/test_distmatch_tuning.py tests/test_distmatch_cli.py tests/test_distmatch_progress.py
 ```
 
-These checks cover KS/reference agreement, causality, train-only normalization,
+These checks cover KS/reference agreement, causality, normalization boundaries,
 validation isolation from test, serial/multicore equality, metrics and plotting,
 and CLI/configuration behavior.
 

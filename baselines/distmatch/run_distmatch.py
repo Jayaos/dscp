@@ -61,6 +61,8 @@ def _resolve_paths(config):
 
 def _evaluate_sequence(key, item, config, split, progress):
     prepared = prepare_sequence(item, config, split=split)
+    normalization = prepared["normalization"]
+    residual_scale = normalization["target_std"]
     pairs = target_quantiles(config)
     seed = sequence_seed(config["seed"], key)
     estimator = DistMatchResidualIntervalEstimator(
@@ -70,7 +72,7 @@ def _evaluate_sequence(key, item, config, split, progress):
     )
     started = time.perf_counter()
     estimator.fit(
-        prepared["train_residuals"], normalize=config["data"]["normalize"],
+        prepared["train_residuals"], normalize=normalization["mode"] == "residual_inputs",
         progress=progress.update if config["show_progress"] else None,
     )
     training_seconds = time.perf_counter() - started
@@ -96,8 +98,10 @@ def _evaluate_sequence(key, item, config, split, progress):
         intervals = estimator.predict_intervals([tuple(sorted(pair)) for pair in pairs])
         for pair in pairs:
             lower, upper, betas = intervals[tuple(sorted(pair))]
-            results[pair]["lower_residual_quantile"].append(float(lower))
-            results[pair]["upper_residual_quantile"].append(float(upper))
+            # Upstream residuals use normalized target units internally. Restore
+            # forecast-artifact units for every saved endpoint and metric.
+            results[pair]["lower_residual_quantile"].append(float(lower) * residual_scale)
+            results[pair]["upper_residual_quantile"].append(float(upper) * residual_scale)
             results[pair]["selected_beta_per_tree"].append([float(beta) for beta in betas])
         estimator.observe(float(residual))
         progress.update(split, index, evaluation_size)
@@ -147,6 +151,7 @@ def _evaluate_sequence(key, item, config, split, progress):
             "input_mean": float(estimator.input_mean),
             "input_std": float(estimator.input_std),
             "normalize": config["data"]["normalize"],
+            "normalization": normalization,
             "interval_scale": "original_response",
             "residual_quantile_scale": "original_residual",
             "tree_structure": "fixed_after_training",

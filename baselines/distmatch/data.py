@@ -24,11 +24,50 @@ def scalar_sequence(values, name="residuals"):
     return array
 
 
+def _normalization(item, data_config, y, evaluation_start):
+    """Use upstream's target statistics without reading evaluation targets.
+
+    For saved forecasts, the original training outcomes are in ``train_y``;
+    the held-out prefix supplies the remaining pre-evaluation outcomes.
+    torch.std in the upstream loader uses the sample standard deviation.
+    """
+    mode = data_config.get("normalization_mode", "residual_inputs")
+    if not data_config.get("normalize", False):
+        mode = "none"
+    info = {"mode": mode, "target_mean": 0.0, "target_std": 1.0}
+    if mode != "upstream_target":
+        return info
+    if "train_y" not in item:
+        raise ValueError(
+            "data.normalization_mode='upstream_target' requires saved train_y "
+            "to fit the target scaler on training and pre-evaluation outcomes."
+        )
+    train_y = scalar_sequence(item["train_y"], "train_y (target normalization)")
+    history = np.concatenate((train_y, y[:evaluation_start]))
+    if len(history) < 2:
+        raise ValueError("Upstream target normalization requires at least two outcomes.")
+    with np.errstate(over="ignore", invalid="ignore"):
+        mean = float(history.mean())
+        std = float(history.std(ddof=1))
+    if not np.isfinite(mean) or not np.isfinite(std):
+        raise ValueError("Target normalization statistics must be finite.")
+    info.update({
+        "target_mean": mean,
+        "target_std": std if std > 0 else 1.0,
+        "ddof": 1,
+        "fit_size": int(len(history)),
+        "heldout_fit_end": int(evaluation_start),
+        "source": "train_y + heldout_y[:evaluation_start]",
+    })
+    return info
+
+
 def prepare_sequence(item, config, split="test"):
     """Slice the permitted region before validating or transforming its values.
 
     In validation mode the reserved test suffix is used only for its length.
-    No point-forecaster fitting data or contemporaneous covariates are consumed.
+    Upstream target normalization also reads saved ``train_y`` for its scaler.
+    No point forecaster is fitted and no covariates are consumed.
     """
     if split not in {"validation", "test"}:
         raise ValueError("split must be 'validation' or 'test'.")
@@ -58,6 +97,13 @@ def prepare_sequence(item, config, split="test"):
         residuals = y - predictions
     if not np.isfinite(residuals).all():
         raise ValueError("Signed residuals must remain finite after subtraction.")
+    normalization = _normalization(item, data_config, y, start)
+    # (y - mean) / std - (prediction - mean) / std = residual / std.
+    # Scale both the windows and regression targets, without residual centering.
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        residuals = residuals / normalization["target_std"]
+    if not np.isfinite(residuals).all():
+        raise ValueError("Signed residuals must remain finite after target normalization.")
     return {
         "train_residuals": residuals[:train_end].copy(),
         "warmup_residuals": residuals[train_end:start].copy(),
@@ -66,4 +112,5 @@ def prepare_sequence(item, config, split="test"):
         "predictions": predictions[start:end].copy(),
         "target_indices": np.arange(start, end, dtype=np.int64),
         "boundaries": boundaries,
+        "normalization": normalization,
     }

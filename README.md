@@ -43,6 +43,15 @@ observations then enter their leaves in chronological order before final-test
 evaluation. Each new test residual becomes available only after its interval
 is issued. There is no additional calibration partition.
 
+The LR presets enable `data.normalize: true` with
+`data.normalization_mode: upstream_target`. This uses saved `train_y` and the
+held-out targets observed before the evaluated split to scale both residual
+windows and quantile-forest targets. Quantiles are converted back to the
+original units for intervals and metrics. Saved point forecasts are reused;
+the forecasting models are not retrained on standardized data. LSTM and
+Chronos presets keep normalization disabled. The guide documents the exact
+statistics and the compatible `residual_inputs` mode.
+
 From the repository root, after activating the environment defined in
 [`envs/env-distmatch.yml`](envs/env-distmatch.yml):
 

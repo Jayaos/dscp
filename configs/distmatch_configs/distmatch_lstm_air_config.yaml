@@ -1,6 +1,6 @@
 # Ratios partition each saved forecast suffix chronologically.
 seed: 2026
-num_cores: 4
+num_cores: 12
 threads_per_worker: 1
 
 data:
@@ -8,7 +8,9 @@ data:
   train_ratio: 0.5
   valid_ratio: 0.16
   test_ratio: 0.34
-  normalize: false
+  # Scale residual inputs and targets using target statistics before evaluation.
+  normalize: true
+  normalization_mode: upstream_target
 
 model:
   prediction_step: 1
