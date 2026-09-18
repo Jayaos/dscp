@@ -4,9 +4,9 @@
 #SBATCH --array=0-2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=64G
-#SBATCH --t240
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
+#SBATCH --t120
 #SBATCH -qinferno
 #SBATCH -o Report-rescp-solar-%A_%a.out
 #SBATCH --mail-type=ALL
