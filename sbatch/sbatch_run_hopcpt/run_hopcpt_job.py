@@ -47,10 +47,7 @@ def main(argv=None):
         REPO_ROOT / "data" / artifact_dir / predictor
         / f"{predictor}_{artifact_name}_data.pkl"
     )
-    if args.dataset == "sapflux":
-        template_name = "hopcpt_lstm_sapflux_config.yaml"
-    else:
-        template_name = f"hopcpt_{predictor}_air_config.yaml"
+    template_name = f"hopcpt_{predictor}_{args.dataset}_config.yaml"
     template_path = REPO_ROOT / "configs" / "hopcpt_configs" / template_name
     output_dir = args.output_root.expanduser().resolve() / args.dataset / predictor
 

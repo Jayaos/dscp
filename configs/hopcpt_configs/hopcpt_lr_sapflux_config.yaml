@@ -8,7 +8,7 @@ parallel:
   devices: [0, 1]
 
 data:
-  data_path: "./data/sapflux-solo3-large/lstm/lstm_sapflux-solo3-large_data.pkl"
+  data_path: "./data/sapflux-solo3-large/lr/lr_sapflux-solo3-large_data.pkl"
   train_ratio: 0.33
   valid_ratio: 0.33
   normalize: True
@@ -16,7 +16,7 @@ data:
 model:
   dim_context_encoding: auto
   dim_hopfield_hidden: auto
-  use_temporal_encoding: True
+  use_temporal_encoding: False
   # Train MSE on absolute residuals; conformal selection uses signed residuals.
   predict_absolute_residual: True
   conformal_absolute_residual: False
@@ -39,4 +39,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/hopcpt_lstm_sapflux_solo3_large/"
+saving_dir: "./results/hopcpt_lr_sapflux_solo3_large/"

@@ -5,7 +5,7 @@ data:
 
 model:
   n_estimators: 10
-  max_depth: 2
+  max_depth: 50
   criterion: "squared_error"
   target_quantiles:
     - [0.95, 0.05]

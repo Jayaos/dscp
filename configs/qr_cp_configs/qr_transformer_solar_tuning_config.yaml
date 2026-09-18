@@ -1,0 +1,18 @@
+grid:
+  model.head_type: [nondecreasing] # uncomment to compare both
+  model.dim_model: [32, 64]
+  model.num_heads: [2, 4]
+  model.num_layers: [2, 4]
+  model.window_size: [100, 200]
+  model.use_current_feature: [True, False]
+  data.strided_features: ["xr", "xry"]
+  training.learning_rate: [0.0001]
+  training.epochs: [50]
+  training.early_stop: [3]
+
+
+tuning:
+  num_gpus: 1 # 1: sequential; >1: parallel trials (allocate matching GPUs in Slurm)
+  num_sequences: 10 # positive integer or all
+  delta_threshold: -0.01
+  model_selection_valid_ratio: 0.15

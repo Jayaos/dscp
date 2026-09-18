@@ -1,4 +1,4 @@
-# Original Sapflow Ridge settings, shared across base predictors.
+# Original Solar 3Y Ridge settings, shared across base predictors.
 device: 0
 
 parallel:
@@ -8,7 +8,7 @@ parallel:
   devices: [0, 1]
 
 data:
-  data_path: "./data/sapflux-solo3-large/lstm/lstm_sapflux-solo3-large_data.pkl"
+  data_path: "./data/solar_prediction/chronos/chronos_nsdb-60m_data.pkl"
   train_ratio: 0.33
   valid_ratio: 0.33
   normalize: True
@@ -21,7 +21,7 @@ model:
   predict_absolute_residual: True
   conformal_absolute_residual: False
   beta: 1
-  memory_size: 4000
+  memory_size: 5000
   y_lags: 1
   target_quantiles:
     - [0.05, 0.95]
@@ -39,4 +39,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/hopcpt_lstm_sapflux_solo3_large/"
+saving_dir: "./results/hopcpt_chronos_solar/"

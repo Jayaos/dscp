@@ -1,0 +1,38 @@
+device: 0
+base_predictor: lr # choices: lr, lstm, chronos
+
+
+data:
+  data_path: "./data/solar_prediction/${base_predictor}/${base_predictor}_nsdb-60m_data.pkl"
+  train_ratio: 0.5
+  valid_ratio: 0.16
+  normalize: True
+  strided_features: "xry"
+
+
+model:
+  head_type: nondecreasing # choices: nondecreasing, independent
+  dim_model: 64
+  num_heads: 4
+  num_layers: 2
+  dropout: 0.
+  use_current_feature: True
+  target_quantiles:
+    - [0.05, 0.95]
+  prediction_step: 1
+  window_size: 200
+
+
+training:
+  batch_size: 32
+  learning_rate: 0.0001
+  epochs: 50
+  early_stop: 3
+
+
+plotting:
+  plotting: True
+  plotting_seq_len: 200
+  
+
+saving_dir: "./results/qr_transformer_${base_predictor}_solar/"

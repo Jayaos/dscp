@@ -741,6 +741,38 @@ The tuning jobs automatically separate results under
 logs use `Report-%x-%A_%a.out`, separating the job name, array job ID, and task
 ID.
 
+### QR-CP tuning on Solar and Sapflux
+
+Solar and Sapflux use the same predictor arrays as Air: task `0` selects LR,
+task `1` selects LSTM, and task `2` selects Chronos. Their RNN and Transformer
+tuning grids match the corresponding Air grids (48 and 64 combinations).
+
+```bash
+sbatch sbatch/sbatch_run_tuning/run_qr_cp_rnn_solar_tuning.sbatch
+sbatch sbatch/sbatch_run_tuning/run_qr_cp_transformer_solar_tuning.sbatch
+sbatch sbatch/sbatch_run_tuning/run_qr_cp_rnn_sapflux_tuning.sbatch
+sbatch sbatch/sbatch_run_tuning/run_qr_cp_transformer_sapflux_tuning.sbatch
+```
+
+Each task loads `configs/qr_cp_configs/qr_<encoder>_<predictor>_<dataset>_config.yaml`
+and `configs/qr_cp_configs/qr_<encoder>_<dataset>_tuning_config.yaml`.
+Solar predictions come from `data/solar_prediction/<predictor>/<predictor>_nsdb-60m_data.pkl`;
+Sapflux predictions come from
+`data/sapflux-solo3-large/<predictor>/<predictor>_sapflux-solo3-large_data.pkl`.
+Generate the selected base predictor artifacts before submitting.
+Results are saved under `results/tuning/qr_<encoder>_<predictor>_<dataset>/`.
+
+All four launchers follow the current Air templates: two GPUs per array task,
+two concurrent trial workers, and a four-hour time limit. RNN tasks request
+two CPUs and 8 GB RAM; Transformer tasks request four CPUs and 16 GB RAM.
+The scripts pass `--num-gpus 2`, overriding the tuning YAML default of one.
+To run a single predictor on one GPU, for example:
+
+```bash
+sbatch --array=1 --gres=gpu:1 --cpus-per-task=2 --mem=8G \
+  sbatch/sbatch_run_tuning/run_qr_cp_transformer_solar_tuning.sbatch --num-gpus 1
+```
+
 ### Selecting the Air base predictor for IQN-CP tuning
 
 IQN-CP uses the same three-task predictor arrays as QR-CP: task `0` selects

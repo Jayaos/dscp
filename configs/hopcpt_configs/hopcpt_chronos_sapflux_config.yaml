@@ -8,7 +8,7 @@ parallel:
   devices: [0, 1]
 
 data:
-  data_path: "./data/sapflux-solo3-large/lstm/lstm_sapflux-solo3-large_data.pkl"
+  data_path: "./data/sapflux-solo3-large/chronos/chronos_sapflux-solo3-large_data.pkl"
   train_ratio: 0.33
   valid_ratio: 0.33
   normalize: True
@@ -39,4 +39,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/hopcpt_lstm_sapflux_solo3_large/"
+saving_dir: "./results/hopcpt_chronos_sapflux_solo3_large/"

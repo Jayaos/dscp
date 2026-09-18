@@ -43,10 +43,17 @@ Here, `P` is the selected predictor (`lr`, `lstm`, or `chronos`):
 | Solar | `data/solar_prediction/P/P_nsdb-60m_data.pkl` |
 | Sapflux | `data/sapflux-solo3-large/P/P_sapflux-solo3-large_data.pkl` |
 
-Air and Solar use the corresponding predictor's Air HopCPT configuration
-template. Sapflux uses `hopcpt_lstm_sapflux_config.yaml` for all three
-predictors, substituting the selected artifact path. These are starting
-hyperparameters, with no additional tuning for Solar or Sapflux combinations.
+Each dataset and predictor has an explicit configuration under
+`configs/hopcpt_configs/hopcpt_{predictor}_{dataset}_config.yaml`.
+Solar and Sapflux use the original publication's Ridge/LR HopCPT settings
+for all three base predictors: learning rate `0.01`, 3,000 epochs,
+validation every 5 epochs, no dropout, and no temporal encoding.
+Solar uses a memory size of 5,000; Sapflux uses 4,000. These settings
+come from the authors' Ridge experiment commands and their configuration
+defaults, without additional tuning for LSTM or Chronos.
+
+The standard runner continues to train one model per sequence. In particular,
+this does not reproduce the original Solar training batch of four sequences.
 The dispatcher sets `prediction_step: 1`, `device: 0`, and disables internal
 multi-GPU processing to match each task's single GPU allocation.
 
