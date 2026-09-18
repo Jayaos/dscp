@@ -34,7 +34,7 @@ training:
   # training batch size one entire sequence
   learning_rate: 0.001
   epochs: 3000
-  validation_epochs: 100
+  validation_epochs: 30
 
 
 plotting:
