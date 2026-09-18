@@ -1,7 +1,7 @@
 grid:
   model.head_type: [nondecreasing] # uncomment to compare both
   model.dim_model: [32, 64]
-  model.num_layers: [1, 2, 4]
+  model.num_layers: [1, 2]
   model.window_size: [100, 200]
   model.use_current_feature: [True, False]
   data.strided_features: ["xr", "xry"]
