@@ -161,9 +161,8 @@ main(sys.argv[1:])
                 _, config = cli.resolve_config(args)
                 self.assertEqual(config.num_cores, OmegaConf.load(path).num_cores)
                 self.assertEqual(config.threads_per_worker, 1)
-                self.assertEqual(config.data.normalize, name.startswith("lr_"))
-                self.assertEqual(config.data.normalization_mode,
-                                 "upstream_target" if name.startswith("lr_") else "residual_inputs")
+                self.assertTrue(config.data.normalize)
+                self.assertEqual(config.data.normalization_mode, "upstream_target")
                 self.assertEqual(config.model.past_window_len, 100)
                 self.assertTrue(Path(config.data.data_path).is_relative_to(REPO_ROOT))
         for dataset, num_sequences in (("air", 3), ("solar", 10), ("sapflux", 5)):

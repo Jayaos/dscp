@@ -155,7 +155,7 @@ adaptations to the original wrapper.
 
 ### Normalization
 
-The LR air, solar, and sapflux presets enable target-based residual scaling:
+The LR, LSTM, and Chronos presets enable target-based residual scaling:
 
 ```yaml
 data:
@@ -163,13 +163,17 @@ data:
   normalization_mode: upstream_target
 ```
 
-This mode requires `train_y` in each saved forecast entry. For validation,
-target statistics use `train_y` followed by `heldout_y[:train_end]`. For final
-test, they use `train_y` followed by `heldout_y[:validation_end]`, including the
-observed validation history. The mean and sample standard deviation (`ddof=1`)
-are frozen before the active evaluation split; a constant target history uses
-scale one. Validation tuning therefore excludes validation targets from its
-statistics, and final-test runs exclude test targets.
+For validation, target statistics use `heldout_y[:train_end]`; for final test,
+they use `heldout_y[:validation_end]`, including observed validation history.
+When an entry contains `train_y`, that history is prepended. Entries without
+`train_y`, including existing Chronos artifacts, use only the observed held-out
+prefix. This fallback does not use the entire held-out sequence. A provided
+`train_y` must still be a valid, nonempty finite target sequence.
+
+The mean and sample standard deviation (`ddof=1`) are frozen before the active
+evaluation split; a constant target history uses scale one. At least two
+historical targets are required. Validation tuning excludes validation targets
+from its statistics, and final-test runs exclude test targets.
 
 Both residual windows and quantile-forest targets are divided by this target
 standard deviation. The target mean cancels in
@@ -178,21 +182,22 @@ on the target mean. Predicted residual quantiles are multiplied by the standard
 deviation before being added to the saved point forecasts. Interval endpoints,
 widths, and Winkler scores remain in the original target units. Per-series
 metadata records the normalization source, target mean, standard deviation,
-sample count, and held-out cutoff.
+sample count, and held-out cutoff. Its `source` is
+`train_y + heldout_y[:evaluation_start]` when training history is supplied, or
+`heldout_y[:evaluation_start]` when the fallback is used.
 
 `normalization_mode` defaults to `residual_inputs` for compatibility. With
 `normalize: true`, that mode retains the earlier behavior: fit residual mean
 and standard deviation on the initial training residuals and transform input
 windows only; QRF targets and predicted residual quantiles remain in original
-units. With `normalize: false`, scaling is disabled. LSTM and Chronos presets
-retain this disabled setting; current Chronos artifacts lack the `train_y`
-needed by `upstream_target`.
+units. With `normalize: false`, scaling is disabled.
 
-`upstream_target` reproduces the residual scaling induced by the original
-target normalization within the saved-forecast workflow. It does not retrain
-the base predictor on standardized features and targets, and therefore does
-not reproduce the original forecasting pipeline. Artifact alignment and split
-boundaries are unchanged.
+`upstream_target` follows the original target-scaling formula within the
+saved-forecast workflow. Its historical population uses the available prefix;
+the fallback omits any pre-forecast context that was not saved. It does not
+retrain the base predictor on standardized features and targets, and therefore
+does not reproduce the original forecasting pipeline. Artifact alignment and
+split boundaries are unchanged.
 
 ## Matching cache and memory
 

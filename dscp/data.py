@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from torch.utils.data import Dataset
+from utils.forecast_data import canonicalize_forecast_data
 from utils.utils import (
     chronological_split_fixed_calibration_test,
     chronological_split_fixed_test,
@@ -18,7 +19,9 @@ class ConformalPredictionData:
 
     def __init__(self, data):
         super(ConformalPredictionData, self).__init__()
-        self.data = data
+        # Saved scalar forecasts may mix vectors and columns. Align both before
+        # normalization or subtraction, including direct API and tuning calls.
+        self.data = canonicalize_forecast_data(data)
         self.dataset = dict()
 
     def prepare_quantile_regression_datasets(self, 

@@ -67,26 +67,28 @@ code details; it does not claim that the code and paper are interchangeable.
   the earlier `normalize: true` behavior: frozen initial-training residual
   statistics transform input windows only, while QRF targets remain in original
   residual units. `normalize: false` disables scaling in either mode.
-- The LR presets enable `normalize: true` with
-  `normalization_mode: upstream_target`. This requires saved `train_y` and fits
-  target statistics on `train_y` plus the held-out prefix before the active
-  evaluation split: `heldout_y[:train_end]` for validation or
-  `heldout_y[:validation_end]` for final test. The target mean and sample
-  standard deviation (`ddof=1`) are frozen for that run; constant target history
+- The LR, LSTM, and Chronos presets enable `normalize: true` with
+  `normalization_mode: upstream_target`. Target statistics use the held-out
+  prefix before the active evaluation split: `heldout_y[:train_end]` for
+  validation or `heldout_y[:validation_end]` for final test. Saved `train_y` is
+  prepended when present. Artifacts without it, including existing Chronos
+  artifacts, use only that held-out prefix; unavailable pre-forecast context
+  is omitted. A supplied `train_y` is still validated, and invalid history is
+  rejected. At least two historical targets are required. The target mean and
+  sample standard deviation (`ddof=1`) are frozen for that run; constant target history
   uses scale one. Both residual windows and QRF targets are divided by the
   target standard deviation. The mean cancels when subtracting a standardized
   prediction from a standardized target. Predicted residual quantiles are
   multiplied by the same scale before adding them to the original saved
   forecasts, keeping all intervals and metrics in original units. Per-series
   metadata records the statistics' source, mean, standard deviation, sample
-  count, and held-out cutoff.
+  count, and held-out cutoff. The source explicitly distinguishes combined
+  history from the held-out-prefix fallback.
 - This target mode follows the original residual normalization while retaining
   DSCP's saved forecasts, alignment, and chronological splits. It does not
   retrain the base predictor on the original standardized features and targets,
-  so it does not reproduce upstream's full forecasting experiment. LSTM and
-  Chronos presets keep normalization disabled; current Chronos artifacts lack
-  the `train_y` required for this mode. Nonfinite inputs are rejected instead
-  of silently replaced with zero.
+  so it does not reproduce upstream's full forecasting experiment. Nonfinite
+  inputs are rejected instead of silently replaced with zero.
 - Two-sample KS uses sorted equal-length windows and exact integer empirical
   CDF counts, including ties. Computation is blocked, and the pairwise cache is
   boolean. No quadratic floating-point distance matrix or tree-owned mask is

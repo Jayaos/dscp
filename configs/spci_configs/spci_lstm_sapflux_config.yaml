@@ -6,13 +6,13 @@ data:
 model:
   optimize_beta: true
   beta_bins: 5
-  n_estimators: 10
-  max_depth: 2
+  n_estimators: 50
+  max_depth: 10
   criterion: "squared_error"
   target_quantiles:
     - [0.95, 0.05]
   prediction_step: 1
-  window_size: 100
+  window_size: 200
 
 plotting:
   plotting: True

@@ -37,23 +37,26 @@ def _config(normalize=True, mode="upstream_target"):
     }
 
 
-def _artifact():
+def _artifact(with_train_y=True):
     index = np.arange(24, dtype=np.float64)
     predictions = 40 + 0.7 * index
-    return {
-        "train_y": np.linspace(-30, 20, 8)[:, None],
+    item = {
         "heldout_y": predictions + 2 + 1.7 * np.sin(0.8 * index),
         "heldout_predictions": predictions[:, None],
         # Target normalization never needs contemporaneous covariates.
         "heldout_x": np.full((24, 2), np.nan),
     }
+    if with_train_y:
+        item["train_y"] = np.linspace(-30, 20, 8)[:, None]
+    return item
 
 
 def _target_stats(item, start):
-    history = torch.cat([
-        torch.as_tensor(item["train_y"], dtype=torch.float64).reshape(-1),
-        torch.as_tensor(item["heldout_y"][:start], dtype=torch.float64),
-    ])
+    history = torch.as_tensor(item["heldout_y"][:start], dtype=torch.float64).reshape(-1)
+    if "train_y" in item:
+        history = torch.cat([
+            torch.as_tensor(item["train_y"], dtype=torch.float64).reshape(-1), history,
+        ])
     mean = history.mean().item()
     std = history.std().item()  # Upstream torch.std uses sample correction=1.
     return mean, std if std != 0 else 1.0
@@ -72,27 +75,28 @@ class DistMatchNormalizationTests(unittest.TestCase):
                 validate_config(_config(mode=mode))
 
     def test_preparation_matches_independent_torch_sample_statistics(self):
-        item = _artifact()
-        residuals = item["heldout_y"] - item["heldout_predictions"][:, 0]
-        for split, start, end in (("validation", 12, 18), ("test", 18, 24)):
-            with self.subTest(split=split):
-                prepared = prepare_sequence(item, _config(), split=split)
-                mean, std = _target_stats(item, start)
-                metadata = prepared["normalization"]
-                self.assertEqual(metadata["mode"], "upstream_target")
-                self.assertAlmostEqual(metadata["target_mean"], mean)
-                self.assertAlmostEqual(metadata["target_std"], std)
-                self.assertEqual(metadata["fit_size"], len(item["train_y"]) + start)
-                self.assertEqual(metadata["heldout_fit_end"], start)
-                self.assertEqual(metadata["ddof"], 1)
-                self.assertIsInstance(metadata["source"], str)
-                self.assertTrue(metadata["source"])
-                np.testing.assert_allclose(prepared["train_residuals"], residuals[:12] / std)
-                np.testing.assert_allclose(prepared["warmup_residuals"], residuals[12:start] / std)
-                np.testing.assert_allclose(prepared["residuals"], residuals[start:end] / std)
-                np.testing.assert_array_equal(prepared["y"], item["heldout_y"][start:end])
-                np.testing.assert_array_equal(prepared["predictions"], item["heldout_predictions"][start:end, 0])
-                np.testing.assert_array_equal(prepared["target_indices"], np.arange(start, end))
+        for with_train_y in (True, False):
+            item = _artifact(with_train_y)
+            residuals = item["heldout_y"] - item["heldout_predictions"][:, 0]
+            for split, start, end in (("validation", 12, 18), ("test", 18, 24)):
+                with self.subTest(with_train_y=with_train_y, split=split):
+                    prepared = prepare_sequence(item, _config(), split=split)
+                    mean, std = _target_stats(item, start)
+                    metadata = prepared["normalization"]
+                    self.assertEqual(metadata["mode"], "upstream_target")
+                    self.assertAlmostEqual(metadata["target_mean"], mean)
+                    self.assertAlmostEqual(metadata["target_std"], std)
+                    self.assertEqual(metadata["fit_size"], len(item.get("train_y", [])) + start)
+                    self.assertEqual(metadata["heldout_fit_end"], start)
+                    self.assertEqual(metadata["ddof"], 1)
+                    source = "heldout_y[:evaluation_start]"
+                    self.assertEqual(metadata["source"], "train_y + " + source if with_train_y else source)
+                    np.testing.assert_allclose(prepared["train_residuals"], residuals[:12] / std)
+                    np.testing.assert_allclose(prepared["warmup_residuals"], residuals[12:start] / std)
+                    np.testing.assert_allclose(prepared["residuals"], residuals[start:end] / std)
+                    np.testing.assert_array_equal(prepared["y"], item["heldout_y"][start:end])
+                    np.testing.assert_array_equal(prepared["predictions"], item["heldout_predictions"][start:end, 0])
+                    np.testing.assert_array_equal(prepared["target_indices"], np.arange(start, end))
 
     def test_scaled_residuals_match_executed_upstream_normalize_method(self):
         source_path = REPO_ROOT / "dist_match_conformal" / "code" / "loader" / "dataset.py"
@@ -124,7 +128,12 @@ class DistMatchNormalizationTests(unittest.TestCase):
                 np.testing.assert_allclose(actual, expected[:end], rtol=1e-12, atol=1e-14)
 
     def test_runner_restores_raw_units_against_manually_scaled_estimator(self):
-        item, config = _artifact(), _config()
+        for with_train_y in (True, False):
+            with self.subTest(with_train_y=with_train_y):
+                self._assert_runner_restores_raw_units(_artifact(with_train_y))
+
+    def _assert_runner_restores_raw_units(self, item):
+        config = _config()
         _, std = _target_stats(item, 18)
         residuals = (item["heldout_y"] - item["heldout_predictions"][:, 0]) / std
         options = {name: value for name, value in config["model"].items() if name != "target_quantiles"}
@@ -164,51 +173,64 @@ class DistMatchNormalizationTests(unittest.TestCase):
                 np.testing.assert_allclose(result["winkler_score"], score, rtol=1e-6)
 
     def test_current_and_future_targets_do_not_change_scaler_or_first_interval(self):
-        for split, start in (("validation", 12), ("test", 18)):
-            with self.subTest(split=split):
-                item = _artifact()
-                baseline = evaluate_sequence("station", item, _config(), split=split)
-                changed = copy.deepcopy(item)
-                changed["heldout_y"][start:] += 1000 + np.arange(24 - start) * 100
-                actual = evaluate_sequence("station", changed, _config(), split=split)
-                self.assertEqual(actual["metadata"]["normalization"], baseline["metadata"]["normalization"])
-                for pair in PAIRS:
-                    for field in ("lower_interval", "upper_interval"):
-                        self.assertEqual(actual["evaluation_results"][pair][field][0], baseline["evaluation_results"][pair][field][0])
+        for with_train_y in (True, False):
+            for split, start in (("validation", 12), ("test", 18)):
+                with self.subTest(with_train_y=with_train_y, split=split):
+                    item = _artifact(with_train_y)
+                    baseline = evaluate_sequence("station", item, _config(), split=split)
+                    changed = copy.deepcopy(item)
+                    changed["heldout_y"][start:] += 1000 + np.arange(24 - start) * 100
+                    actual = evaluate_sequence("station", changed, _config(), split=split)
+                    self.assertEqual(actual["metadata"]["normalization"], baseline["metadata"]["normalization"])
+                    for pair in PAIRS:
+                        for field in ("lower_interval", "upper_interval"):
+                            self.assertEqual(actual["evaluation_results"][pair][field][0], baseline["evaluation_results"][pair][field][0])
 
     def test_reserved_test_suffix_may_be_nonfinite_during_validation(self):
-        item = _artifact()
-        baseline = evaluate_sequence("station", item, _config(), split="validation")
-        item["heldout_y"][18:] = np.nan
-        item["heldout_predictions"][18:] = np.inf
-        actual = evaluate_sequence("station", item, _config(), split="validation")
-        self.assertEqual(actual["metadata"]["normalization"], baseline["metadata"]["normalization"])
-        self.assertEqual(actual["evaluation_results"], baseline["evaluation_results"])
+        for with_train_y in (True, False):
+            with self.subTest(with_train_y=with_train_y):
+                item = _artifact(with_train_y)
+                baseline = evaluate_sequence("station", item, _config(), split="validation")
+                item["heldout_y"][18:] = np.nan
+                item["heldout_predictions"][18:] = np.inf
+                actual = evaluate_sequence("station", item, _config(), split="validation")
+                self.assertEqual(actual["metadata"]["normalization"], baseline["metadata"]["normalization"])
+                self.assertEqual(actual["evaluation_results"], baseline["evaluation_results"])
 
-    def test_upstream_scaling_requires_valid_training_targets_without_fallback(self):
-        item = _artifact()
-        del item["train_y"]
-        with self.assertRaisesRegex(ValueError, "train_y"):
-            prepare_sequence(item, _config())
-        for train_y in ([], [np.nan], [np.inf], [[1, 2], [3, 4]], ["invalid"]):
+    def test_upstream_scaling_rejects_invalid_provided_training_targets(self):
+        for train_y in (None, [], [np.nan], [np.inf], [[1, 2], [3, 4]], ["invalid"]):
             with self.subTest(train_y=train_y), self.assertRaisesRegex(ValueError, "train_y"):
                 item = _artifact()
                 item["train_y"] = train_y
                 prepare_sequence(item, _config())
 
     def test_constant_target_history_uses_unit_scale(self):
-        item = _artifact()
-        item["train_y"][:] = 7
-        item["heldout_y"][:] = 7
-        prepared = prepare_sequence(item, _config())
-        self.assertEqual(prepared["normalization"]["target_mean"], 7)
-        self.assertEqual(prepared["normalization"]["target_std"], 1)
-        residuals = item["heldout_y"] - item["heldout_predictions"][:, 0]
-        np.testing.assert_array_equal(prepared["train_residuals"], residuals[:12])
-        actual = evaluate_sequence("station", item, _config())
-        for result in actual["evaluation_results"].values():
-            self.assertTrue(np.isfinite(result["lower_interval"]).all())
-            self.assertTrue(np.isfinite(result["upper_interval"]).all())
+        for with_train_y in (True, False):
+            with self.subTest(with_train_y=with_train_y):
+                item = _artifact(with_train_y)
+                if with_train_y:
+                    item["train_y"][:] = 7
+                item["heldout_y"][:] = 7
+                prepared = prepare_sequence(item, _config())
+                self.assertEqual(prepared["normalization"]["target_mean"], 7)
+                self.assertEqual(prepared["normalization"]["target_std"], 1)
+                residuals = item["heldout_y"] - item["heldout_predictions"][:, 0]
+                np.testing.assert_array_equal(prepared["train_residuals"], residuals[:12])
+                actual = evaluate_sequence("station", item, _config())
+                for result in actual["evaluation_results"].values():
+                    self.assertTrue(np.isfinite(result["lower_interval"]).all())
+                    self.assertTrue(np.isfinite(result["upper_interval"]).all())
+
+    def test_fallback_requires_two_pre_evaluation_targets(self):
+        item = {name: values[:3] for name, values in _artifact(False).items()}
+        # With three observations validation starts at index 1, test at index 2.
+        with self.assertRaisesRegex(ValueError, "at least two outcomes"):
+            prepare_sequence(item, _config(), split="validation")
+        prepared = prepare_sequence(item, _config(), split="test")
+        mean, std = _target_stats(item, 2)
+        self.assertEqual(prepared["normalization"]["fit_size"], 2)
+        self.assertAlmostEqual(prepared["normalization"]["target_mean"], mean)
+        self.assertAlmostEqual(prepared["normalization"]["target_std"], std)
 
     def test_legacy_input_scaling_ignores_training_targets(self):
         config = _config()

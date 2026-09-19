@@ -27,8 +27,8 @@ def scalar_sequence(values, name="residuals"):
 def _normalization(item, data_config, y, evaluation_start):
     """Use upstream's target statistics without reading evaluation targets.
 
-    For saved forecasts, the original training outcomes are in ``train_y``;
-    the held-out prefix supplies the remaining pre-evaluation outcomes.
+    Include saved ``train_y`` when available. Artifacts without that history
+    (such as Chronos forecasts) use only the observed held-out prefix.
     torch.std in the upstream loader uses the sample standard deviation.
     """
     mode = data_config.get("normalization_mode", "residual_inputs")
@@ -37,13 +37,12 @@ def _normalization(item, data_config, y, evaluation_start):
     info = {"mode": mode, "target_mean": 0.0, "target_std": 1.0}
     if mode != "upstream_target":
         return info
-    if "train_y" not in item:
-        raise ValueError(
-            "data.normalization_mode='upstream_target' requires saved train_y "
-            "to fit the target scaler on training and pre-evaluation outcomes."
-        )
-    train_y = scalar_sequence(item["train_y"], "train_y (target normalization)")
-    history = np.concatenate((train_y, y[:evaluation_start]))
+    history = y[:evaluation_start]
+    source = "heldout_y[:evaluation_start]"
+    if "train_y" in item:
+        train_y = scalar_sequence(item["train_y"], "train_y (target normalization)")
+        history = np.concatenate((train_y, history))
+        source = "train_y + heldout_y[:evaluation_start]"
     if len(history) < 2:
         raise ValueError("Upstream target normalization requires at least two outcomes.")
     with np.errstate(over="ignore", invalid="ignore"):
@@ -57,7 +56,7 @@ def _normalization(item, data_config, y, evaluation_start):
         "ddof": 1,
         "fit_size": int(len(history)),
         "heldout_fit_end": int(evaluation_start),
-        "source": "train_y + heldout_y[:evaluation_start]",
+        "source": source,
     })
     return info
 
@@ -66,7 +65,8 @@ def prepare_sequence(item, config, split="test"):
     """Slice the permitted region before validating or transforming its values.
 
     In validation mode the reserved test suffix is used only for its length.
-    Upstream target normalization also reads saved ``train_y`` for its scaler.
+    Target normalization includes saved ``train_y`` when present; otherwise it
+    uses only the held-out prefix preceding the active evaluation split.
     No point forecaster is fitted and no covariates are consumed.
     """
     if split not in {"validation", "test"}:
