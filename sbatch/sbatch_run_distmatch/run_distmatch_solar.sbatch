@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=24
 #SBATCH --mem=192G
-#SBATCH -t360
+#SBATCH -t720
 #SBATCH --output=%x_%A_%a.out
 
 set -euo pipefail
