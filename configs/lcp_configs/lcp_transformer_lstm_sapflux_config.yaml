@@ -1,31 +1,35 @@
 device: 0
+base_predictor: lstm # choices: lr, lstm, chronos
+
 
 data:
-  data_path: "./data/sapflux-solo3-large/lstm/lstm_sapflux-solo3-large_data.pkl"
-  train_ratio: 0.6
+  data_path: "./data/sapflux-solo3-large/${base_predictor}/${base_predictor}_sapflux-solo3-large_data.pkl"
+  train_ratio: 0.4
   valid_ratio: 0.1
-  calibration_ratio: 0.1
-  test_ratio: 0.2
+  calibration_ratio: 0.16
+  test_ratio: 0.34
   normalize: True
   strided_features: "xry"
 
+
 model:
-  dim_model: 32
-  num_heads: 2
-  num_layers: 4
+  dim_model: 64
+  num_heads: 4
+  num_layers: 2
   dropout: 0.
   use_current_feature: False
-  training_quantiles: [0.05, 0.25, 0.5, 0.75, 0.95]
+  training_quantiles: [0.1, 0.5, 0.9]
   target_quantiles:
     - [0.05, 0.95]
   prediction_step: 1
-  window_size: 100
+  window_size: 200
   calibration_size: 500
-  rolling_calibration: true
+  rolling_calibration: True
   # Options: dot_product, cos_similarity, euclidean (negative squared distance / temperature).
-  similarity_fn: "dot_product"
-  temperature: 0.1
+  similarity_fn: "cos_similarity"
+  temperature: 10.0
   sampling_num: 1000
+
 
 training:
   batch_size: 32
@@ -37,4 +41,5 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/lcp_transformer_lstm_sapflux_solo3_large/"
+
+saving_dir: "./results/lcp_transformer_${base_predictor}_sapflux_solo3_large/"

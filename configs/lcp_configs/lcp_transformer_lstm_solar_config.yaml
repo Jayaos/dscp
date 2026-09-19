@@ -3,7 +3,7 @@ base_predictor: lstm # choices: lr, lstm, chronos
 
 
 data:
-  data_path: "./data/sapflux-solo3-large/${base_predictor}/${base_predictor}_sapflux-solo3-large_data.pkl"
+  data_path: "./data/solar_prediction/${base_predictor}/${base_predictor}_nsdb-60m_data.pkl"
   train_ratio: 0.4
   valid_ratio: 0.1
   calibration_ratio: 0.16
@@ -13,8 +13,8 @@ data:
 
 
 model:
-  rnn_type: "lstm"
   dim_model: 64
+  num_heads: 4
   num_layers: 2
   dropout: 0.
   use_current_feature: False
@@ -33,7 +33,7 @@ model:
 
 training:
   batch_size: 32
-  learning_rate: 0.001
+  learning_rate: 0.0001
   epochs: 50
   early_stop: 3
 
@@ -42,4 +42,4 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/lcp_rnn_${base_predictor}_sapflux_solo3_large/"
+saving_dir: "./results/lcp_transformer_${base_predictor}_solar/"

@@ -1,5 +1,5 @@
 device: 0
-base_predictor: lstm # choices: lr, lstm, chronos
+base_predictor: lr # choices: lr, lstm, chronos
 
 
 data:
@@ -13,11 +13,11 @@ data:
 
 
 model:
-  rnn_type: "lstm"
-  dim_model: 64
-  num_layers: 2
+  dim_model: 32
+  num_heads: 2
+  num_layers: 4
   dropout: 0.
-  use_current_feature: False
+  use_current_feature: True
   training_quantiles: [0.1, 0.5, 0.9]
   target_quantiles:
     - [0.05, 0.95]
@@ -33,7 +33,7 @@ model:
 
 training:
   batch_size: 32
-  learning_rate: 0.001
+  learning_rate: 0.0001
   epochs: 50
   early_stop: 3
 
@@ -42,4 +42,4 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/lcp_rnn_${base_predictor}_sapflux_solo3_large/"
+saving_dir: "./results/lcp_transformer_${base_predictor}_sapflux_solo3_large/"

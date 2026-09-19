@@ -60,16 +60,21 @@ needs all three. Local-CP consumes the saved held-out forecasts and observations
 
 ## Configuration
 
-The dispatcher selects these templates for every base predictor, where
-`{encoder}` is `rnn` or `transformer`:
+The dispatcher selects the matching dataset, encoder, and predictor
+configuration, where `{encoder}` is `rnn` or `transformer` and `{predictor}`
+is `lr`, `lstm`, or `chronos`:
 
 | Dataset | Template |
 | --- | --- |
-| Air and Solar | `configs/lcp_configs/lcp_{encoder}_chronos_air_config.yaml` |
-| Sapflux | `configs/lcp_configs/lcp_{encoder}_lstm_sapflux_config.yaml` |
+| Air | `configs/lcp_configs/lcp_{encoder}_{predictor}_air_config.yaml` |
+| Solar | `configs/lcp_configs/lcp_{encoder}_{predictor}_solar_config.yaml` |
+| Sapflux | `configs/lcp_configs/lcp_{encoder}_{predictor}_sapflux_config.yaml` |
 
-These supply starting hyperparameters; the arrays do not perform a
-hyperparameter search for the additional dataset/predictor combinations.
+The Solar and Sapflux configurations were initialized from the corresponding
+Air configuration, preserving all hyperparameters and data split settings.
+Only the dataset path and ordinary output directory differ. These are separate
+YAML files; later edits to an Air configuration do not automatically update
+the other datasets. The arrays run the selected experiment configurations.
 The dispatcher sets the selected data path, `model.prediction_step: 1`,
 `saving_dir` and seed, and defaults `device` to `0` if absent.
 
@@ -81,7 +86,7 @@ preserves these settings:
 - `model.target_quantiles`: interval quantile pairs used for inference and
   evaluation, independently of the training levels.
 - `model.similarity_fn` and `model.temperature`: similarity weighting. Current
-  templates use `dot_product` and `0.1`. Supported choices are `dot_product`,
+  templates use `cos_similarity` and `10.0`. Supported choices are `dot_product`,
   `cos_similarity` and `euclidean`. Dot product and cosine multiply similarity
   by temperature before softmax; Euclidean uses negative squared distance
   divided by a positive temperature before softmax.

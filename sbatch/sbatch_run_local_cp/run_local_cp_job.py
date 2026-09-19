@@ -55,10 +55,7 @@ def main(argv=None):
         / predictor
         / f"{predictor}_{artifact_name}_data.pkl"
     )
-    if args.dataset == "sapflux":
-        template_name = f"lcp_{encoder}_lstm_sapflux_config.yaml"
-    else:
-        template_name = f"lcp_{encoder}_chronos_air_config.yaml"
+    template_name = f"lcp_{encoder}_{predictor}_{args.dataset}_config.yaml"
     template_path = REPO_ROOT / "configs" / "lcp_configs" / template_name
     output_dir = (
         args.output_root.expanduser().resolve()

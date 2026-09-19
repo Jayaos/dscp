@@ -1,5 +1,5 @@
 device: 0
-base_predictor: lstm # choices: lr, lstm, chronos
+base_predictor: lr # choices: lr, lstm, chronos
 
 
 data:
@@ -9,7 +9,7 @@ data:
   calibration_ratio: 0.16
   test_ratio: 0.34
   normalize: True
-  strided_features: "xry"
+  strided_features: "xr"
 
 
 model:
