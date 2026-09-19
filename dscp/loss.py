@@ -1,3 +1,6 @@
+import math
+from numbers import Real
+
 import torch
 from utils.utils import get_sorted_unique_quantiles
 
@@ -101,13 +104,58 @@ def _local_cp_quantile_loss(model, quantile_predictions, target):
     return torch.maximum((taus - 1.0) * errors, taus * errors).mean()
 
 
-def compute_loss_iqn_transformer(model, x, target, num_taus, current_feature=None):
+def resolve_iqn_validation_quantiles(training_config, target_quantiles):
+    """Resolve checkpoint loss without changing the sampled IQN training objective.
+
+    Target mode uses each distinct interval endpoint once. Sampled mode preserves
+    the legacy validation behavior and does not supply explicit quantile levels.
     """
-    Compute sampled quantile loss for an IQN Transformer.
+    mode = str(training_config.get("validation_loss", "sampled_quantiles")).strip().lower()
+    if mode not in ("sampled_quantiles", "target_quantiles"):
+        raise ValueError(
+            "training.validation_loss must be 'sampled_quantiles' or 'target_quantiles'."
+        )
+    if mode == "sampled_quantiles":
+        return mode, None
+
+    error = (
+        "model.target_quantiles must contain nonempty interval pairs of distinct, "
+        "finite quantile levels strictly between 0 and 1 for target_quantiles validation."
+    )
+    try:
+        pairs = list(target_quantiles)
+    except TypeError as exc:
+        raise ValueError(error) from exc
+    if not pairs:
+        raise ValueError(error)
+    levels = set()
+    for pair in pairs:
+        try:
+            endpoints = list(pair)
+        except TypeError as exc:
+            raise ValueError(error) from exc
+        if len(endpoints) != 2 or any(
+            isinstance(level, bool)
+            or not isinstance(level, Real)
+            or not math.isfinite(level)
+            or not 0.0 < level < 1.0
+            for level in endpoints
+        ):
+            raise ValueError(error)
+        if endpoints[0] == endpoints[1]:
+            raise ValueError(error)
+        levels.update(float(level) for level in endpoints)
+    return mode, sorted(levels)
+
+
+def compute_loss_iqn_transformer(model, x, target, num_taus, current_feature=None, *, taus=None):
+    """
+    Compute IQN pinball loss at sampled or explicitly requested quantile levels.
 
     :param x: input, (batch_size, window_size, feature_dim)
     :param target: target_residual, (batch_size, 1)
     :param num_taus: number of quantile fractions to sample per instance
+    :param taus: optional fixed levels; None preserves full-range sampled training
     """
     device = x.device
     target = target.to(device)
@@ -116,6 +164,7 @@ def compute_loss_iqn_transformer(model, x, target, num_taus, current_feature=Non
         x,
         current_feature=current_feature,
         num_taus=num_taus,
+        taus=taus,
         src_mask=causal_mask,
         src_key_padding_mask=None,
     )
@@ -125,13 +174,14 @@ def compute_loss_iqn_transformer(model, x, target, num_taus, current_feature=Non
     return loss_tensor.mean()
 
 
-def compute_loss_iqn_rnn(model, x, target, num_taus, current_feature=None):
+def compute_loss_iqn_rnn(model, x, target, num_taus, current_feature=None, *, taus=None):
     """
-    Compute sampled quantile loss for an IQN RNN.
+    Compute IQN pinball loss at sampled or explicitly requested quantile levels.
 
     :param x: input, (batch_size, window_size, feature_dim)
     :param target: target_residual, (batch_size, 1)
     :param num_taus: number of quantile fractions to sample per instance
+    :param taus: optional fixed levels; None preserves full-range sampled training
     """
     device = x.device
     target = target.to(device)
@@ -139,6 +189,7 @@ def compute_loss_iqn_rnn(model, x, target, num_taus, current_feature=None):
         x,
         current_feature=current_feature,
         num_taus=num_taus,
+        taus=taus,
     )
 
     errors = target - quantile_values

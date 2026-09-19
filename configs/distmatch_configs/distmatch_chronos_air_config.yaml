@@ -9,8 +9,7 @@ data:
   valid_ratio: 0.16
   test_ratio: 0.34
   # Scale residual inputs and targets using target statistics before evaluation.
-  normalize: true
-  normalization_mode: upstream_target
+  normalize_residual: true
 
 model:
   prediction_step: 1

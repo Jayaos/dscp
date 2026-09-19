@@ -8,7 +8,7 @@ from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
 from dscp.data import ConformalPredictionData
-from dscp.loss import compute_loss_iqn_rnn, compute_loss_iqn_transformer
+from dscp.loss import compute_loss_iqn_rnn, compute_loss_iqn_transformer, resolve_iqn_validation_quantiles
 from dscp.models.iqn import build_iqn_optimizer
 from dscp.models.iqn_rnn import IQNRNN
 from dscp.models.iqn_transformer import IQNTransformer
@@ -177,6 +177,14 @@ def _normalization_params(config, sequence_data):
 
 def _run_single_trial(config, sequence_item, normalization_params):
     device = resolve_device(config.device)
+    validation_mode, validation_quantiles = resolve_iqn_validation_quantiles(
+        config.training, config.model.target_quantiles
+    )
+    config.training.validation_loss = validation_mode
+    validation_kwargs = (
+        {"taus": torch.tensor(validation_quantiles, dtype=torch.float32, device=device)}
+        if validation_quantiles is not None else {}
+    )
     sorted_quantiles, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
     delta_threshold = float(config.tuning.get("delta_threshold", 0.0))
 
@@ -246,6 +254,7 @@ def _run_single_trial(config, sequence_item, normalization_params):
 
         model.eval()
         loss_sum = 0.0
+        validation_weight = 0
         for strided_x, strided_residual, strided_y, target_x, target_residual, _, _ in model_selection_valid_dataloader:
             strided_feature = generate_strided_feature(
                 strided_x,
@@ -257,12 +266,22 @@ def _run_single_trial(config, sequence_item, normalization_params):
             target_x = target_x.to(device)
             with torch.no_grad():
                 if use_current_feature:
-                    loss = loss_fn(model, strided_feature, target_residual, config.model.num_taus, target_x)
+                    loss = loss_fn(
+                        model, strided_feature, target_residual, config.model.num_taus,
+                        target_x, **validation_kwargs,
+                    )
                 else:
-                    loss = loss_fn(model, strided_feature, target_residual, config.model.num_taus)
-            loss_sum += loss.item()
+                    loss = loss_fn(
+                        model, strided_feature, target_residual, config.model.num_taus,
+                        **validation_kwargs,
+                    )
+            # Fixed-target loss weights each observation equally; sampled mode
+            # retains the legacy mean over batches.
+            weight = target_residual.shape[0] if validation_quantiles is not None else 1
+            loss_sum += loss.item() * weight
+            validation_weight += weight
 
-        epoch_valid_loss = loss_sum / len(model_selection_valid_dataloader)
+        epoch_valid_loss = loss_sum / validation_weight
         model_selection_valid_loss.append(float(epoch_valid_loss))
 
         if epoch_valid_loss < best_loss:
@@ -340,6 +359,8 @@ def _run_single_trial(config, sequence_item, normalization_params):
     return {
         "model_type": model_type,
         "prediction_head": model.prediction_head,
+        "validation_loss": validation_mode,
+        "validation_quantiles": validation_quantiles,
         "train_loss": train_loss,
         "model_fit_train_loss": train_loss,
         "model_selection_valid_loss": model_selection_valid_loss,
@@ -393,9 +414,14 @@ def _run_grid_trial(
 ):
     """Evaluate one configuration on every selected sequence, in their original order."""
     _synchronize_shared_dimensions(trial_config)
+    validation_mode, validation_quantiles = resolve_iqn_validation_quantiles(
+        trial_config.training, trial_config.model.target_quantiles
+    )
+    trial_config.training.validation_loss = validation_mode
     print(
         f"[iqn_cp] starting trial {trial_index} on device={trial_config.get('device', 'default')} "
-        f"with grid_values={grid_values}",
+        f"with grid_values={grid_values}; validation_loss={validation_mode}, "
+        f"validation_quantiles={validation_quantiles}",
         flush=True,
     )
     set_global_seed(seed + trial_index)
@@ -413,6 +439,8 @@ def _run_grid_trial(
     }
     result = aggregate_sequence_results(sequence_results, trial_config.model.target_quantiles)
     result["prediction_head"] = sequence_results[sequence_keys[0]]["prediction_head"]
+    result["validation_loss"] = validation_mode
+    result["validation_quantiles"] = validation_quantiles
     result["mean_best_model_selection_valid_loss"] = result["mean_best_valid_loss"]
     result["evaluation_split"] = "nominal_validation"
     result["final_test_evaluated"] = False

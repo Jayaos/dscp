@@ -67,6 +67,14 @@ class DistMatchCLITests(unittest.TestCase):
             self.assertTrue(Path(config.data.data_path).is_absolute())
             self.assertFalse(Path(config.saving_dir).exists())
 
+    def test_dry_run_preserves_normalize_residual_setting(self):
+        for enabled in (True, False):
+            with self.subTest(enabled=enabled), tempfile.TemporaryDirectory() as directory:
+                config_path = self._config(directory, **{"data.normalize_residual": enabled})
+                with contextlib.redirect_stdout(io.StringIO()):
+                    config = cli.main([str(config_path), "--dry-run"])
+                self.assertIs(config.data.normalize_residual, enabled)
+
     def test_relative_paths_resolve_against_repository_root(self):
         with tempfile.TemporaryDirectory() as directory:
             config_path = self._config(directory, **{
@@ -118,7 +126,8 @@ class DistMatchCLITests(unittest.TestCase):
             {"data.test_ratio": 0.5}, {"data.train_ratio": -0.5},
             {"num_cores": 0}, {"num_cores": True}, {"num_cores": 1.5},
             {"threads_per_worker": 0}, {"model.prediction_step": 2},
-            {"data.normalization_mode": "unknown"},
+            {"data.normalize_residual": "true"}, {"data.normalize_residual": 1},
+            {"data.normalize": True}, {"data.normalization_mode": "upstream_target"},
         )
         for updates in cases:
             with self.subTest(updates=updates), tempfile.TemporaryDirectory() as directory:
@@ -161,8 +170,7 @@ main(sys.argv[1:])
                 _, config = cli.resolve_config(args)
                 self.assertEqual(config.num_cores, OmegaConf.load(path).num_cores)
                 self.assertEqual(config.threads_per_worker, 1)
-                self.assertTrue(config.data.normalize)
-                self.assertEqual(config.data.normalization_mode, "upstream_target")
+                self.assertIs(config.data.normalize_residual, True)
                 self.assertEqual(config.model.past_window_len, 100)
                 self.assertTrue(Path(config.data.data_path).is_relative_to(REPO_ROOT))
         for dataset, num_sequences in (("air", 3), ("solar", 10), ("sapflux", 5)):

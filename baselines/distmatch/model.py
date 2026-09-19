@@ -89,6 +89,8 @@ class DistMatchResidualIntervalEstimator:
     """Fit fixed distribution-matching trees and update their leaf memories.
 
     ``fit`` accepts a chronological calibration prefix of signed residuals.
+    Inputs, targets, observations, and returned quantiles share the supplied
+    residual units. The data loader handles optional scaling before ``fit``.
     ``predict_intervals`` uses only its last observed residual window and does
     not advance memory or random streams. Call ``observe`` once per newly
     available outcome, after making all intervals for that time step.
@@ -148,14 +150,12 @@ class DistMatchResidualIntervalEstimator:
             ) from exc
         return RandomForestQuantileRegressor
 
-    def fit(self, residuals, normalize=False, progress=None):
-        """Build the initial partition; normalization statistics stay frozen.
+    def fit(self, residuals, *, progress=None):
+        """Build the initial partition in the supplied residual units.
 
         Optional ``progress(stage, completed, total)`` reports matching pair
         comparisons and completed trees. Cached matching is skipped.
         """
-        if not isinstance(normalize, (bool, np.bool_)):
-            raise ValueError("normalize must be a boolean.")
         residuals = np.asarray(residuals)
         if residuals.ndim == 2 and residuals.shape[1] == 1:
             residuals = residuals[:, 0]
@@ -171,21 +171,11 @@ class DistMatchResidualIntervalEstimator:
                 "yield at least one bootstrapped training pair."
             )
         self._fitted = False
-        mean = float(residuals.mean()) if normalize else 0.0
-        std = float(residuals.std()) if normalize else 1.0
-        if not np.isfinite(mean) or not np.isfinite(std):
-            raise ValueError("Calibration normalization statistics must be finite.")
-        self._input_mean = mean
-        self._input_std = std if std > 0 else 1.0
-        normalized = (residuals - self.input_mean) / self.input_std
-        if not np.isfinite(normalized).all():
-            raise ValueError("Residuals cannot be represented after normalization.")
-        patches = np.ascontiguousarray(sliding_window_view(normalized, self.past_window_len)[:-1])
+        patches = np.ascontiguousarray(sliding_window_view(residuals, self.past_window_len)[:-1])
         self._patches = [row.copy() for row in patches]
-        # Keep targets in original units; optional normalization only scales QRF
-        # inputs and KS windows, never the returned residual quantiles.
+        # Data preparation supplies both windows and targets in the same units.
         self._targets = residuals[self.past_window_len:].tolist()
-        self._history = normalized[-self.past_window_len:].copy()
+        self._history = residuals[-self.past_window_len:].copy()
         self._calibration_size = len(residuals)
         self._training_pair_count = n_pairs
         self._observed_updates = 0
@@ -232,7 +222,7 @@ class DistMatchResidualIntervalEstimator:
     def _match_matrix(self, sorted_patches, progress=None):
         settings = dict(
             version=_CACHE_VERSION, window=self.past_window_len,
-            threshold=self.match_threshold, mean=self.input_mean, std=self.input_std,
+            threshold=self.match_threshold,
             shape=sorted_patches.shape,
         )
         digest = hashlib.sha256(json.dumps(settings, sort_keys=True).encode("utf-8"))
@@ -439,14 +429,11 @@ class DistMatchResidualIntervalEstimator:
         }
 
     def observe(self, residual):
-        """Insert one new (pre-observation window, raw residual) pair per tree."""
+        """Insert one new window/target pair in the same residual units as fit."""
         self._require_fit()
         if isinstance(residual, (bool, np.bool_)) or not isinstance(residual, Real) or not np.isfinite(residual):
             raise ValueError("residual must be a finite number.")
         residual = float(residual)
-        normalized = (residual - self.input_mean) / self.input_std
-        if not np.isfinite(normalized):
-            raise ValueError("Residual cannot be represented after normalization.")
         sorted_query = np.sort(self._history)[None, :]
         ranks = _tie_ranks(sorted_query)
         leaves = [self._route(tree, sorted_query, ranks) for tree in self._trees]
@@ -456,17 +443,9 @@ class DistMatchResidualIntervalEstimator:
         for leaf in leaves:
             leaf.member_ids.append(new_id)
         self._history[:-1] = self._history[1:]
-        self._history[-1] = normalized
+        self._history[-1] = residual
         self._observed_updates += 1
         return self
-
-    @property
-    def input_mean(self):
-        return self._input_mean
-
-    @property
-    def input_std(self):
-        return self._input_std
 
     @property
     def memory_size(self):
@@ -483,8 +462,7 @@ class DistMatchResidualIntervalEstimator:
         return dict(
             upstream_commit=UPSTREAM_COMMIT, calibration_size=self._calibration_size,
             training_pair_count=self._training_pair_count, memory_size=self.memory_size,
-            observed_updates=self._observed_updates, input_mean=self.input_mean,
-            input_std=self.input_std, tree_depths=self.tree_depths,
+            observed_updates=self._observed_updates, tree_depths=self.tree_depths,
             tree_leaf_counts=[len(tree.leaves) for tree in self._trees],
             leaf_sizes=[[len(leaf.member_ids) for leaf in tree.leaves] for tree in self._trees],
             cache=dict(self._cache_info), fixed_tree_structure=True,

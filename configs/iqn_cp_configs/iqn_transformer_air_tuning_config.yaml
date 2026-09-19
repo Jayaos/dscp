@@ -11,6 +11,7 @@ grid:
   training.learning_rate: [0.0001]
   training.epochs: [50]
   training.early_stop: [3]
+  training.validation_loss: [target_quantiles] # Add sampled_quantiles to compare legacy random-level validation.
 
 tuning:
   num_gpus: 2 # 1: sequential; >1: parallel trials (allocate matching GPUs in Slurm)

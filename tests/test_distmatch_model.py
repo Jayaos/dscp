@@ -180,17 +180,16 @@ class DistMatchModelTests(unittest.TestCase):
             self.assertEqual(sum(len(leaf.member_ids) for leaf in tree.leaves), original + 1)
             self.assertEqual(sum(leaf.member_ids.count(model.memory_size - 1) for leaf in tree.leaves), 1)
 
-    def test_normalization_is_frozen_and_targets_remain_in_raw_units(self):
-        model = self.model().fit(self.RESIDUALS * 10 + 70, normalize=True)
-        mean, std = model.input_mean, model.input_std
-        self.assertAlmostEqual(mean, np.mean(self.RESIDUALS * 10 + 70))
-        self.assertAlmostEqual(std, np.std(self.RESIDUALS * 10 + 70))
-        np.testing.assert_array_equal(model._targets, self.RESIDUALS[3:] * 10 + 70)
+    def test_supplied_residual_units_are_preserved_during_fit_and_observe(self):
+        residuals = self.RESIDUALS * 10 + 70
+        model = self.model().fit(residuals)
+        np.testing.assert_array_equal(model._patches[0], residuals[:3])
+        np.testing.assert_array_equal(model._targets, residuals[3:])
+        np.testing.assert_array_equal(model._history, residuals[-3:])
         model.observe(10000.0)
-        self.assertEqual(model.input_mean, mean)
-        self.assertEqual(model.input_std, std)
+        np.testing.assert_array_equal(model._patches[-1], residuals[-3:])
         self.assertEqual(model._targets[-1], 10000.0)
-        self.assertEqual(model._history[-1], (10000 - mean) / std)
+        self.assertEqual(model._history[-1], 10000.0)
 
     def test_qrf_endpoints_match_independent_scipy_tree_reference(self):
         from sklearn_quantile import RandomForestQuantileRegressor
@@ -364,8 +363,7 @@ class DistMatchModelTests(unittest.TestCase):
         for values in ([1, 2, 3], [1, 2, 3, 4], [1, 2, np.nan, 4, 5]):
             with self.assertRaises(ValueError):
                 self.model().fit(values)
-        model = self.model().fit([5.0] * 10, normalize=True)
-        self.assertEqual(model.input_std, 1.0)
+        model = self.model().fit([5.0] * 10)
         result = model.predict_intervals([(0.1, 0.9)])[(0.1, 0.9)]
         self.assertEqual(result[:2], (5.0, 5.0))
         with self.assertRaises(ValueError):

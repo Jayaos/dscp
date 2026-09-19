@@ -8,7 +8,7 @@ from dscp.models.iqn_transformer import IQNTransformer
 from dscp.models.iqn_rnn import IQNRNN
 from dscp.models.iqn import build_iqn_optimizer
 from dscp.data import ConformalPredictionData
-from dscp.loss import compute_loss_iqn_transformer, compute_loss_iqn_rnn
+from dscp.loss import compute_loss_iqn_transformer, compute_loss_iqn_rnn, resolve_iqn_validation_quantiles
 from utils.utils import load_data, save_data, read_setup, generate_strided_feature, get_interval_quantile_indices
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, construct_interval_endpoints, summarize_evaluation_results
 from utils.plotting import plot_cp_prediction_intervals
@@ -72,6 +72,10 @@ def run_transformer_iqn_cp(config_path):
 
     config = OmegaConf.load(config_path)
     _materialize_prediction_head_selector(config.model)
+    validation_mode, validation_quantiles = resolve_iqn_validation_quantiles(
+        config.training, config.model.target_quantiles
+    )
+    config.training.validation_loss = validation_mode
     os.makedirs(config.saving_dir, exist_ok=True)
     _save_resolved_config(config)
 
@@ -85,11 +89,16 @@ def run_transformer_iqn_cp(config_path):
                                              config.data.valid_ratio,
                                              normalize=config.data.normalize)
     device = config.device
+    validation_kwargs = (
+        {"taus": torch.tensor(validation_quantiles, dtype=torch.float32, device=device)}
+        if validation_quantiles is not None else {}
+    )
     sorted_quantiles, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
     log = dict()
 
     print("Experiment setup")
     print("Method: IQN - Transformer")
+    print("Validation/checkpoint loss: {} (levels: {})".format(validation_mode, validation_quantiles))
     print("Prediction head: {}".format(
         config.model.get("prediction_head", "cosine_embedding")
     ))
@@ -181,6 +190,7 @@ def run_transformer_iqn_cp(config_path):
             print("training loss at epoch {}: {}".format(i + 1, epoch_train_loss))
 
             loss_sum = 0.0
+            validation_weight = 0
             iqn_transformer.eval()
             for strided_x, strided_residual, strided_y, target_x, target_residual, _, _ in tqdm(valid_dataloader):
 
@@ -199,6 +209,7 @@ def run_transformer_iqn_cp(config_path):
                             target_residual,
                             config.model.num_taus,
                             target_x,
+                            **validation_kwargs,
                         )
                     else:
                         loss = compute_loss_iqn_transformer(
@@ -206,10 +217,15 @@ def run_transformer_iqn_cp(config_path):
                             strided_feature,
                             target_residual,
                             config.model.num_taus,
+                            **validation_kwargs,
                         )
-                loss_sum += loss.item()
+                # Fixed-target loss is averaged over observations, including a
+                # short last batch. Keep sampled mode's legacy batch averaging.
+                weight = target_residual.shape[0] if validation_quantiles is not None else 1
+                loss_sum += loss.item() * weight
+                validation_weight += weight
 
-            epoch_valid_loss = loss_sum / len(valid_dataloader)
+            epoch_valid_loss = loss_sum / validation_weight
             valid_loss.append(epoch_valid_loss)
             print("validation loss at epoch {}: {}".format(i + 1, epoch_valid_loss))
 
@@ -339,8 +355,12 @@ def run_transformer_iqn_cp(config_path):
 
         log[key] = {"prediction_head": iqn_transformer.prediction_head,
                     "model_config": OmegaConf.to_container(config.model, resolve=True),
+                    "validation_loss": validation_mode,
+                    "validation_quantiles": validation_quantiles,
                     "train_loss": train_loss,
                     "valid_loss": valid_loss,
+                    "best_epoch": best_epoch,
+                    "best_valid_loss": float(best_loss),
                     "evaluation_results": evaluation_results}
 
         torch.save(best_model, os.path.join(config.saving_dir, key + '_model.pt'))
@@ -380,6 +400,10 @@ def run_rnn_iqn_cp(config_path):
 
     config = OmegaConf.load(config_path)
     _materialize_prediction_head_selector(config.model)
+    validation_mode, validation_quantiles = resolve_iqn_validation_quantiles(
+        config.training, config.model.target_quantiles
+    )
+    config.training.validation_loss = validation_mode
     os.makedirs(config.saving_dir, exist_ok=True)
     _save_resolved_config(config)
 
@@ -393,11 +417,16 @@ def run_rnn_iqn_cp(config_path):
                                              config.data.valid_ratio,
                                              normalize=config.data.normalize)
     device = config.device
+    validation_kwargs = (
+        {"taus": torch.tensor(validation_quantiles, dtype=torch.float32, device=device)}
+        if validation_quantiles is not None else {}
+    )
     sorted_quantiles, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
     log = dict()
 
     print("Experiment setup")
     print("Method: IQN - RNN")
+    print("Validation/checkpoint loss: {} (levels: {})".format(validation_mode, validation_quantiles))
     print("Prediction head: {}".format(
         config.model.get("prediction_head", "cosine_embedding")
     ))
@@ -488,6 +517,7 @@ def run_rnn_iqn_cp(config_path):
             print("training loss at epoch {}: {}".format(i + 1, epoch_train_loss))
 
             loss_sum = 0.0
+            validation_weight = 0
             iqn_rnn.eval()
             for strided_x, strided_residual, strided_y, target_x, target_residual, _, _ in tqdm(valid_dataloader):
 
@@ -506,6 +536,7 @@ def run_rnn_iqn_cp(config_path):
                             target_residual,
                             config.model.num_taus,
                             target_x,
+                            **validation_kwargs,
                         )
                     else:
                         loss = compute_loss_iqn_rnn(
@@ -513,10 +544,15 @@ def run_rnn_iqn_cp(config_path):
                             strided_feature,
                             target_residual,
                             config.model.num_taus,
+                            **validation_kwargs,
                         )
-                loss_sum += loss.item()
+                # Fixed-target loss is averaged over observations, including a
+                # short last batch. Keep sampled mode's legacy batch averaging.
+                weight = target_residual.shape[0] if validation_quantiles is not None else 1
+                loss_sum += loss.item() * weight
+                validation_weight += weight
 
-            epoch_valid_loss = loss_sum / len(valid_dataloader)
+            epoch_valid_loss = loss_sum / validation_weight
             valid_loss.append(epoch_valid_loss)
             print("validation loss at epoch {}: {}".format(i + 1, epoch_valid_loss))
 
@@ -646,8 +682,12 @@ def run_rnn_iqn_cp(config_path):
 
         log[key] = {"prediction_head": iqn_rnn.prediction_head,
                     "model_config": OmegaConf.to_container(config.model, resolve=True),
+                    "validation_loss": validation_mode,
+                    "validation_quantiles": validation_quantiles,
                     "train_loss": train_loss,
                     "valid_loss": valid_loss,
+                    "best_epoch": best_epoch,
+                    "best_valid_loss": float(best_loss),
                     "evaluation_results": evaluation_results}
 
         torch.save(best_model, os.path.join(config.saving_dir, key + '_model.pt'))

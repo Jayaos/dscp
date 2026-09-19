@@ -41,7 +41,7 @@ class DistMatchTuningTests(unittest.TestCase):
                 "train_ratio": 0.5,
                 "valid_ratio": 0.2,
                 "test_ratio": 0.3,
-                "normalize": True,
+                "normalize_residual": True,
             },
             "model": {
                 "target_quantiles": [list(PAIR)],
@@ -78,7 +78,7 @@ class DistMatchTuningTests(unittest.TestCase):
         self.assertEqual(base.model.match_threshold, 0.1)
         for key in (
             "data.train_ratio", "data.valid_ratio", "data.test_ratio", "data.data_path",
-            "data.normalize", "model.target_quantiles", "model.prediction_step", "seed",
+            "data.normalize_residual", "model.target_quantiles", "model.prediction_step", "seed",
             "num_cores", "threads_per_worker", "model.unknown_setting",
         ):
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, "Keep the artifact"):
@@ -90,6 +90,9 @@ class DistMatchTuningTests(unittest.TestCase):
     def test_validation_only_dispatch_preserves_config_workers_splits_and_seed(self):
         with tempfile.TemporaryDirectory() as directory:
             base_path, grid_path = self._configs(directory)
+            base = OmegaConf.load(base_path)
+            del base.data.normalize_residual
+            OmegaConf.save(base, base_path)
             output = Path(directory) / "tuning"
             captured = []
 
@@ -99,6 +102,7 @@ class DistMatchTuningTests(unittest.TestCase):
                 self.assertEqual(config.num_cores, 3)
                 self.assertEqual(config.threads_per_worker, 2)
                 self.assertEqual(config.seed, 17)
+                self.assertIs(config.data.normalize_residual, True)
                 self.assertEqual((config.data.train_ratio, config.data.valid_ratio, config.data.test_ratio),
                                  (0.5, 0.2, 0.3))
                 self.assertEqual(list(data), ["station"])
@@ -122,12 +126,30 @@ class DistMatchTuningTests(unittest.TestCase):
             self.assertEqual(best.num_cores, 3)
             self.assertEqual(best.threads_per_worker, 2)
             self.assertEqual(best.seed, 17)
+            self.assertIs(best.data.normalize_residual, True)
             self.assertEqual(OmegaConf.to_container(best.data), captured[0]["data"])
             self.assertEqual(Path(best.saving_dir), output / "final_test")
             self.assertFalse((output / "final_test").exists())
             self.assertTrue((output / "trial_0001" / "resolved_config.yaml").is_file())
             self.assertTrue((output / "trial_0002" / "result.pkl").is_file())
             self.assertTrue((output / "tuning_results.pkl").is_file())
+
+    def test_invalid_normalization_settings_fail_before_loading_artifacts(self):
+        for updates in (
+            {"normalize_residual": None}, {"normalize_residual": 1},
+            {"normalize_residual": "true"}, {"normalize": True},
+            {"normalization_mode": "upstream_target"},
+        ):
+            with self.subTest(updates=updates), tempfile.TemporaryDirectory() as directory:
+                base_path, grid_path = self._configs(directory)
+                base = OmegaConf.load(base_path)
+                for name, value in updates.items():
+                    base.data[name] = value
+                OmegaConf.save(base, base_path)
+                with patch.object(tuning, "load_data") as load_data, \
+                        self.assertRaisesRegex(ValueError, "normalize_residual"):
+                    tuning.run_tuning(base_path, grid_path, Path(directory) / "tuning")
+                load_data.assert_not_called()
 
     def test_explicit_worker_and_seed_overrides_are_exported(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from baselines.distmatch.config import split_boundaries
+from baselines.distmatch.config import normalize_residual_enabled, split_boundaries
 
 
 def _sequence_array(values, name):
@@ -31,11 +31,9 @@ def _normalization(item, data_config, y, evaluation_start):
     (such as Chronos forecasts) use only the observed held-out prefix.
     torch.std in the upstream loader uses the sample standard deviation.
     """
-    mode = data_config.get("normalization_mode", "residual_inputs")
-    if not data_config.get("normalize", False):
-        mode = "none"
-    info = {"mode": mode, "target_mean": 0.0, "target_std": 1.0}
-    if mode != "upstream_target":
+    enabled = normalize_residual_enabled(data_config)
+    info = {"enabled": enabled, "target_mean": 0.0, "target_std": 1.0}
+    if not enabled:
         return info
     history = y[:evaluation_start]
     source = "heldout_y[:evaluation_start]"

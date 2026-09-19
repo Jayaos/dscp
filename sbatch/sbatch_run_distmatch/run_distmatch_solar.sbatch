@@ -4,9 +4,9 @@
 #SBATCH --array=0-2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=16G
-#SBATCH --time=24:00:00
+#SBATCH --cpus-per-task=50
+#SBATCH --mem=192G
+#SBATCH -t360
 #SBATCH --output=%x_%A_%a.out
 
 set -euo pipefail

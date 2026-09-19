@@ -26,6 +26,22 @@ MATCHING_DEFAULTS = {
 }
 
 
+def normalize_residual_enabled(data):
+    """Validate DistMatch's sole normalization switch, enabled by default."""
+    obsolete = sorted({"normalize", "normalization_mode"}.intersection(data))
+    if obsolete:
+        fields = ", ".join(f"data.{name}" for name in obsolete)
+        raise ValueError(
+            f"DistMatch no longer accepts {fields}. Replace the old normalization "
+            "settings with data.normalize_residual: true for target-standard-deviation "
+            "scaling, or false for raw residuals."
+        )
+    enabled = data.get("normalize_residual", True)
+    if not isinstance(enabled, bool):
+        raise ValueError("data.normalize_residual must be a boolean.")
+    return enabled
+
+
 def positive_integer(value, name, minimum=1):
     if isinstance(value, bool) or not isinstance(value, Integral) or value < minimum:
         raise ValueError(f"{name} must be an integer >= {minimum}.")
@@ -111,15 +127,7 @@ def validate_config(config, num_cores=None):
     if missing:
         raise ValueError(f"Missing DistMatch data settings: {missing}")
     validate_ratios(*(data[name] for name in names))
-    data.setdefault("normalize", False)
-    if not isinstance(data["normalize"], bool):
-        raise ValueError("data.normalize must be a boolean.")
-    # Preserve the original boolean's input-only behavior for existing configs.
-    data.setdefault("normalization_mode", "residual_inputs")
-    if data["normalization_mode"] not in ("residual_inputs", "upstream_target"):
-        raise ValueError(
-            "data.normalization_mode must be 'residual_inputs' or 'upstream_target'."
-        )
+    data["normalize_residual"] = normalize_residual_enabled(data)
     config["seed"] = positive_integer(config.get("seed", 2026), "seed", minimum=0)
     if config["seed"] >= 2**32:
         raise ValueError("seed must be smaller than 2**32.")

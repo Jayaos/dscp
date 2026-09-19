@@ -14,7 +14,10 @@ if str(REPO_ROOT) not in sys.path:
 import numpy as np
 from omegaconf import OmegaConf
 
-from baselines.distmatch.config import target_quantiles as configured_target_quantiles
+from baselines.distmatch.config import (
+    normalize_residual_enabled,
+    target_quantiles as configured_target_quantiles,
+)
 from sbatch.sbatch_run_tuning.common import (
     choose_sequence_keys,
     finalize_and_save_results,
@@ -185,6 +188,7 @@ def run_tuning(base_config_path, grid_config_path, save_dir, *, sequence_key=Non
     base_config_path, grid_config_path = Path(base_config_path).resolve(), Path(grid_config_path).resolve()
     save_dir = Path(save_dir).resolve()
     base_config = OmegaConf.load(base_config_path)
+    base_config.data.normalize_residual = normalize_residual_enabled(base_config.data)
     base_config.seed = _integer(
         base_config.get("seed", 2026) if seed is None else seed,
         "seed", minimum=0, maximum=2**32 - 1,

@@ -72,7 +72,7 @@ def _evaluate_sequence(key, item, config, split, progress):
     )
     started = time.perf_counter()
     estimator.fit(
-        prepared["train_residuals"], normalize=normalization["mode"] == "residual_inputs",
+        prepared["train_residuals"],
         progress=progress.update if config["show_progress"] else None,
     )
     training_seconds = time.perf_counter() - started
@@ -148,9 +148,7 @@ def _evaluate_sequence(key, item, config, split, progress):
             "seed": config["seed"],
             "sequence_seed": seed,
             "upstream_commit": UPSTREAM_COMMIT,
-            "input_mean": float(estimator.input_mean),
-            "input_std": float(estimator.input_std),
-            "normalize": config["data"]["normalize"],
+            "normalize_residual": config["data"]["normalize_residual"],
             "normalization": normalization,
             "interval_scale": "original_response",
             "residual_quantile_scale": "original_residual",

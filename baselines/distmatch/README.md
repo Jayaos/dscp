@@ -159,11 +159,14 @@ The LR, LSTM, and Chronos presets enable target-based residual scaling:
 
 ```yaml
 data:
-  normalize: true
-  normalization_mode: upstream_target
+  normalize_residual: true
 ```
 
-For validation, target statistics use `heldout_y[:train_end]`; for final test,
+`data.normalize_residual` defaults to `true` when omitted. Set it to `false`
+to use raw residuals throughout matching and quantile-forest fitting. Raw-residual
+runs ignore `train_y` and do not require normalization statistics.
+
+When normalization is enabled, validation statistics use `heldout_y[:train_end]`; for final test,
 they use `heldout_y[:validation_end]`, including observed validation history.
 When an entry contains `train_y`, that history is prepended. Entries without
 `train_y`, including existing Chronos artifacts, use only the observed held-out
@@ -181,23 +184,30 @@ standard deviation. The target mean cancels in
 on the target mean. Predicted residual quantiles are multiplied by the standard
 deviation before being added to the saved point forecasts. Interval endpoints,
 widths, and Winkler scores remain in the original target units. Per-series
-metadata records the normalization source, target mean, standard deviation,
+metadata records `normalize_residual` and `normalization.enabled`, with the
+enabled normalization's source, target mean, standard deviation,
 sample count, and held-out cutoff. Its `source` is
 `train_y + heldout_y[:evaluation_start]` when training history is supplied, or
 `heldout_y[:evaluation_start]` when the fallback is used.
 
-`normalization_mode` defaults to `residual_inputs` for compatibility. With
-`normalize: true`, that mode retains the earlier behavior: fit residual mean
-and standard deviation on the initial training residuals and transform input
-windows only; QRF targets and predicted residual quantiles remain in original
-units. With `normalize: false`, scaling is disabled.
+The former `data.normalize` and `data.normalization_mode` keys are rejected
+with a migration error. Replace `normalize: true` and
+`normalization_mode: upstream_target` with `normalize_residual: true`, or
+replace `normalize: false` with `normalize_residual: false`, removing both old
+keys. The former `residual_inputs` mode has been removed; choose either target
+standard-deviation scaling or raw residuals explicitly when migrating it.
 
-`upstream_target` follows the original target-scaling formula within the
+Residual normalization follows the original target-scaling formula within the
 saved-forecast workflow. Its historical population uses the available prefix;
 the fallback omits any pre-forecast context that was not saved. It does not
 retrain the base predictor on standardized features and targets, and therefore
 does not reproduce the original forecasting pipeline. Artifact alignment and
 split boundaries are unchanged.
+
+The estimator core consumes the residual units supplied to `fit` and `observe`
+without an additional normalization option. The data preparation and experiment
+runner apply the configured scaling and restore predicted quantiles to original
+units.
 
 ## Matching cache and memory
 

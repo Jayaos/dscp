@@ -19,7 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PAIRS = ((0.05, 0.95), (0.1, 0.9))
 
 
-def _config(normalize=True, mode="upstream_target"):
+def _config(normalize_residual=True):
     return {
         "seed": 37,
         "num_cores": 1,
@@ -27,7 +27,7 @@ def _config(normalize=True, mode="upstream_target"):
         "show_progress": False,
         "data": {
             "train_ratio": 0.5, "valid_ratio": 0.25, "test_ratio": 0.25,
-            "normalize": normalize, "normalization_mode": mode,
+            "normalize_residual": normalize_residual,
         },
         "model": {
             "past_window_len": 3, "match_threshold": 0.5,
@@ -63,16 +63,44 @@ def _target_stats(item, start):
 
 
 class DistMatchNormalizationTests(unittest.TestCase):
-    def test_config_preserves_legacy_default_and_validates_mode(self):
+    def test_normalization_defaults_to_true_and_requires_a_boolean(self):
         config = _config()
-        del config["data"]["normalization_mode"]
-        self.assertEqual(validate_config(config)["data"]["normalization_mode"], "residual_inputs")
-        for mode in ("upstream_target", "residual_inputs"):
-            with self.subTest(mode=mode):
-                self.assertEqual(validate_config(_config(mode=mode))["data"]["normalization_mode"], mode)
-        for mode in ("target", "", True, None, 1):
-            with self.subTest(mode=mode), self.assertRaisesRegex(ValueError, "normalization_mode"):
-                validate_config(_config(mode=mode))
+        del config["data"]["normalize_residual"]
+        self.assertIs(validate_config(config)["data"]["normalize_residual"], True)
+        default = prepare_sequence(_artifact(), config)
+        explicit = prepare_sequence(_artifact(), _config(True))
+        self.assertEqual(default["normalization"], explicit["normalization"])
+        np.testing.assert_array_equal(default["train_residuals"], explicit["train_residuals"])
+        for enabled in (True, False):
+            with self.subTest(enabled=enabled):
+                self.assertIs(validate_config(_config(enabled))["data"]["normalize_residual"], enabled)
+        for invalid in ("true", "false", "", None, 0, 1, [], {}):
+            for path in ("validate_config", "prepare_sequence"):
+                with self.subTest(invalid=invalid, path=path), self.assertRaisesRegex(ValueError, "normalize_residual"):
+                    if path == "validate_config":
+                        validate_config(_config(invalid))
+                    else:
+                        prepare_sequence(_artifact(), _config(invalid))
+
+    def test_obsolete_normalization_settings_require_explicit_migration(self):
+        for old_settings in (
+            {"normalize": True}, {"normalize": False},
+            {"normalization_mode": "upstream_target"},
+            {"normalization_mode": "residual_inputs"},
+            {"normalize": False, "normalization_mode": "residual_inputs"},
+        ):
+            for include_new_key in (True, False):
+                config = _config()
+                if not include_new_key:
+                    del config["data"]["normalize_residual"]
+                config["data"].update(old_settings)
+                for path in ("validate_config", "prepare_sequence"):
+                    with self.subTest(old_settings=old_settings, include_new_key=include_new_key, path=path), \
+                            self.assertRaisesRegex(ValueError, "normalize_residual"):
+                        if path == "validate_config":
+                            validate_config(config)
+                        else:
+                            prepare_sequence(_artifact(), config)
 
     def test_preparation_matches_independent_torch_sample_statistics(self):
         for with_train_y in (True, False):
@@ -83,7 +111,7 @@ class DistMatchNormalizationTests(unittest.TestCase):
                     prepared = prepare_sequence(item, _config(), split=split)
                     mean, std = _target_stats(item, start)
                     metadata = prepared["normalization"]
-                    self.assertEqual(metadata["mode"], "upstream_target")
+                    self.assertIs(metadata["enabled"], True)
                     self.assertAlmostEqual(metadata["target_mean"], mean)
                     self.assertAlmostEqual(metadata["target_std"], std)
                     self.assertEqual(metadata["fit_size"], len(item.get("train_y", [])) + start)
@@ -129,16 +157,17 @@ class DistMatchNormalizationTests(unittest.TestCase):
 
     def test_runner_restores_raw_units_against_manually_scaled_estimator(self):
         for with_train_y in (True, False):
-            with self.subTest(with_train_y=with_train_y):
-                self._assert_runner_restores_raw_units(_artifact(with_train_y))
+            for normalize_residual in (True, False):
+                with self.subTest(with_train_y=with_train_y, normalize_residual=normalize_residual):
+                    self._assert_runner_restores_raw_units(_artifact(with_train_y), normalize_residual)
 
-    def _assert_runner_restores_raw_units(self, item):
-        config = _config()
-        _, std = _target_stats(item, 18)
+    def _assert_runner_restores_raw_units(self, item, normalize_residual):
+        config = _config(normalize_residual)
+        std = _target_stats(item, 18)[1] if normalize_residual else 1.0
         residuals = (item["heldout_y"] - item["heldout_predictions"][:, 0]) / std
         options = {name: value for name, value in config["model"].items() if name != "target_quantiles"}
         reference = DistMatchResidualIntervalEstimator(seed=sequence_seed(config["seed"], "station"), **options)
-        reference.fit(residuals[:12], normalize=False)
+        reference.fit(residuals[:12])
         for residual in residuals[12:18]:
             reference.observe(float(residual))
         expected = {pair: [] for pair in PAIRS}
@@ -151,8 +180,7 @@ class DistMatchNormalizationTests(unittest.TestCase):
 
         actual = evaluate_sequence("station", item, config)
         self.assertEqual(actual["metadata"]["normalization"], prepare_sequence(item, config)["normalization"])
-        self.assertEqual(actual["metadata"]["input_mean"], 0)
-        self.assertEqual(actual["metadata"]["input_std"], 1)
+        self.assertIs(actual["metadata"]["normalize_residual"], normalize_residual)
         for pair, quantiles in expected.items():
             with self.subTest(pair=pair):
                 result = actual["evaluation_results"][pair]
@@ -232,9 +260,8 @@ class DistMatchNormalizationTests(unittest.TestCase):
         self.assertAlmostEqual(prepared["normalization"]["target_mean"], mean)
         self.assertAlmostEqual(prepared["normalization"]["target_std"], std)
 
-    def test_legacy_input_scaling_ignores_training_targets(self):
-        config = _config()
-        del config["data"]["normalization_mode"]
+    def test_disabled_normalization_ignores_training_targets(self):
+        config = _config(False)
         item = _artifact()
         item["train_y"][:] = np.nan
         baseline = evaluate_sequence("station", item, config)
@@ -242,24 +269,21 @@ class DistMatchNormalizationTests(unittest.TestCase):
         actual = evaluate_sequence("station", item, config)
         self.assertEqual(actual["evaluation_results"], baseline["evaluation_results"])
         residuals = item["heldout_y"] - item["heldout_predictions"][:, 0]
-        self.assertAlmostEqual(actual["metadata"]["input_mean"], residuals[:12].mean())
-        self.assertAlmostEqual(actual["metadata"]["input_std"], residuals[:12].std())
+        self.assertIs(actual["metadata"]["normalize_residual"], False)
+        self.assertIs(actual["metadata"]["normalization"]["enabled"], False)
         np.testing.assert_array_equal(prepare_sequence(item, config)["train_residuals"], residuals[:12])
 
-    def test_normalize_false_disables_target_scaling_and_training_history_requirement(self):
-        item = _artifact()
-        del item["train_y"]
-        config = _config(normalize=False)
+    def test_disabled_normalization_preserves_raw_residuals_and_unit_scale(self):
+        item = _artifact(False)
+        config = _config(False)
         prepared = prepare_sequence(item, config)
         residuals = item["heldout_y"] - item["heldout_predictions"][:, 0]
         np.testing.assert_array_equal(prepared["train_residuals"], residuals[:12])
         np.testing.assert_array_equal(prepared["warmup_residuals"], residuals[12:18])
         np.testing.assert_array_equal(prepared["residuals"], residuals[18:])
-        actual = evaluate_sequence("station", item, config)
-        expected = evaluate_sequence("station", item, _config(normalize=False, mode="residual_inputs"))
-        self.assertEqual(actual["evaluation_results"], expected["evaluation_results"])
-        self.assertEqual(actual["metadata"]["input_mean"], 0)
-        self.assertEqual(actual["metadata"]["input_std"], 1)
+        self.assertIs(prepared["normalization"]["enabled"], False)
+        self.assertEqual(prepared["normalization"]["target_mean"], 0)
+        self.assertEqual(prepared["normalization"]["target_std"], 1)
 
 
 if __name__ == "__main__":

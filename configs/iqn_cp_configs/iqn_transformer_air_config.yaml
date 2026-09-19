@@ -35,6 +35,7 @@ training:
   learning_rate: 0.001
   epochs: 50
   early_stop: 3
+  validation_loss: "target_quantiles"
 
 
 plotting:

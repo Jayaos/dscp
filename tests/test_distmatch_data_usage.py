@@ -22,7 +22,7 @@ def config():
         "seed": 37,
         "num_cores": 1,
         "threads_per_worker": 1,
-        "data": {"train_ratio": 0.5, "valid_ratio": 0.2, "test_ratio": 0.3, "normalize": True},
+        "data": {"train_ratio": 0.5, "valid_ratio": 0.2, "test_ratio": 0.3, "normalize_residual": False},
         "model": {
             "past_window_len": 3, "match_threshold": 0.5,
             "n_trees": 2, "qrf_n_estimators": 2, "qrf_max_depth": 2,
@@ -37,7 +37,7 @@ def artifact(length=40):
     return {
         "heldout_y": predictions + 2 + np.sin(t * 0.8),
         "heldout_predictions": predictions[:, None],
-        # Neither covariates nor the point predictor's fitting data is needed.
+        # Covariates and historical targets are not used with normalization off.
         "heldout_x": np.full((length, 2), np.nan),
         "train_y": np.full(25, np.nan),
     }
@@ -87,17 +87,20 @@ def test_mixed_shapes_slice_before_subtracting():
 
 def test_poisoned_reserved_test_does_not_change_validation_or_scaler():
     item = artifact()
-    baseline = evaluate_sequence("a", item, config(), split="validation")
+    del item["train_y"]
+    cfg = config()
+    cfg["data"]["normalize_residual"] = True
+    baseline = evaluate_sequence("a", item, cfg, split="validation")
     changed = copy.deepcopy(item)
     changed["heldout_y"][28:] = np.nan
     changed["heldout_predictions"][28:] = np.inf
-    actual = evaluate_sequence("a", changed, config(), split="validation")
+    actual = evaluate_sequence("a", changed, cfg, split="validation")
     assert actual["evaluation_results"] == baseline["evaluation_results"]
-    for name in ("input_mean", "input_std", "initial_memory_size", "final_memory_size"):
+    for name in ("normalization", "initial_memory_size", "final_memory_size"):
         assert actual["metadata"][name] == baseline["metadata"][name]
-    expected = item["heldout_y"][:20] - item["heldout_predictions"][:20, 0]
-    assert actual["metadata"]["input_mean"] == pytest.approx(expected.mean())
-    assert actual["metadata"]["input_std"] == pytest.approx(expected.std())
+    expected = item["heldout_y"][:20]
+    assert actual["metadata"]["normalization"]["target_mean"] == pytest.approx(expected.mean())
+    assert actual["metadata"]["normalization"]["target_std"] == pytest.approx(expected.std(ddof=1))
 
 
 def test_current_target_does_not_change_issued_interval_and_updates_once():
@@ -165,7 +168,8 @@ def test_native_thread_limits_hold_during_real_qrf_fits():
         DistMatchResidualIntervalEstimator._load_qrf = staticmethod(inspect_load)
         cfg = {
             'num_cores': 1, 'threads_per_worker': 1,
-            'data': {'train_ratio': .5, 'valid_ratio': .2, 'test_ratio': .3},
+            'data': {'train_ratio': .5, 'valid_ratio': .2, 'test_ratio': .3,
+                     'normalize_residual': False},
             'model': {'past_window_len': 3, 'n_trees': 1, 'qrf_n_estimators': 2},
         }
         evaluate_sequence('a', {'heldout_y': np.sin(np.arange(30)),

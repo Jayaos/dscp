@@ -43,14 +43,16 @@ observations then enter their leaves in chronological order before final-test
 evaluation. Each new test residual becomes available only after its interval
 is issued. There is no additional calibration partition.
 
-The LR presets enable `data.normalize: true` with
-`data.normalization_mode: upstream_target`. This uses saved `train_y` and the
-held-out targets observed before the evaluated split to scale both residual
-windows and quantile-forest targets. Quantiles are converted back to the
-original units for intervals and metrics. Saved point forecasts are reused;
-the forecasting models are not retrained on standardized data. LSTM and
-Chronos presets keep normalization disabled. The guide documents the exact
-statistics and the compatible `residual_inputs` mode.
+All LR, LSTM, and Chronos presets enable `data.normalize_residual: true`, which
+is also the default when omitted. Target statistics use the held-out prefix
+observed before the evaluated split, with saved `train_y` prepended when
+available. Chronos artifacts without `train_y` use that held-out prefix alone.
+Both residual windows and quantile-forest targets are divided by the frozen
+target sample standard deviation; quantiles are restored to original units for
+intervals and metrics. Set `data.normalize_residual: false` to use raw residuals.
+Saved point forecasts are reused without retraining the forecasting models.
+The former `data.normalize` and `data.normalization_mode` keys are rejected;
+the guide documents migration and the exact statistics.
 
 From the repository root, after activating the environment defined in
 [`envs/env-distmatch.yml`](envs/env-distmatch.yml):
@@ -337,6 +339,29 @@ layers and `monotonic_num_layers` is K. An optional
 layer widths are wanted. Supported monotonic activations are `tanh`,
 `sigmoid`, and `softplus`. The `cos_emb_dim` setting is used only by the
 legacy cosine head.
+
+IQN training always minimizes pinball loss at uniformly sampled quantile
+levels, with `model.num_taus` samples per example. Checkpoint validation is
+configured separately through `training.validation_loss`:
+
+- `target_quantiles` averages pinball loss over validation observations and
+  the sorted distinct levels in `model.target_quantiles`. It evaluates the raw
+  prediction head directly at those levels for both head types. This exactly
+  matches deployed endpoint evaluation for `partially_monotonic`; for
+  `cosine_embedding`, it intentionally does not use the unchanged
+  sampling-based empirical rearrangement used at inference.
+- `sampled_quantiles` averages over fresh uniformly sampled levels and
+  preserves the legacy validation behavior. Configurations that omit
+  `training.validation_loss` also fall back to `sampled_quantiles` for
+  backward compatibility.
+
+The checked-in ordinary IQN configurations and tuning grids explicitly use
+`target_quantiles`. To compare the checkpoint criteria in one grid, use:
+
+```yaml
+grid:
+  training.validation_loss: [target_quantiles, sampled_quantiles]
+```
 
 The two head choices have different state-dictionary layouts, so a checkpoint
 must be reconstructed with the complete matching model configuration. Each

@@ -20,10 +20,10 @@ model:
   # Choose "partially_monotonic" or the legacy "cosine_embedding" IQN head.
   prediction_head: "partially_monotonic"
   iqn_hidden_dim: *shared_dim
-  monotonic_num_layers: 2
+  monotonic_num_layers: 1
   monotonic_activation: "tanh"
   cos_emb_dim: *shared_dim
-  num_taus: 64
+  num_taus: 16
   target_quantiles:
     - [0.95, 0.05]
   prediction_step: 1
@@ -35,6 +35,7 @@ training:
   learning_rate: 0.001
   epochs: 50
   early_stop: 3
+  validation_loss: "target_quantiles"
 
 
 plotting:

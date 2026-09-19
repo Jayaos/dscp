@@ -63,12 +63,12 @@ code details; it does not claim that the code and paper are interchangeable.
 - All requested quantile levels are evaluated with one leaf QRF fit per tree
   per `predict_intervals` call. Extra calls are deterministic and do not advance
   state. `observe` only appends a pair; the next prediction refits the leaf QRF.
-- Normalization has two explicit modes. The default `residual_inputs` preserves
-  the earlier `normalize: true` behavior: frozen initial-training residual
-  statistics transform input windows only, while QRF targets remain in original
-  residual units. `normalize: false` disables scaling in either mode.
-- The LR, LSTM, and Chronos presets enable `normalize: true` with
-  `normalization_mode: upstream_target`. Target statistics use the held-out
+- `data.normalize_residual` is the sole normalization setting and defaults to
+  `true`. All LR, LSTM, and Chronos presets enable it. Setting it to `false`
+  uses raw residuals for both input windows and QRF targets. The former
+  `data.normalize` and `data.normalization_mode` keys are rejected with a
+  migration error, and input-only residual standardization has been removed.
+- With residual normalization enabled, target statistics use the held-out
   prefix before the active evaluation split: `heldout_y[:train_end]` for
   validation or `heldout_y[:validation_end]` for final test. Saved `train_y` is
   prepended when present. Artifacts without it, including existing Chronos
@@ -84,17 +84,19 @@ code details; it does not claim that the code and paper are interchangeable.
   metadata records the statistics' source, mean, standard deviation, sample
   count, and held-out cutoff. The source explicitly distinguishes combined
   history from the held-out-prefix fallback.
-- This target mode follows the original residual normalization while retaining
+- This residual scaling follows the original normalization formula while retaining
   DSCP's saved forecasts, alignment, and chronological splits. It does not
   retrain the base predictor on the original standardized features and targets,
   so it does not reproduce upstream's full forecasting experiment. Nonfinite
-  inputs are rejected instead of silently replaced with zero.
+  inputs are rejected instead of silently replaced with zero. The estimator
+  core uses the supplied residual units without a normalization option; data
+  preparation and the runner handle scaling and restoration to original units.
 - Two-sample KS uses sorted equal-length windows and exact integer empirical
   CDF counts, including ties. Computation is blocked, and the pairwise cache is
   boolean. No quadratic floating-point distance matrix or tree-owned mask is
   retained. The initial cache still requires quadratic disk or memory space,
   and matching still requires quadratic pair comparisons.
-- With `cache_dir`, a fingerprint of sorted input windows, scaler statistics,
+- With `cache_dir`, a fingerprint of sorted input windows,
   window size, threshold, and cache algorithm version names a persistent `.npy`
   boolean memmap. Publication is atomic. Without a directory, fitting uses an
   in-memory boolean matrix within the memory budget, otherwise a temporary
