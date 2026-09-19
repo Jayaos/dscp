@@ -6,7 +6,7 @@
 #SBATCH --array=0-2
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=4G
-#SBATCH --t60
+#SBATCH -t60
 #SBATCH -qinferno
 #SBATCH -o Report-nexcp-sapflux-%A_%a.out
 #SBATCH --mail-type=ALL
