@@ -22,7 +22,7 @@ model:
   monotonic_num_layers: 1
   monotonic_activation: "tanh"
   cos_emb_dim: 32
-  num_taus: 16
+  num_taus: 512
   target_quantiles:
     - [0.95, 0.05]
   prediction_step: 1
