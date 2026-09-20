@@ -12,16 +12,16 @@ data:
 
 model:
   rnn_type: "lstm"
-  dim_model: 128
+  dim_model: 64
   num_layers: 1
   dropout: 0.
   use_current_feature: False
   # Choose "partially_monotonic" or the legacy "cosine_embedding" IQN head.
   prediction_head: "partially_monotonic"
-  iqn_hidden_dim: 128
+  iqn_hidden_dim: 64
   monotonic_num_layers: 1
   monotonic_activation: "tanh"
-  cos_emb_dim: 128
+  cos_emb_dim: 64
   num_taus: 64
   target_quantiles:
     - [0.95, 0.05]

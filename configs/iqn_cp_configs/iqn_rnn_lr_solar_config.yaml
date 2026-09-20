@@ -10,19 +10,21 @@ data:
   strided_features: "xry"
 
 
+
+
 model:
   rnn_type: "lstm"
-  dim_model: 16
-  num_layers: 2
+  dim_model: 64
+  num_layers: 1
   dropout: 0.
   use_current_feature: False
   # Choose "partially_monotonic" or the legacy "cosine_embedding" IQN head.
   prediction_head: "partially_monotonic"
-  iqn_hidden_dim: 16
+  iqn_hidden_dim: 64
   monotonic_num_layers: 1
   monotonic_activation: "tanh"
-  cos_emb_dim: 16
-  num_taus: 16
+  cos_emb_dim: 64
+  num_taus: 64
   target_quantiles:
     - [0.95, 0.05]
   prediction_step: 1
@@ -32,8 +34,8 @@ model:
 training:
   batch_size: 32
   learning_rate: 0.001
-  epochs: 50
-  early_stop: 3
+  epochs: 100
+  early_stop: 10
   validation_loss: "target_quantiles"
 
 
