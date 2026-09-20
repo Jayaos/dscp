@@ -15,7 +15,7 @@ data:
 model:
   prediction_step: 1
   target_quantiles:
-    - [0.05, 0.95]
+    - [0.025, 0.975]
   past_window_len: 100
   match_threshold: 0.1
   n_trees: 10

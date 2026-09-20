@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J distmatch_air
 #SBATCH --account=gts-yxie77-paid
-#SBATCH --array=0
+#SBATCH --array=0-2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12

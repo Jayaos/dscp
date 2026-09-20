@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J distmatch_solar
 #SBATCH --account=gts-yxie77-paid
-#SBATCH --array=0-1
+#SBATCH --array=0-2
 #SBATCH --nodes=3
 #SBATCH --ntasks=3
 #SBATCH --ntasks-per-node=1
