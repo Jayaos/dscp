@@ -39,4 +39,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/hopcpt/solar/chronos/"
+saving_dir: "./results/hopcpt/solar/chronos/${now:%Y-%m-%d_%H-%M-%S_%f}/"

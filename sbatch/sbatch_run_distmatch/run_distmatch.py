@@ -98,11 +98,12 @@ def validate_cpu_allocation(config, allocated_cpus):
 
 def resolve_config(args):
     from omegaconf import OmegaConf
+    from utils.experiment_config import load_experiment_config
 
     config_path = args.config_path.expanduser().resolve()
     if not config_path.is_file():
         raise ValueError(f"Experiment configuration does not exist: {config_path}")
-    config = OmegaConf.load(config_path)
+    config = load_experiment_config(config_path)
     if not OmegaConf.is_dict(config):
         raise ValueError("Experiment configuration must be a YAML mapping.")
     for field in ("seed", "num_cores", "threads_per_worker"):

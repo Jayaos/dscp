@@ -16,5 +16,5 @@ model:
   window_size: 100
 
 
-saving_dir: "./results/spci/air/chronos/toy/"
+saving_dir: "./results/spci/air/chronos/toy/${now:%Y-%m-%d_%H-%M-%S_%f}/"
 

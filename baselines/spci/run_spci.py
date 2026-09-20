@@ -1,4 +1,6 @@
 from omegaconf import OmegaConf
+
+from utils.experiment_config import load_experiment_config
 import os
 import random
 import torch
@@ -14,7 +16,7 @@ from utils.plotting import plot_cp_prediction_intervals
 
 def run_spci_experiment(config_path):
 
-    config = OmegaConf.load(config_path)
+    config = load_experiment_config(config_path)
     if config.get("seed", None) is not None:
         random.seed(config.seed)
         np.random.seed(config.seed)

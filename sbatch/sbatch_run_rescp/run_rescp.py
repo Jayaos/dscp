@@ -11,6 +11,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from omegaconf import OmegaConf
 
+from utils.experiment_config import load_experiment_config
+
 
 DATASETS = ("air", "solar", "sapflux")
 BASE_PREDICTORS = ("lr", "lstm", "chronos")
@@ -62,7 +64,7 @@ def resolve_config(args):
         )
     else:
         config_path = args.config_path.resolve()
-    config = OmegaConf.load(config_path)
+    config = load_experiment_config(config_path)
     if args.seed is not None:
         config.seed = args.seed
     seed = config.get("seed", 2026)

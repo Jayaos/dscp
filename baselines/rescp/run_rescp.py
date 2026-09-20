@@ -10,6 +10,8 @@ import time
 
 import numpy as np
 from omegaconf import OmegaConf
+
+from utils.experiment_config import load_experiment_config
 import torch
 
 from baselines.rescp.data import prepare_sequence
@@ -200,7 +202,7 @@ def evaluate_sequences(data, config, split="test", num_cores=1):
 
 def run_rescp(config_path, num_cores=1):
     """Run the fixed configuration on test and write standard DSCP artifacts."""
-    config = OmegaConf.load(config_path)
+    config = load_experiment_config(config_path)
     output_dir = Path(config.saving_dir)
     with open(config.data.data_path, "rb") as stream:
         data = pickle.load(stream)

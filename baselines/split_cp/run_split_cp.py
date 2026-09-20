@@ -11,6 +11,8 @@ import time
 
 import numpy as np
 from omegaconf import OmegaConf
+
+from utils.experiment_config import load_experiment_config
 import torch
 
 from baselines.split_cp.data import prepare_sequence, validate_split_settings
@@ -196,7 +198,7 @@ def evaluate_sequences(data, config, num_cores=None):
 def run_split_cp(config_path, num_cores=None):
     """Run a YAML path or configuration mapping and save standard DSCP artifacts."""
     config = validate_config(
-        OmegaConf.load(config_path) if isinstance(config_path, (str, Path)) else config_path,
+        load_experiment_config(config_path) if isinstance(config_path, (str, Path)) else config_path,
     )
     if num_cores is not None:
         config["num_cores"] = _positive_integer(num_cores, "num_cores")

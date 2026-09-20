@@ -11,6 +11,8 @@ import time
 
 import numpy as np
 from omegaconf import OmegaConf
+
+from utils.experiment_config import load_experiment_config
 from threadpoolctl import threadpool_limits
 import torch
 from tqdm import tqdm
@@ -291,7 +293,7 @@ def _write_run_results(config, log, metadata):
 
 def run_distmatch(config_path, num_cores=None):
     """Evaluate final test and save DSCP-compatible results and resolved config."""
-    config = _resolve_paths(validate_config(OmegaConf.load(config_path), num_cores=num_cores))
+    config = _resolve_paths(validate_config(load_experiment_config(config_path), num_cores=num_cores))
     if not config["data"].get("data_path"):
         raise ValueError("data.data_path is required for an experiment run.")
     if not config.get("saving_dir"):

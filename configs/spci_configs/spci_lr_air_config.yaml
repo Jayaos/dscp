@@ -21,4 +21,4 @@ plotting:
   plotting_seq_len: 200
   
 
-saving_dir: "./results/spci/air/lr/"
+saving_dir: "./results/spci/air/lr/${now:%Y-%m-%d_%H-%M-%S_%f}/"

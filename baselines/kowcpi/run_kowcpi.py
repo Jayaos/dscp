@@ -4,6 +4,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 import torch
 from omegaconf import OmegaConf
+
+from utils.experiment_config import load_experiment_config
 from tqdm import tqdm
 
 from baselines.kowcpi.data import prepare_sequence
@@ -209,7 +211,7 @@ def _run_kowcpi_sequence(key, item, config, target_quantiles):
 
 
 def run_kowcpi(config_path, num_cores=1):
-    config = OmegaConf.load(config_path)
+    config = load_experiment_config(config_path)
     os.makedirs(config.saving_dir, exist_ok=True)
     num_cores = _validate_num_cores(num_cores)
 

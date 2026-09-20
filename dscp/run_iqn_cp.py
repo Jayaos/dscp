@@ -1,4 +1,6 @@
 from omegaconf import OmegaConf
+
+from utils.experiment_config import load_experiment_config
 import torch
 import os
 import copy
@@ -70,7 +72,7 @@ def _save_resolved_config(config):
 
 def run_transformer_iqn_cp(config_path):
 
-    config = OmegaConf.load(config_path)
+    config = load_experiment_config(config_path)
     _materialize_prediction_head_selector(config.model)
     validation_mode, validation_quantiles = resolve_iqn_validation_quantiles(
         config.training, config.model.target_quantiles
@@ -398,7 +400,7 @@ def run_transformer_iqn_cp(config_path):
 
 def run_rnn_iqn_cp(config_path):
 
-    config = OmegaConf.load(config_path)
+    config = load_experiment_config(config_path)
     _materialize_prediction_head_selector(config.model)
     validation_mode, validation_quantiles = resolve_iqn_validation_quantiles(
         config.training, config.model.target_quantiles

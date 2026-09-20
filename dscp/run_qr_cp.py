@@ -1,4 +1,6 @@
 from omegaconf import OmegaConf
+
+from utils.experiment_config import load_experiment_config
 import torch
 import os
 import copy
@@ -16,7 +18,7 @@ from torch.utils.data import DataLoader
 
 def run_transformer_quantile_regression_cp(config_path):
 
-    config = OmegaConf.load(config_path)
+    config = load_experiment_config(config_path)
     os.makedirs(config.saving_dir, exist_ok=True)
     _, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
 
@@ -321,7 +323,7 @@ def run_transformer_quantile_regression_cp(config_path):
 
 def run_rnn_quantile_regression_cp(config_path):
 
-    config = OmegaConf.load(config_path)
+    config = load_experiment_config(config_path)
     os.makedirs(config.saving_dir, exist_ok=True)
     _, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
 

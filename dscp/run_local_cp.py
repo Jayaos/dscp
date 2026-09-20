@@ -1,4 +1,6 @@
 from omegaconf import OmegaConf
+
+from utils.experiment_config import load_experiment_config
 import torch
 import os
 import copy
@@ -66,7 +68,7 @@ def _append_to_calibration_pool(calibration_repr, calibration_residual,
 
 def run_transformer_local_cp(config_path):
 
-    config = OmegaConf.load(config_path)
+    config = load_experiment_config(config_path)
     rolling_calibration = validate_rolling_calibration(
         OmegaConf.select(config, "model.rolling_calibration", default=True)
     )
@@ -382,7 +384,7 @@ def run_transformer_local_cp(config_path):
 
 def run_rnn_local_cp(config_path):
 
-    config = OmegaConf.load(config_path)
+    config = load_experiment_config(config_path)
     rolling_calibration = validate_rolling_calibration(
         OmegaConf.select(config, "model.rolling_calibration", default=True)
     )

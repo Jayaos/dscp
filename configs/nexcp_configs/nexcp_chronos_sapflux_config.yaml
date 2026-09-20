@@ -13,4 +13,4 @@ plotting:
   plotting: true
   plotting_seq_len: 200
 
-saving_dir: "./results/nexcp/sapflux/chronos/"
+saving_dir: "./results/nexcp/sapflux/chronos/${now:%Y-%m-%d_%H-%M-%S_%f}/"

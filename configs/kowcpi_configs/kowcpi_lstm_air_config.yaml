@@ -39,4 +39,4 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/kowcpi/air/lstm/"
+saving_dir: "./results/kowcpi/air/lstm/${now:%Y-%m-%d_%H-%M-%S_%f}/"

@@ -14,4 +14,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/nexcp/air/lr/"
+saving_dir: "./results/nexcp/air/lr/${now:%Y-%m-%d_%H-%M-%S_%f}/"

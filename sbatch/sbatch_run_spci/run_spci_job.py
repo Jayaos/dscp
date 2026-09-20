@@ -40,6 +40,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     from omegaconf import OmegaConf
+    from utils.experiment_config import load_experiment_config, resolve_job_saving_dir
 
     predictor = TASKS[args.task_id]
     artifact_dir, artifact_name = DATASET_ARTIFACTS[args.dataset]
@@ -49,13 +50,11 @@ def main(argv=None):
     )
     template_name = f"spci_{predictor}_{args.dataset}_config.yaml"
     template_path = REPO_ROOT / "configs" / "spci_configs" / template_name
-    output_dir = args.output_root.expanduser().resolve() / args.dataset / predictor
-
-    config = OmegaConf.load(template_path)
+    config = load_experiment_config(template_path)
     config.model.prediction_step = 1
     config.data.data_path = str(artifact_path)
-    config.saving_dir = str(output_dir)
     config.seed = args.seed
+    output_dir = resolve_job_saving_dir(config, args.output_root)
 
     print(
         f"SPCI task {args.task_id}: dataset={args.dataset}, "

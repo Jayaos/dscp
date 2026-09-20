@@ -51,6 +51,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     from omegaconf import OmegaConf
+    from utils.experiment_config import load_experiment_config, resolve_job_saving_dir
 
     encoder, predictor = TASKS[args.task_id]
     artifact_dir, artifact_name = DATASET_ARTIFACTS[args.dataset]
@@ -63,22 +64,14 @@ def main(argv=None):
     )
     template_name = f"iqn_{encoder}_{predictor}_{args.dataset}_config.yaml"
     template_path = REPO_ROOT / "configs" / "iqn_cp_configs" / template_name
-    output_dir = (
-        args.output_root.expanduser().resolve()
-        / args.dataset
-        / predictor
-        / encoder
-        / args.prediction_head
-    )
-
-    config = OmegaConf.load(template_path)
+    config = load_experiment_config(template_path)
     config.base_predictor = predictor
     config.model.prediction_head = args.prediction_head
     config.model.prediction_step = 1
     config.data.data_path = str(artifact_path)
-    config.saving_dir = str(output_dir)
     config.device = config.get("device", 0)
     config.seed = args.seed
+    output_dir = resolve_job_saving_dir(config, args.output_root)
 
     print(
         f"IQN-CP task {args.task_id}: dataset={args.dataset}, "

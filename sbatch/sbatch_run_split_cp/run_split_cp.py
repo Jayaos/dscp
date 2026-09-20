@@ -11,6 +11,8 @@ if str(REPO_ROOT) not in sys.path:
 from omegaconf import OmegaConf
 from omegaconf.errors import OmegaConfBaseException
 
+from utils.experiment_config import load_experiment_config
+
 
 DATASETS = ("air", "solar", "sapflux")
 BASE_PREDICTORS = ("lr", "lstm", "chronos")
@@ -57,7 +59,7 @@ def resolve_config(args):
         )
     else:
         config_path = args.config_path.expanduser().resolve()
-    config = OmegaConf.load(config_path)
+    config = load_experiment_config(config_path)
     if args.num_cores is not None:
         config.num_cores = args.num_cores
     if args.data_path is not None:

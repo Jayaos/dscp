@@ -1,4 +1,6 @@
 from omegaconf import OmegaConf
+
+from utils.experiment_config import load_experiment_config
 import os
 import numpy as np
 import torch
@@ -16,7 +18,7 @@ from utils.plotting import plot_cp_prediction_intervals
 
 
 def run_nexcp(config_path):
-    config = OmegaConf.load(config_path)
+    config = load_experiment_config(config_path)
     os.makedirs(config.saving_dir, exist_ok=True)
 
     data = load_data(config.data.data_path)

@@ -36,4 +36,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/iqn_cp/sapflux/chronos/rnn/${model.prediction_head}/"
+saving_dir: "./results/iqn_cp/sapflux/chronos/rnn/${model.prediction_head}/${now:%Y-%m-%d_%H-%M-%S_%f}/"

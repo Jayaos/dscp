@@ -42,4 +42,4 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/local_cp/sapflux/${base_predictor}/rnn/"
+saving_dir: "./results/local_cp/sapflux/${base_predictor}/rnn/${now:%Y-%m-%d_%H-%M-%S_%f}/"

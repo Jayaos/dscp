@@ -42,4 +42,4 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/iqn_cp/air/${base_predictor}/transformer/${model.prediction_head}/"
+saving_dir: "./results/iqn_cp/air/${base_predictor}/transformer/${model.prediction_head}/${now:%Y-%m-%d_%H-%M-%S_%f}/"

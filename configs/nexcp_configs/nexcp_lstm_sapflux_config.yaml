@@ -12,4 +12,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/nexcp/sapflux/lstm/"
+saving_dir: "./results/nexcp/sapflux/lstm/${now:%Y-%m-%d_%H-%M-%S_%f}/"

@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from omegaconf import OmegaConf
 
+from utils.experiment_config import load_experiment_config
 from utils.utils import save_data
 
 
@@ -100,7 +101,7 @@ def parse_args(method_name: str, include_num_cores: bool = False) -> argparse.Na
 
 
 def load_grid(grid_path: Path) -> Tuple[dict, dict]:
-    grid_cfg = OmegaConf.load(grid_path)
+    grid_cfg = load_experiment_config(grid_path)
     grid = OmegaConf.to_container(grid_cfg.get("grid", {}), resolve=True)
     if not isinstance(grid, dict) or len(grid) == 0:
         raise ValueError("Grid config must define a non-empty `grid:` mapping.")

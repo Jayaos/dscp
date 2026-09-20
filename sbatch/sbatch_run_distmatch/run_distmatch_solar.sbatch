@@ -38,7 +38,9 @@ CONFIG_PATH="configs/distmatch_configs/distmatch_${BASE_PREDICTOR}_solar_config.
 # Every allocated node must see the repository, artifact, environment, and output directory.
 JOB_ID="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:?Submit this script using sbatch.}}"
 OUTPUT_ROOT="${DISTMATCH_OUTPUT_ROOT:-$RUNPATH/results/distmatch}"
-OUTPUT_DIR="$OUTPUT_ROOT/solar/$BASE_PREDICTOR/job_$JOB_ID"
+# Resolve the trial datetime once so preparation, workers, and merge share it.
+RUN_DATETIME="$(python -c 'from datetime import datetime; print(datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f"))')"
+OUTPUT_DIR="$OUTPUT_ROOT/solar/$BASE_PREDICTOR/job_$JOB_ID/$RUN_DATETIME"
 SHARD_COUNT="${SLURM_JOB_NUM_NODES:-${SLURM_NNODES:-3}}"
 if [[ ! "$SHARD_COUNT" =~ ^[1-9][0-9]*$ ]]; then
   echo "Expected a positive Slurm node count; got '$SHARD_COUNT'." >&2

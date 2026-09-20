@@ -35,5 +35,5 @@ plotting:
   plotting: true
   plotting_seq_len: 200
 
-saving_dir: "./results/distmatch/solar/lstm/seed_${seed}/"
+saving_dir: "./results/distmatch/solar/lstm/seed_${seed}/${now:%Y-%m-%d_%H-%M-%S_%f}/"
 
