@@ -4,8 +4,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --array=0-2
-#SBATCH --gres=gpu:4 -C V100
-#SBATCH --cpus-per-task=8
+#SBATCH --gres=gpu:2 -C V100
+#SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
 #SBATCH -t720
 #SBATCH -qinferno
