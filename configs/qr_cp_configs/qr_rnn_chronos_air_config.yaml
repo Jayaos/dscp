@@ -13,8 +13,8 @@ data:
 model:
   head_type: nondecreasing # choices: nondecreasing, independent
   rnn_type: "lstm"
-  dim_model: 32
-  num_layers: 2
+  dim_model: 128
+  num_layers: 1
   dropout: 0.
   use_current_feature: True
   target_quantiles:
