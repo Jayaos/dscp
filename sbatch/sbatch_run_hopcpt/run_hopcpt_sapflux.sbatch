@@ -4,10 +4,10 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --array=0-2
-#SBATCH --gres=gpu:2 -C V100
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=16G
-#SBATCH -t360
+#SBATCH --gres=gpu:4 -C V100
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
+#SBATCH -t720
 #SBATCH -qinferno
 #SBATCH -o Report-hopcpt-sapflux-%A_%a.out
 #SBATCH --mail-type=ALL
