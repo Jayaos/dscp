@@ -42,4 +42,4 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/iqn_rnn_${base_predictor}_solar_${model.prediction_head}/"
+saving_dir: "./results/iqn_cp/solar/${base_predictor}/rnn/${model.prediction_head}/"

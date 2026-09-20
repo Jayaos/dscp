@@ -18,4 +18,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/spci_lstm_sapflux_solo3_large/"
+saving_dir: "./results/spci/sapflux/lstm/"

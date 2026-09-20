@@ -42,4 +42,4 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/lcp_rnn_${base_predictor}_air/"
+saving_dir: "./results/local_cp/air/${base_predictor}/rnn/"

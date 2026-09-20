@@ -18,4 +18,4 @@ plotting:
   plotting: true
   plotting_seq_len: 200
 
-saving_dir: "./results/spci_lstm_solar/"
+saving_dir: "./results/spci/solar/lstm/"

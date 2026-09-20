@@ -35,5 +35,5 @@ plotting:
   plotting: true
   plotting_seq_len: 200
 
-saving_dir: "./results/distmatch_lstm_air/seed_${seed}/"
+saving_dir: "./results/distmatch/air/lstm/seed_${seed}/"
 

@@ -35,4 +35,4 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/qr_rnn_${base_predictor}_air/"
+saving_dir: "./results/qr_cp/air/${base_predictor}/rnn/${model.head_type}/"

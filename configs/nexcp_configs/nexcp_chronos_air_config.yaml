@@ -14,4 +14,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/nexcp_chronos_air/"
+saving_dir: "./results/nexcp/air/chronos/"

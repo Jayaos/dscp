@@ -42,4 +42,4 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/lcp_transformer_${base_predictor}_solar/"
+saving_dir: "./results/local_cp/solar/${base_predictor}/transformer/"

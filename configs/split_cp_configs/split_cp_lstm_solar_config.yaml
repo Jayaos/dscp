@@ -15,4 +15,4 @@ plotting:
   plotting: true
   plotting_seq_len: 200
 
-saving_dir: "./results/split_cp_lstm_solar/"
+saving_dir: "./results/split_cp/solar/lstm/"

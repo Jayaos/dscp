@@ -39,4 +39,4 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/kowcpi_lr_solar/"
+saving_dir: "./results/kowcpi/solar/lr/"

@@ -28,4 +28,4 @@ plotting:
   plotting_seq_len: 50
   
 
-saving_dir: "./results/kowcpi_simulation/"
+saving_dir: "./results/kowcpi/simulation/lightgbm/"

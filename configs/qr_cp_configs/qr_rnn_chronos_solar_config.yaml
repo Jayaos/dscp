@@ -35,5 +35,5 @@ plotting:
   plotting_seq_len: 200
 
 
-saving_dir: "./results/qr_rnn_${base_predictor}_solar/"
+saving_dir: "./results/qr_cp/solar/${base_predictor}/rnn/${model.head_type}/"
 

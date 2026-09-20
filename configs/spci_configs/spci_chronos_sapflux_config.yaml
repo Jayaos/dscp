@@ -18,4 +18,4 @@ plotting:
   plotting: true
   plotting_seq_len: 200
 
-saving_dir: "./results/spci_chronos_sapflux/"
+saving_dir: "./results/spci/sapflux/chronos/"

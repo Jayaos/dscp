@@ -22,4 +22,4 @@ plotting:
   plotting_seq_len: 200
   
   
-saving_dir: "./results/spci_lstm_air/"
+saving_dir: "./results/spci/air/lstm/"

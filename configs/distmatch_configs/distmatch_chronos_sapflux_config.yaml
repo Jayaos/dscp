@@ -36,5 +36,5 @@ plotting:
   plotting: true
   plotting_seq_len: 200
 
-saving_dir: "./results/distmatch_chronos_sapflux/seed_${seed}/"
+saving_dir: "./results/distmatch/sapflux/chronos/seed_${seed}/"
 

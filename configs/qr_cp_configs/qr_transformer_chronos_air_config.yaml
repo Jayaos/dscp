@@ -35,5 +35,5 @@ plotting:
   plotting_seq_len: 200
   
 
-saving_dir: "./results/qr_transformer_${base_predictor}_air/"
+saving_dir: "./results/qr_cp/air/${base_predictor}/transformer/${model.head_type}/"
 

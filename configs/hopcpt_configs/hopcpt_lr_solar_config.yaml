@@ -39,4 +39,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/hopcpt_lr_solar/"
+saving_dir: "./results/hopcpt/solar/lr/"

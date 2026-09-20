@@ -36,4 +36,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/iqn_transformer_lstm_sapflux_solo3_large_${model.prediction_head}/"
+saving_dir: "./results/iqn_cp/sapflux/lstm/transformer/${model.prediction_head}/"

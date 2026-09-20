@@ -29,4 +29,4 @@ plotting:
   plotting: true
   plotting_seq_len: 200
 
-saving_dir: "./results/rescp_lr_sapflux/seed_${seed}/"
+saving_dir: "./results/rescp/sapflux/lr/seed_${seed}/"

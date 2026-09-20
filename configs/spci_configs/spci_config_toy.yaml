@@ -16,5 +16,5 @@ model:
   window_size: 100
 
 
-saving_dir: "C:/Users/jayao/Desktop/spci_test/"
+saving_dir: "./results/spci/air/chronos/toy/"
 

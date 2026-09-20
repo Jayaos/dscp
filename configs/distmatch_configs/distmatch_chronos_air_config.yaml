@@ -35,5 +35,5 @@ plotting:
   plotting: true
   plotting_seq_len: 200
 
-saving_dir: "./results/distmatch_chronos_air/seed_${seed}/"
+saving_dir: "./results/distmatch/air/chronos/seed_${seed}/"
 

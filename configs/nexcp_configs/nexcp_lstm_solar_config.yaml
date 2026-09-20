@@ -13,4 +13,4 @@ plotting:
   plotting: true
   plotting_seq_len: 200
 
-saving_dir: "./results/nexcp_lstm_solar/"
+saving_dir: "./results/nexcp/solar/lstm/"

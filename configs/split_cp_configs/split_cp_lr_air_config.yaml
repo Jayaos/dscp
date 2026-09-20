@@ -15,4 +15,4 @@ plotting:
   plotting: true
   plotting_seq_len: 200
 
-saving_dir: "./results/split_cp_lr_air/"
+saving_dir: "./results/split_cp/air/lr/"

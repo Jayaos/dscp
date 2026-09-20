@@ -15,4 +15,4 @@ plotting:
   plotting: true
   plotting_seq_len: 200
 
-saving_dir: "./results/split_cp_chronos_sapflux/"
+saving_dir: "./results/split_cp/sapflux/chronos/"

@@ -26,4 +26,4 @@ plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/kowcpi_chronos_sapflux_solo3_large/"
+saving_dir: "./results/kowcpi/sapflux/chronos/"

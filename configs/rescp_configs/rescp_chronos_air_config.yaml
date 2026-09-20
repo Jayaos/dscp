@@ -30,4 +30,4 @@ plotting:
   plotting: true
   plotting_seq_len: 200
 
-saving_dir: "./results/rescp_chronos_air/seed_${seed}/"
+saving_dir: "./results/rescp/air/chronos/seed_${seed}/"
