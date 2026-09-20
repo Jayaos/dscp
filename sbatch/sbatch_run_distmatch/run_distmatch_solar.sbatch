@@ -7,7 +7,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=17
 #SBATCH --mem=192G
-#SBATCH -t720
+#SBATCH -t1440
 #SBATCH --output=%x_%A_%a.out
 
 set -euo pipefail
