@@ -22,7 +22,7 @@ model:
   monotonic_num_layers: 1
   monotonic_activation: "tanh"
   cos_emb_dim: 32
-  num_taus: 512
+  num_taus: 64
   target_quantiles:
     - [0.95, 0.05]
   prediction_step: 1
@@ -32,8 +32,8 @@ model:
 training:
   batch_size: 32
   learning_rate: 0.001
-  epochs: 50
-  early_stop: 3
+  epochs: 100
+  early_stop: 10
   validation_loss: "target_quantiles"
 
 
