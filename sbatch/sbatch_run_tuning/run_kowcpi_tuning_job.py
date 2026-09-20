@@ -64,11 +64,7 @@ def main(argv=None):
         / f"{predictor}_{artifact_name}_data.pkl"
     )
     config_dir = REPO_ROOT / "configs" / "kowcpi_configs"
-    template_name = (
-        "kowcpi_lstm_sapflux_config.yaml"
-        if args.dataset == "sapflux"
-        else "kowcpi_chronos_air_config.yaml"
-    )
+    template_name = f"kowcpi_{predictor}_{args.dataset}_config.yaml"
     template_path = (args.base_config or config_dir / template_name).expanduser().resolve()
     grid_path = (
         args.grid_config or config_dir / f"kowcpi_{args.dataset}_tuning_config.yaml"

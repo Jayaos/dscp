@@ -65,11 +65,18 @@ observations.
 
 ## Configuration and outputs
 
-The dispatcher uses the corresponding Air IQN-CP encoder template for Air
-and Solar. Sapflux uses the existing Sapflux LSTM-base encoder template for
-every base predictor, substituting the selected artifact path. These are
-starting hyperparameters: they are not separate tuned configurations for
-Solar or for the additional predictor/template combinations. All runs force
+Air, Solar, and Sapflux jobs load
+`configs/iqn_cp_configs/iqn_{encoder}_{predictor}_{dataset}_config.yaml`, where
+`encoder` is `rnn` or `transformer`, `predictor` is `lr`, `lstm`, or `chronos`,
+and `dataset` is `air`, `solar`, or `sapflux`. Each task preserves its selected
+config's model and training settings instead of loading a generic template.
+
+The six Solar configs initially match their corresponding Air hyperparameters;
+only their prediction artifact and output paths differ. They are separate files
+so future Solar-specific settings can be made without changing Air. The LR and
+Chronos Sapflux configs initially copy the corresponding LSTM Sapflux encoder
+settings, with their own predictor data and output paths. Each is loaded
+independently; no generic or shared template is required. All runs force
 `prediction_step: 1`.
 
 Each run writes its resolved settings and outputs under:

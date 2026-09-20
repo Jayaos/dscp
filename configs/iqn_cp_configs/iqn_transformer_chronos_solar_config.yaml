@@ -1,29 +1,33 @@
 device: 0
+base_predictor: chronos
+
 
 data:
-  data_path: "./data/sapflux-solo3-large/lstm/lstm_sapflux-solo3-large_data.pkl"
+  data_path: "./data/solar_prediction/${base_predictor}/${base_predictor}_nsdb-60m_data.pkl"
   train_ratio: 0.5
   valid_ratio: 0.16
   normalize: True
   strided_features: "xry"
 
+
 model:
-  rnn_type: "lstm"
-  dim_model: 16
+  dim_model: 32
+  num_heads: 2
   num_layers: 2
   dropout: 0.
   use_current_feature: False
   # Choose "partially_monotonic" or the legacy "cosine_embedding" IQN head.
   prediction_head: "partially_monotonic"
-  iqn_hidden_dim: 16
+  iqn_hidden_dim: 32
   monotonic_num_layers: 2
   monotonic_activation: "tanh"
-  cos_emb_dim: 16
+  cos_emb_dim: 32
   num_taus: 64
   target_quantiles:
     - [0.95, 0.05]
   prediction_step: 1
   window_size: 100
+
 
 training:
   batch_size: 32
@@ -32,8 +36,10 @@ training:
   early_stop: 3
   validation_loss: "target_quantiles"
 
+
 plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/iqn_rnn_lstm_sapflux_solo3_large_${model.prediction_head}/"
+
+saving_dir: "./results/run_iqn_transformer_${base_predictor}_solar_${model.prediction_head}/"

@@ -11,19 +11,18 @@ data:
 
 
 model:
-  shared_dim: &shared_dim 32
-  dim_model: *shared_dim
+  dim_model: 32
   num_heads: 2
   num_layers: 2
   dropout: 0.
   use_current_feature: False
   # Choose "partially_monotonic" or the legacy "cosine_embedding" IQN head.
   prediction_head: "partially_monotonic"
-  iqn_hidden_dim: *shared_dim
+  iqn_hidden_dim: 32
   monotonic_num_layers: 1
   monotonic_activation: "tanh"
-  cos_emb_dim: *shared_dim
-  num_taus: 64
+  cos_emb_dim: 32
+  num_taus: 16
   target_quantiles:
     - [0.95, 0.05]
   prediction_step: 1

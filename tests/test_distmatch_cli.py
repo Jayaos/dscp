@@ -18,6 +18,7 @@ from sbatch.sbatch_run_distmatch import run_distmatch as cli
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PRESET = REPO_ROOT / "configs/distmatch_configs/distmatch_lr_air_config.yaml"
+GENERIC_LAUNCHER = REPO_ROOT / "sbatch/sbatch_run_distmatch/run_distmatch.sbatch"
 
 
 class DistMatchCLITests(unittest.TestCase):
@@ -75,6 +76,67 @@ class DistMatchCLITests(unittest.TestCase):
                     config = cli.main([str(config_path), "--dry-run"])
                 self.assertIs(config.data.normalize_residual, enabled)
 
+    def test_distributed_modes_dispatch_resolved_config_without_launch_files(self):
+        for arguments, expected_mode, expected_index in (
+            (["--prepare-shards", "2"], "prepare", 2),
+            (["--shard-index", "0"], "shard", 0),
+            (["--merge-shards"], "merge", None),
+        ):
+            with self.subTest(arguments=arguments), tempfile.TemporaryDirectory() as directory:
+                config_path = self._config(directory)
+                backend = types.ModuleType("baselines.distmatch.distributed")
+                calls = []
+
+                def prepare_shards(config, num_shards):
+                    calls.append(("prepare", config, num_shards))
+                    return "prepared"
+
+                def run_shard(config, shard_index):
+                    calls.append(("shard", config, shard_index))
+                    return "evaluated"
+
+                def merge_shards(config):
+                    calls.append(("merge", config, None))
+                    return "merged"
+
+                backend.prepare_shards = prepare_shards
+                backend.run_shard = run_shard
+                backend.merge_shards = merge_shards
+                with patch.dict(sys.modules, {backend.__name__: backend}):
+                    result = cli.main([str(config_path), *arguments, "--num-cores", "2"])
+                self.assertEqual(result, {"prepare": "prepared", "shard": "evaluated", "merge": "merged"}[expected_mode])
+                self.assertEqual(len(calls), 1)
+                mode, resolved, index = calls[0]
+                self.assertEqual((mode, index), (expected_mode, expected_index))
+                self.assertEqual(resolved.num_cores, 2)
+                self.assertTrue(Path(resolved.data.data_path).is_absolute())
+                self.assertFalse(Path(resolved.saving_dir).exists())
+
+    def test_distributed_modes_validate_arguments_and_remain_mutually_exclusive(self):
+        for arguments in (
+            ["--prepare-shards", "0"], ["--prepare-shards", "-1"],
+            ["--prepare-shards", "1.5"], ["--shard-index", "-1"],
+            ["--shard-index", "0.5"],
+            ["--prepare-shards", "2", "--shard-index", "0"],
+            ["--prepare-shards", "2", "--merge-shards"],
+            ["--shard-index", "0", "--merge-shards"],
+        ):
+            with self.subTest(arguments=arguments), contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit) as exc:
+                cli.build_parser().parse_args([str(PRESET), *arguments])
+            self.assertEqual(exc.exception.code, 2)
+
+    def test_shard_workers_respect_per_task_cpu_allocation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = self._config(directory, threads_per_worker=2)
+            stderr = io.StringIO()
+            with patch.dict(os.environ, {"SLURM_CPUS_PER_TASK": "4"}), \
+                    contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as exc:
+                cli.main([str(config_path), "--shard-index", "0", "--dry-run"])
+            self.assertEqual(exc.exception.code, 2)
+            self.assertIn("3 workers * 2 threads", stderr.getvalue())
+            self.assertFalse((Path(directory) / "output").exists())
+
     def test_relative_paths_resolve_against_repository_root(self):
         with tempfile.TemporaryDirectory() as directory:
             config_path = self._config(directory, **{
@@ -97,6 +159,12 @@ class DistMatchCLITests(unittest.TestCase):
             self.assertEqual(config.num_cores, 3)
             self.assertEqual(config.threads_per_worker, 2)
             self.assertFalse(Path(config.saving_dir).exists())
+
+    def test_generic_launcher_cpu_request_matches_its_default_preset(self):
+        config = OmegaConf.load(PRESET)
+        required_cpus = config.num_cores * config.threads_per_worker
+        source = GENERIC_LAUNCHER.read_text(encoding="utf-8")
+        self.assertIn(f"#SBATCH --cpus-per-task={required_cpus}\n", source)
 
     def test_slurm_allocation_error_recommends_sufficient_request(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -151,13 +219,19 @@ main(sys.argv[1:])
 """
         with tempfile.TemporaryDirectory() as directory:
             config_path = self._config(directory)
-            for arguments in (["--help"], [str(config_path), "--dry-run"]):
+            for arguments in (
+                ["--help"], [str(config_path), "--dry-run"],
+                [str(config_path), "--prepare-shards", "2", "--dry-run"],
+                [str(config_path), "--shard-index", "0", "--dry-run"],
+                [str(config_path), "--merge-shards", "--dry-run"],
+            ):
                 with self.subTest(arguments=arguments):
                     result = subprocess.run(
                         [sys.executable, "-c", script, *arguments], cwd=REPO_ROOT,
                         capture_output=True, text=True, check=False,
                     )
                     self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertFalse((Path(directory) / "output").exists())
 
     def test_checked_in_presets_and_grids_have_portable_paths(self):
         names = (f"{predictor}_{dataset}"

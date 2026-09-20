@@ -60,11 +60,12 @@ needs all three. QR-CP consumes the saved held-out forecasts and observations.
 
 ## Configuration and outputs
 
-The dispatcher uses the corresponding Air QR-CP YAML templates for Air and
-Solar. Sapflux uses the existing Sapflux LSTM-base templates for every base
-predictor, substituting the selected artifact path. These supply starting
-hyperparameters; they do not represent a hyperparameter search for Solar or
-the additional Sapflux combinations. All runs use `prediction_step: 1`.
+Each task loads its dedicated
+`configs/qr_cp_configs/qr_{encoder}_{predictor}_{dataset}_config.yaml` for Air,
+Solar, or Sapflux. Model, training, and preprocessing settings come from that
+file; Solar no longer inherits Air settings, and Sapflux predictors no longer
+share the LSTM config. The dispatcher resolves the matching forecast artifact
+and output directory. All runs use `prediction_step: 1`.
 
 Each run writes its resolved settings and outputs under:
 

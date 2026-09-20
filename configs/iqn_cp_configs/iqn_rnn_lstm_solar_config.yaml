@@ -1,11 +1,14 @@
 device: 0
+base_predictor: lstm
+
 
 data:
-  data_path: "./data/sapflux-solo3-large/lstm/lstm_sapflux-solo3-large_data.pkl"
+  data_path: "./data/solar_prediction/${base_predictor}/${base_predictor}_nsdb-60m_data.pkl"
   train_ratio: 0.5
   valid_ratio: 0.16
   normalize: True
   strided_features: "xry"
+
 
 model:
   rnn_type: "lstm"
@@ -25,6 +28,7 @@ model:
   prediction_step: 1
   window_size: 100
 
+
 training:
   batch_size: 32
   learning_rate: 0.001
@@ -32,8 +36,10 @@ training:
   early_stop: 3
   validation_loss: "target_quantiles"
 
+
 plotting:
   plotting: True
   plotting_seq_len: 200
 
-saving_dir: "./results/iqn_rnn_lstm_sapflux_solo3_large_${model.prediction_head}/"
+
+saving_dir: "./results/iqn_rnn_${base_predictor}_solar_${model.prediction_head}/"

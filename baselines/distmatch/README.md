@@ -91,8 +91,9 @@ sbatch sbatch/sbatch_run_distmatch/run_distmatch_sapflux.sbatch
 
 Each array maps tasks `0`, `1`, and `2` to LR, LSTM, and Chronos. For example,
 `sbatch --array=1 sbatch/sbatch_run_distmatch/run_distmatch_air.sbatch` runs only
-air LSTM. Each task requests four CPUs, 16 GB of memory, and a 24-hour time limit.
-Logs use `%x_%A_%a.out` (job name, array job ID, task ID).
+air LSTM. The checked-in `#SBATCH` directives determine each launcher's active
+array range, CPU, memory, and time requests. Logs use `%x_%A_%a.out` (job name,
+array job ID, task ID).
 
 For a single configuration, use the generic launcher:
 
@@ -100,8 +101,13 @@ For a single configuration, use the generic launcher:
 sbatch sbatch/sbatch_run_distmatch/run_distmatch.sbatch configs/distmatch_configs/distmatch_lr_air_config.yaml
 ```
 
-All launchers honor the YAML `num_cores` and `threads_per_worker`. Before loading
-the model, the CLI checks that their product fits `SLURM_CPUS_PER_TASK`.
+The generic, air, and Sapflow launchers honor the YAML `num_cores` and
+`threads_per_worker`. The generic launcher's default 12-CPU request matches its
+default LR Air preset (12 workers with one thread each). When selecting a preset
+that requests more workers, override the Slurm CPU request or pass an explicit
+worker override. Solar uses the allocated-node orchestration described below.
+Before loading the model, the CLI checks that the worker/thread product fits
+`SLURM_CPUS_PER_TASK` on each node.
 For example, eight workers with one thread each
 require `sbatch --cpus-per-task=8 ...`; an insufficient allocation returns an
 error without changing the configured worker count. The same check applies to
@@ -115,6 +121,67 @@ with `DISTMATCH_ENV`, or the repository location with `DSCP_RUNPATH` (`RUNPATH`
 is also accepted). `DISTMATCH_SEED` overrides the configured seed. Dataset
 launchers forward additional arguments to the experiment CLI; the generic
 launcher takes the configuration path first, followed by CLI arguments.
+
+### Solar across allocated nodes
+
+The checked-in Solar launcher requests **three nodes, one task per node, and 17
+CPUs per task**. Each task starts up to 17 independent sequence workers, with
+one CPU thread per worker. A 50-sequence artifact is split into three disjoint
+groups, allowing all 50 sequences to run concurrently when resources are
+available:
+
+```bash
+# One three-node job for Solar LSTM.
+sbatch --array=1 sbatch/sbatch_run_distmatch/run_distmatch_solar.sbatch
+
+# LR only: --array=0. Chronos only: --array=2.
+# The script's default array=0-1 submits both LR and LSTM, each on three nodes.
+```
+
+The script derives its shard count from `SLURM_JOB_NUM_NODES`, falling back to
+`SLURM_NNODES` and then the checked-in three-node default. The same count is
+passed to manifest preparation and to `srun` for both `--nodes` and `--ntasks`,
+so every allocated node receives one shard. When overriding the node count,
+also request the same task count. For example, two nodes with 25 workers each
+can process a 50-sequence artifact concurrently:
+
+```bash
+sbatch --array=1 --nodes=2 --ntasks=2 --cpus-per-task=25 \
+  sbatch/sbatch_run_distmatch/run_distmatch_solar.sbatch
+```
+
+Solar overrides YAML `num_cores` with `SLURM_CPUS_PER_TASK` and sets
+`threads_per_worker=1`. The existing `--mem=192G` request applies **per node**;
+adjust it for your partition and worker memory requirements. The repository,
+forecast artifact, conda environment, and output directory must be accessible
+from every allocated node through shared storage.
+
+The batch task prepares one shard per allocated node, then `srun` starts shard
+indices `0` through `N-1` on different nodes. Each sequence keeps its existing
+seed, split, normalization, and evaluation procedure.
+`srun --kill-on-bad-exit=1` stops the step if a node's task fails. The merge
+runs only after every task succeeds and validates run identity, configuration,
+artifact identity, and complete sequence membership. It writes one combined
+log, summary, and set of plots in the usual format.
+
+Outputs are isolated under
+`results/distmatch_solar/job_<array_job_id>/<predictor>/`. Set
+`DISTMATCH_OUTPUT_ROOT` to change the parent directory, or pass `--output-dir`
+for a single predictor job. Preparation requires a fresh output directory to
+avoid mixing results from different runs. Resubmitting normally uses a new job
+ID; a requeued job with an existing output directory needs a fresh destination.
+The manifest records ordered shard assignments, completion files live under
+`shards/`, and merged metadata records total and per-shard worker counts.
+Artifacts with other sequence counts are split evenly without dropping series.
+
+The DistMatch CLI also exposes `--prepare-shards N`, `--shard-index I`, and
+`--merge-shards` for manual orchestration. Use the same configuration and
+overrides in all phases; these modes are mutually exclusive. An existing run's
+saved `launch_config.yaml` can be used to retry an unfinished shard or merge
+completed shards. Completed shards are not overwritten. If a task was killed
+without cleanup, inspect its `.lock` file and confirm the process has stopped
+before removing the lock and retrying that step. `--dry-run` validates arguments
+and paths without preparing or executing shards.
 
 ## Experiment protocol
 
@@ -270,12 +337,14 @@ environment variables are `DISTMATCH_GRID_CONFIG`,
 ## Verify
 
 ```bash
-python -m pytest tests/test_distmatch_model.py tests/test_distmatch_data_usage.py tests/test_distmatch_normalization.py tests/test_distmatch_tuning.py tests/test_distmatch_cli.py tests/test_distmatch_progress.py
+python -m pytest tests/test_distmatch_model.py tests/test_distmatch_data_usage.py tests/test_distmatch_normalization.py tests/test_distmatch_tuning.py tests/test_distmatch_cli.py tests/test_distmatch_progress.py tests/test_distmatch_distributed.py tests/test_distmatch_solar_launch.py
 ```
 
 These checks cover KS/reference agreement, causality, normalization boundaries,
 validation isolation from test, serial/multicore equality, metrics and plotting,
-and CLI/configuration behavior.
+CLI/configuration behavior, merged shard equivalence, incomplete-run rejection,
+and the Solar launch sequence with mocked Slurm commands. A real multi-node
+Slurm submission must be verified on the target cluster.
 
 ## Saved results
 

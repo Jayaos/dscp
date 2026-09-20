@@ -249,6 +249,46 @@ def _save_pickle(path, value):
         pickle.dump(value, stream, protocol=pickle.HIGHEST_PROTOCOL)
 
 
+def _run_metadata(config, num_sequences, elapsed):
+    return {
+        "elapsed_seconds": elapsed,
+        "num_sequences": num_sequences,
+        "configured_num_cores": config["num_cores"],
+        "effective_num_cores": min(config["num_cores"], num_sequences),
+        "threads_per_worker": config["threads_per_worker"],
+        "upstream_commit": UPSTREAM_COMMIT,
+        "package_versions": {name: version(name) for name in (
+            "numpy", "scipy", "scikit-learn", "sklearn-quantile", "torch", "omegaconf"
+        )},
+    }
+
+
+def _write_run_results(config, log, metadata):
+    """Write the same result format for ordinary runs and completed shard sets."""
+    output_dir = Path(config["saving_dir"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    OmegaConf.save(config=OmegaConf.create(config), f=output_dir / "resolved_config.yaml", resolve=True)
+    pairs = target_quantiles(config)
+    summary = summarize_evaluation_results(log, pairs)
+    _save_pickle(output_dir / "log.pkl", log)
+    _save_pickle(output_dir / "summary_results.pkl", summary)
+    OmegaConf.save(config=OmegaConf.create(metadata), f=output_dir / "run_metadata.yaml")
+    for pair, result in summary.items():
+        print(
+            f"{pair}: coverage={result['avg_coverage_mean']:.4f}, "
+            f"width={result['avg_interval_width_mean']:.6g}, "
+            f"Winkler={result['avg_winkler_score_mean']:.6g}", flush=True,
+        )
+    if config.get("plotting", {}).get("plotting", False):
+        import matplotlib
+        matplotlib.use("Agg")
+        from utils.plotting import plot_cp_prediction_intervals
+
+        length = positive_integer(config["plotting"].get("plotting_seq_len", 200), "plotting.plotting_seq_len")
+        plot_cp_prediction_intervals(log, pairs, length, str(output_dir / "plots"))
+    return log
+
+
 def run_distmatch(config_path, num_cores=None):
     """Evaluate final test and save DSCP-compatible results and resolved config."""
     config = _resolve_paths(validate_config(OmegaConf.load(config_path), num_cores=num_cores))
@@ -265,34 +305,5 @@ def run_distmatch(config_path, num_cores=None):
     print(f"DistMatch: {len(data)} sequences, {config['num_cores']} configured sequence workers", flush=True)
     started = time.perf_counter()
     log = evaluate_sequences(data, config, split="test")
-    elapsed = time.perf_counter() - started
-    pairs = target_quantiles(config)
-    summary = summarize_evaluation_results(log, pairs)
-    _save_pickle(output_dir / "log.pkl", log)
-    _save_pickle(output_dir / "summary_results.pkl", summary)
-    metadata = {
-        "elapsed_seconds": elapsed,
-        "num_sequences": len(data),
-        "configured_num_cores": config["num_cores"],
-        "effective_num_cores": min(config["num_cores"], len(data)),
-        "threads_per_worker": config["threads_per_worker"],
-        "upstream_commit": UPSTREAM_COMMIT,
-        "package_versions": {name: version(name) for name in (
-            "numpy", "scipy", "scikit-learn", "sklearn-quantile", "torch", "omegaconf"
-        )},
-    }
-    OmegaConf.save(config=OmegaConf.create(metadata), f=output_dir / "run_metadata.yaml")
-    for pair, result in summary.items():
-        print(
-            f"{pair}: coverage={result['avg_coverage_mean']:.4f}, "
-            f"width={result['avg_interval_width_mean']:.6g}, "
-            f"Winkler={result['avg_winkler_score_mean']:.6g}", flush=True,
-        )
-    if config.get("plotting", {}).get("plotting", False):
-        import matplotlib
-        matplotlib.use("Agg")
-        from utils.plotting import plot_cp_prediction_intervals
-
-        length = positive_integer(config["plotting"].get("plotting_seq_len", 200), "plotting.plotting_seq_len")
-        plot_cp_prediction_intervals(log, pairs, length, str(output_dir / "plots"))
-    return log
+    metadata = _run_metadata(config, len(data), time.perf_counter() - started)
+    return _write_run_results(config, log, metadata)

@@ -25,6 +25,13 @@ def _seed(value):
     return parsed
 
 
+def _nonnegative_int(value):
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("Value must be a nonnegative integer.")
+    return parsed
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         description="Run residual-only DistMatch on saved base-predictor forecasts."
@@ -41,6 +48,19 @@ def build_parser():
     parser.add_argument("--seed", type=_seed, default=None, help="Override the config seed.")
     parser.add_argument("--data-path", type=Path, help="Override the saved forecast artifact.")
     parser.add_argument("--output-dir", type=Path, help="Override the experiment output directory.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--prepare-shards", type=_positive_int, metavar="N",
+        help="Create a fresh run manifest assigning sequences to N nodes (N >= 2).",
+    )
+    mode.add_argument(
+        "--shard-index", type=_nonnegative_int, metavar="I",
+        help="Evaluate only shard I from a prepared run (zero-based).",
+    )
+    mode.add_argument(
+        "--merge-shards", action="store_true",
+        help="Validate all completed shards and write combined results and plots.",
+    )
     parser.add_argument(
         "--dry-run", action="store_true",
         help="Validate config and artifact paths, then print the plan without evaluating or writing files.",
@@ -117,6 +137,8 @@ def main(argv=None):
         parser.error(f"DistMatch configuration requires OmegaConf; install envs/env-distmatch.yml. {exc}")
     try:
         config_path, config = resolve_config(args)
+        if args.prepare_shards is not None and args.prepare_shards < 2:
+            raise ValueError("--prepare-shards requires at least 2 shards.")
         validate_cpu_allocation(config, os.environ.get("SLURM_CPUS_PER_TASK"))
         artifact_path = Path(config.data.data_path)
         if not artifact_path.is_file():
@@ -129,8 +151,23 @@ def main(argv=None):
         print(f"Artifact available: {artifact_path}")
         print(f"Sequence workers: {config.num_cores}")
         print(f"Threads per worker: {config.threads_per_worker}")
+        if args.prepare_shards is not None:
+            print(f"Mode: prepare {args.prepare_shards} shards")
+        elif args.shard_index is not None:
+            print(f"Mode: evaluate shard {args.shard_index}")
+        elif args.merge_shards:
+            print("Mode: merge completed shards")
         print(OmegaConf.to_yaml(config, resolve=True))
         return config
+
+    if args.prepare_shards is not None or args.shard_index is not None or args.merge_shards:
+        from baselines.distmatch.distributed import merge_shards, prepare_shards, run_shard
+
+        if args.prepare_shards is not None:
+            return prepare_shards(config, args.prepare_shards)
+        if args.shard_index is not None:
+            return run_shard(config, args.shard_index)
+        return merge_shards(config)
 
     from baselines.distmatch.run_distmatch import run_distmatch
 

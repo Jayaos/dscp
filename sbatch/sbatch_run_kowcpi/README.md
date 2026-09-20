@@ -43,13 +43,14 @@ Here, `P` is the selected predictor (`lr`, `lstm`, or `chronos`):
 
 ## Configuration and outputs
 
-Air and Solar use `configs/kowcpi_configs/kowcpi_chronos_air_config.yaml`.
-Sapflux uses `configs/kowcpi_configs/kowcpi_lstm_sapflux_config.yaml`.
-Each template supplies starting hyperparameters for all three predictors;
-the dispatcher substitutes the selected artifact path and sets
-`prediction_step: 1`. No additional hyperparameter tuning is performed.
-The templates retain their normalization settings (off for Air/Solar, on
-for Sapflux).
+Each task uses its explicit dataset/predictor configuration:
+`configs/kowcpi_configs/kowcpi_{predictor}_{dataset}_config.yaml`. The Air
+and Solar configurations initially preserve the hyperparameters from the
+former Chronos/Air template; the Sapflux configurations preserve those from
+the former LSTM/Sapflux template. Only their artifact and ordinary output
+paths differ initially, so future settings can vary independently. The
+dispatcher still sets `prediction_step: 1`; normalization remains off for
+Air/Solar and on for Sapflux.
 
 The normal templates set `data.calibration_ratio: 0.66`, reserving 66% of the
 saved heldout forecasts for calibration. The remaining `1 - calibration_ratio`
@@ -110,11 +111,14 @@ existing KOWCPI tuning job. Independent sequences run in parallel within each
 grid trial; the trials run sequentially. Job logs include both the array job
 and task IDs.
 
-The tuning dispatcher uses the same artifact paths and base templates as the
-normal arrays, with `kowcpi_{dataset}_tuning_config.yaml` supplying the grid and
-validation fraction. It writes a resolved base config and tuning artifacts to
+The tuning dispatcher uses the same explicit dataset/predictor base configs as
+the normal arrays, with `kowcpi_{dataset}_tuning_config.yaml` supplying the
+dataset-specific grid and validation fraction. Explicit `--base-config` and
+`--grid-config` arguments continue to override those defaults. It writes a
+resolved base config and tuning artifacts to
 `results/tuning/kowcpi/{dataset}/{predictor}/`. Final-test observations are
-excluded from tuning, following the [baseline split protocol](../../baselines/kowcpi/README.md).
+excluded from tuning, following the
+[baseline split protocol](../../baselines/kowcpi/README.md).
 
 Preview any task locally without writing files or loading forecast artifacts:
 

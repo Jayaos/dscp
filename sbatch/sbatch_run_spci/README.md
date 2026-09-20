@@ -45,10 +45,11 @@ Here, `P` is the selected predictor (`lr`, `lstm`, or `chronos`):
 | Solar | `data/solar_prediction/P/P_nsdb-60m_data.pkl` |
 | Sapflux | `data/sapflux-solo3-large/P/P_sapflux-solo3-large_data.pkl` |
 
-Air and Solar use the corresponding predictor's Air SPCI configuration
-template. Sapflux uses `spci_lstm_sapflux_config.yaml` for all three
-predictors, substituting the selected artifact path. These are starting
-hyperparameters, with no additional tuning for Solar or Sapflux combinations.
+Each task loads its dedicated
+`configs/spci_configs/spci_{predictor}_{dataset}_config.yaml` for Air, Solar,
+or Sapflux. Model and preprocessing settings come from that file; Solar no
+longer inherits Air settings, and Sapflux predictors no longer share the
+LSTM config. Artifact and output paths still follow the selected task.
 The dispatcher sets `prediction_step: 1` to match the base-predictor jobs.
 
 ## Training and test split

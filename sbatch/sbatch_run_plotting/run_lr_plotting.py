@@ -16,7 +16,7 @@ LR_ARTIFACTS = {
     "air-10": Path("data/air-10_prediction/lr/lr_air-10_data.pkl"),
     "nsdb-60m": Path("data/solar_prediction/lr/lr_nsdb-60m_data.pkl"),
     "sapflux-solo3-large": Path(
-        "data/sapflux_prediction/lr/lr_sapflux-solo3-large_data.pkl"
+        "data/sapflux-solo3-large/lr/lr_sapflux-solo3-large_data.pkl"
     ),
 }
 
