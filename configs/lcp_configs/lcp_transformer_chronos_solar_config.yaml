@@ -13,7 +13,7 @@ data:
 
 
 model:
-  dim_model: 32
+  dim_model: 128 #32
   num_heads: 4
   num_layers: 4
   dropout: 0.

@@ -14,7 +14,7 @@ data:
 
 model:
   rnn_type: "lstm"
-  dim_model: 64
+  dim_model: 128 #64
   num_layers: 2
   dropout: 0.
   use_current_feature: False
