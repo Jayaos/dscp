@@ -223,9 +223,14 @@ def run_split_cp(config_path, num_cores=None):
     save_data(output / "log.pkl", log)
     save_data(output / "summary_results.pkl", summary)
     for pair, result in summary.items():
-        print(f"{pair}: coverage={result['avg_coverage_mean']:.4f}, "
-              f"width={result['avg_interval_width_mean']:.6g}, "
-              f"Winkler={result['avg_winkler_score_mean']:.6g}", flush=True)
+        print(f"Summary for confidence pair {pair}", flush=True)
+        for metric in (
+            "avg_coverage", "avg_delta_coverage", "avg_interval_width", "avg_winkler_score",
+        ):
+            print(
+                f"{metric} mean: {result[f'{metric}_mean']}, std: {result[f'{metric}_std']}",
+                flush=True,
+            )
     if config["plotting"]["plotting"]:
         from utils.plotting import plot_cp_prediction_intervals
 

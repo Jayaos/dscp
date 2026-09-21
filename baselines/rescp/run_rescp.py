@@ -215,11 +215,14 @@ def run_rescp(config_path, num_cores=1):
     save_data(output_dir / "log.pkl", log)
     save_data(output_dir / "summary_results.pkl", summary)
     for pair, result in summary.items():
-        print(
-            f"{pair}: coverage={result['avg_coverage_mean']:.4f}, "
-            f"width={result['avg_interval_width_mean']:.6g}, "
-            f"Winkler={result['avg_winkler_score_mean']:.6g}", flush=True,
-        )
+        print(f"Summary for confidence pair {pair}", flush=True)
+        for metric in (
+            "avg_coverage", "avg_delta_coverage", "avg_interval_width", "avg_winkler_score",
+        ):
+            print(
+                f"{metric} mean: {result[f'{metric}_mean']}, std: {result[f'{metric}_std']}",
+                flush=True,
+            )
     if OmegaConf.select(config, "plotting.plotting", default=False):
         from utils.plotting import plot_cp_prediction_intervals
 
