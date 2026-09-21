@@ -8,6 +8,8 @@ standard deviations (ddof=0) across sequence means. Rolling coverage uses
 complete, overlapping windows with stride one, averaged within each sequence
 before aggregation across sequences. Delta means coverage minus the nominal
 target (upper quantile minus lower quantile), including for rolling coverage.
+Rolling undercoverage averages max(target - window coverage, 0) within each
+sequence, then reports mean/std across those per-sequence averages.
 Sequences shorter than the window contribute only to the non-rolling metrics.
 """
 
@@ -27,6 +29,7 @@ METRICS = (
     ("Delta coverage", "delta_coverage"),
     ("Rolling coverage", "rolling_coverage"),
     ("Delta rolling coverage", "delta_rolling_coverage"),
+    ("Rolling undercoverage", "rolling_undercoverage"),
 )
 
 METHOD_NAMES = {
@@ -123,9 +126,12 @@ def summarize_results(log, rolling_window_size):
             if len(coverage) >= rolling_window_size:
                 cumulative = np.concatenate(([0.0], np.cumsum(coverage)))
                 rolling = (cumulative[rolling_window_size:] - cumulative[:-rolling_window_size])
-                rolling_mean = float(np.mean(rolling / rolling_window_size))
+                rolling = rolling / rolling_window_size
+                rolling_mean = float(np.mean(rolling))
                 values["rolling_coverage"].append(rolling_mean)
                 values["delta_rolling_coverage"].append(rolling_mean - target)
+                # Apply the positive part per window, before either average.
+                values["rolling_undercoverage"].append(float(np.mean(np.maximum(target - rolling, 0.0))))
 
     if not per_pair:
         raise ValueError("No sequence evaluation results found in log.pkl.")
@@ -255,6 +261,7 @@ def inspect_results(results_dir, rolling_window_size):
     print("Mean/std across equally weighted sequence means; population std (ddof=0).")
     print("Rolling metrics first average windows within each sequence.")
     print("Delta = coverage - target coverage; n/a means unavailable or undefined.")
+    print("Rolling undercoverage = max(target coverage - window coverage, 0), averaged per sequence.")
     for pair, result in summary.items():
         print(f"\nQuantile pair: {pair}; target coverage: {format_value(result['target_coverage'])}")
         count = result["num_sequences"]

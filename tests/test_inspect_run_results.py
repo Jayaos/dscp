@@ -57,11 +57,36 @@ class RunResultSummaryTests(unittest.TestCase):
             "delta_coverage": (-0.1, 0.3),
             "rolling_coverage": (0.625, 0.375),
             "delta_rolling_coverage": (-0.175, 0.375),
+            "rolling_undercoverage": (0.275, 0.275),
         }
         for metric, (mean, std) in expected.items():
             with self.subTest(metric=metric):
                 self.assertAlmostEqual(values[f"avg_{metric}_mean"], mean)
                 self.assertAlmostEqual(values[f"avg_{metric}_std"], std)
+
+    def test_rolling_undercoverage_clips_each_window_and_weights_sequences_equally(self):
+        log = make_log()
+        log["first"]["evaluation_results"][PAIR]["coverage"] = [True, True, False, False, True]
+
+        values = summarize_results(log, 2)[PAIR]
+
+        # Four windows have deficits [0, 0.3, 0.8, 0.3], averaging 0.35.
+        # The second sequence's two windows both have zero deficit.
+        # Average the two sequence means, rather than pooling six windows
+        # or clipping the first sequence's average coverage gap of 0.3.
+        self.assertAlmostEqual(values["avg_rolling_undercoverage_mean"], 0.175)
+        self.assertAlmostEqual(values["avg_rolling_undercoverage_std"], 0.175)
+
+    def test_fully_covered_sequences_have_zero_rolling_undercoverage(self):
+        log = make_log()
+        for name in ("first", "second"):
+            metrics = log[name]["evaluation_results"][PAIR]
+            metrics["coverage"] = [True] * len(metrics["coverage"])
+
+        values = summarize_results(log, 2)[PAIR]
+
+        self.assertEqual(values["avg_rolling_undercoverage_mean"], 0.0)
+        self.assertEqual(values["avg_rolling_undercoverage_std"], 0.0)
 
     def test_pair_order_and_dictionary_order_do_not_mix_metrics(self):
         log = make_log()
@@ -106,13 +131,15 @@ class RunResultSummaryTests(unittest.TestCase):
         self.assertEqual(values["avg_rolling_coverage_std"], 0.0)
         self.assertAlmostEqual(values["avg_delta_rolling_coverage_mean"], -0.4)
         self.assertEqual(values["avg_delta_rolling_coverage_std"], 0.0)
+        self.assertAlmostEqual(values["avg_rolling_undercoverage_mean"], 0.4)
+        self.assertEqual(values["avg_rolling_undercoverage_std"], 0.0)
 
     def test_no_complete_window_has_unavailable_rolling_statistics(self):
         values = summarize_results(make_log(), 6)[PAIR]
 
         self.assertEqual(values["num_rolling_sequences"], 0)
         self.assertAlmostEqual(values["avg_coverage_mean"], 0.7)
-        for metric in ("rolling_coverage", "delta_rolling_coverage"):
+        for metric in ("rolling_coverage", "delta_rolling_coverage", "rolling_undercoverage"):
             for stat in ("mean", "std"):
                 self.assertIsNone(values[f"avg_{metric}_{stat}"])
 
@@ -226,6 +253,7 @@ class RunResultInspectionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("split_cp", result.stdout)
         self.assertIn("rolling", result.stdout.lower())
+        self.assertIn("Rolling undercoverage", result.stdout)
         self.assertIn("winkler", result.stdout.lower())
 
     def test_cli_help_and_invalid_window(self):

@@ -16,6 +16,7 @@ for each quantile pair with mean and standard deviation of:
 - Delta coverage
 - Rolling coverage
 - Delta rolling coverage
+- Rolling undercoverage
 
 The report reads `resolved_config.yaml` when present. Older runs without that
 file can still be summarized, but missing identity/configuration details are
@@ -33,6 +34,22 @@ with stride one and no padding. Window coverages are averaged within each
 sequence before computing mean/std across sequences. Sequences shorter than the
 window are excluded only from rolling metrics; the report shows the number used.
 If no sequence is long enough, rolling metrics are `n/a`.
+
+For rolling undercoverage, compute each sequence's mean positive shortfall:
+
+```text
+u_j = (1 / N_j) * sum_t max(target_coverage - rolling_coverage[j, t], 0)
+MRU = (1 / M) * sum_j u_j
+std = sqrt((1 / M) * sum_j (u_j - MRU)^2)
+```
+
+Here `N_j` is the number of complete windows for sequence `j`, and `M` is the
+number of sequences with at least one complete window (the displayed rolling
+sequence count). The shortfall is clipped at zero **before** averaging windows,
+so overcoverage in one window does not cancel undercoverage in another. Each
+sequence has equal weight regardless of its number of windows. The returned
+summary keys are `avg_rolling_undercoverage_mean` and
+`avg_rolling_undercoverage_std`.
 
 Both deltas are signed: coverage minus nominal target coverage, where the target
 is the upper quantile minus the lower quantile. Widths/scores may be infinite
