@@ -12,13 +12,13 @@ data:
 
 model:
   head_type: nondecreasing # choices: nondecreasing, independent
-  dim_model: 128
-  num_heads: 4
-  num_layers: 2
+  dim_model: 32
+  num_heads: 2
+  num_layers: 4
   dropout: 0.
   use_current_feature: False
   target_quantiles:
-    - [0.05, 0.95]
+    - [0.025, 0.975]
   prediction_step: 1
   window_size: 100
 

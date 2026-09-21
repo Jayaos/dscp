@@ -13,14 +13,14 @@ data:
 
 
 model:
-  dim_model: 128 #64
+  dim_model: 64
   num_heads: 4
   num_layers: 2
   dropout: 0.
   use_current_feature: False
   training_quantiles: [0.1, 0.5, 0.9]
   target_quantiles:
-    - [0.05, 0.95]
+    - [0.025, 0.975]
   prediction_step: 1
   window_size: 200
   calibration_size: 500
