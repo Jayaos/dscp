@@ -10,7 +10,7 @@ data:
 
 model:
   target_quantiles:
-    - [0.05, 0.95]
+    - [0.975, 0.025]
   prediction_step: 1
   reservoir_size: 512
   spectral_radius: 1.45
