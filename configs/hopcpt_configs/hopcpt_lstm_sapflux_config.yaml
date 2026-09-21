@@ -24,7 +24,7 @@ model:
   memory_size: 4000
   y_lags: 1
   target_quantiles:
-    - [0.025, 0.975]
+    - [0.1, 0.9]
   prediction_step: 1
   alpha: 0.1
   sampling_num: 1000
