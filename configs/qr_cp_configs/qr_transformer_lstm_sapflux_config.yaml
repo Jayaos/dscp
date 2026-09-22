@@ -16,7 +16,7 @@ model:
   dropout: 0.
   use_current_feature: False
   target_quantiles:
-    - [0.025, 0.975]
+    - [0.1, 0.9]
   prediction_step: 1
   window_size: 200
 
