@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH -J distmatch_sapflux
 #SBATCH --account=gts-yxie77-paid
-#SBATCH --array=0-2
+#SBATCH --array=2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=24
 #SBATCH --mem=96G
-#SBATCH -t360
+#SBATCH -t720
 #SBATCH --output=%x_%A_%a.out
 
 set -euo pipefail

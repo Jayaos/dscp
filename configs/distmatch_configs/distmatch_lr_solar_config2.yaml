@@ -1,11 +1,10 @@
-# Template: generate the Sapflow Chronos forecast artifact before running this preset.
 # Ratios partition each saved forecast suffix chronologically.
 seed: 2026
 num_cores: 24
 threads_per_worker: 1
 
 data:
-  data_path: "./data/sapflux-solo3-large/chronos/chronos_sapflux-solo3-large_data.pkl"
+  data_path: "./data/solar_prediction/lr/lr_nsdb-60m_data.pkl"
   train_ratio: 0.5
   valid_ratio: 0.16
   test_ratio: 0.34
@@ -36,5 +35,5 @@ plotting:
   plotting: true
   plotting_seq_len: 200
 
-saving_dir: "./results/distmatch/sapflux/chronos/seed_${seed}/${now:%Y-%m-%d_%H-%M-%S_%f}/"
+saving_dir: "./results/distmatch/solar/lr/seed_${seed}/${now:%Y-%m-%d_%H-%M-%S_%f}/"
 
