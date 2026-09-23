@@ -29,9 +29,9 @@ Each submission creates tasks `0-5` with this mapping:
 
 The RNN templates currently use an LSTM encoder. All tasks default to the
 `partially_monotonic` prediction head, which evaluates requested quantiles
-directly and prevents quantile crossing by construction. Select the legacy
-cosine-embedding head, whose inference uses sampling and empirical
-rearrangement, with `IQN_PREDICTION_HEAD`:
+directly and prevents quantile crossing by construction. Select the paper-style
+cosine-embedding head, whose YAML `model.interval_mode` chooses direct
+evaluation or sampling and empirical rearrangement, with `IQN_PREDICTION_HEAD`:
 
 ```bash
 sbatch --export=ALL,IQN_PREDICTION_HEAD=cosine_embedding \
@@ -70,6 +70,33 @@ Air, Solar, and Sapflux jobs load
 `encoder` is `rnn` or `transformer`, `predictor` is `lr`, `lstm`, or `chronos`,
 and `dataset` is `air`, `solar`, or `sapflux`. Each task preserves its selected
 config's model and training settings instead of loading a generic template.
+
+`training.tau_mode` comes from that YAML: `sampled_quantiles` (the default)
+trains across uniformly sampled levels, while `target_quantiles` trains on all
+distinct endpoints in `model.target_quantiles` for each observation. The latter
+ignores `model.num_taus` for training, but
+`training.validation_loss: sampled_quantiles` still uses it. Validation and
+interval settings remain independent. For a cosine
+endpoint-learning diagnostic, use:
+
+```yaml
+model:
+  prediction_head: cosine_embedding
+  target_quantiles:
+    - [0.95, 0.05]
+  interval_mode: direct
+training:
+  tau_mode: target_quantiles
+  validation_loss: target_quantiles
+```
+
+Also submit with `IQN_PREDICTION_HEAD=cosine_embedding`: the launcher overrides
+the YAML head selector with this environment setting (default
+`partially_monotonic`). Target-only training does not supervise other quantile
+levels, so combining it with cosine sampling intervals emits a warning without
+changing the chosen modes. Use a separate output directory when comparing
+training modes; `tau_mode` does not change the checkpoint architecture or add
+an automatic output-path component.
 
 The six Solar configs initially match their corresponding Air hyperparameters;
 only their prediction artifact and output paths differ. They are separate files

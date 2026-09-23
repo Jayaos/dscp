@@ -8,7 +8,14 @@ from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
 from dscp.data import ConformalPredictionData
-from dscp.loss import compute_loss_iqn_rnn, compute_loss_iqn_transformer, resolve_iqn_validation_quantiles, compute_iqn_interval_validation_loss
+from dscp.loss import (
+    compute_iqn_interval_validation_loss,
+    compute_loss_iqn_rnn,
+    compute_loss_iqn_transformer,
+    resolve_iqn_training_quantiles,
+    resolve_iqn_validation_quantiles,
+    warn_iqn_training_interval_mismatch,
+)
 from dscp.models.iqn import build_iqn_optimizer
 from dscp.models.iqn_rnn import IQNRNN
 from dscp.models.iqn_transformer import IQNTransformer
@@ -185,6 +192,15 @@ def _normalization_params(config, sequence_data):
 
 def _run_single_trial(config, sequence_item, normalization_params):
     device = resolve_device(config.device)
+    tau_mode, training_quantiles = resolve_iqn_training_quantiles(
+        config.training, config.model.target_quantiles
+    )
+    config.training.tau_mode = tau_mode
+    training_kwargs = (
+        {"taus": torch.tensor(training_quantiles, dtype=torch.float32, device=device)}
+        if training_quantiles is not None else {}
+    )
+    warn_iqn_training_interval_mismatch(tau_mode, config.model)
     validation_mode, validation_quantiles = resolve_iqn_validation_quantiles(
         config.training, config.model.target_quantiles
     )
@@ -250,9 +266,15 @@ def _run_single_trial(config, sequence_item, normalization_params):
             target_residual = target_residual.to(device)
             target_x = target_x.to(device)
             if use_current_feature:
-                loss = loss_fn(model, strided_feature, target_residual, config.model.num_taus, target_x)
+                loss = loss_fn(
+                    model, strided_feature, target_residual, config.model.num_taus,
+                    target_x, **training_kwargs,
+                )
             else:
-                loss = loss_fn(model, strided_feature, target_residual, config.model.num_taus)
+                loss = loss_fn(
+                    model, strided_feature, target_residual, config.model.num_taus,
+                    **training_kwargs,
+                )
             loss.backward()
             optimizer.step()
             loss_sum += loss.item()
@@ -377,6 +399,8 @@ def _run_single_trial(config, sequence_item, normalization_params):
         "iqn_num_layers": getattr(model.iqn, "iqn_num_layers", None),
         "interval_mode": model.iqn.interval_mode,
         "sampling_num": getattr(model.iqn, "sampling_num", None),
+        "tau_mode": tau_mode,
+        "training_quantiles": training_quantiles,
         "validation_loss": validation_mode,
         "validation_quantiles": validation_quantiles,
         "train_loss": train_loss,
@@ -432,13 +456,18 @@ def _run_grid_trial(
 ):
     """Evaluate one configuration on every selected sequence, in their original order."""
     _synchronize_shared_dimensions(trial_config)
+    tau_mode, training_quantiles = resolve_iqn_training_quantiles(
+        trial_config.training, trial_config.model.target_quantiles
+    )
+    trial_config.training.tau_mode = tau_mode
     validation_mode, validation_quantiles = resolve_iqn_validation_quantiles(
         trial_config.training, trial_config.model.target_quantiles
     )
     trial_config.training.validation_loss = validation_mode
     print(
         f"[iqn_cp] starting trial {trial_index} on device={trial_config.get('device', 'default')} "
-        f"with grid_values={grid_values}; validation_loss={validation_mode}, "
+        f"with grid_values={grid_values}; tau_mode={tau_mode}, "
+        f"training_quantiles={training_quantiles}; validation_loss={validation_mode}, "
         f"validation_quantiles={validation_quantiles}",
         flush=True,
     )
@@ -457,6 +486,8 @@ def _run_grid_trial(
     }
     result = aggregate_sequence_results(sequence_results, trial_config.model.target_quantiles)
     result["prediction_head"] = sequence_results[sequence_keys[0]]["prediction_head"]
+    result["tau_mode"] = tau_mode
+    result["training_quantiles"] = training_quantiles
     result["validation_loss"] = validation_mode
     result["validation_quantiles"] = validation_quantiles
     result["mean_best_model_selection_valid_loss"] = result["mean_best_valid_loss"]

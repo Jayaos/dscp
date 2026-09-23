@@ -321,9 +321,9 @@ RNN and Transformer IQN-CP support two choices through
 | `partially_monotonic` | Implements the partially monotonic head. The quantile level is supplied directly, all weights along the quantile-dependent path are positive softplus transforms, and inference evaluates `g(h, tau)` directly. Quantiles are nondecreasing in `tau` by construction. |
 | `cosine_embedding` (default when the selector is omitted) | Implements the paper-style cosine quantile embedding and multiplicative context conditioning. Its raw head is not constrained to be monotonic, and `model.interval_mode` selects direct evaluation or sampling-based empirical rearrangement when constructing intervals. |
 
-The checked-in IQN-CP experiment configurations explicitly select the
-partially monotonic design. To select the paper-style cosine design,
-change only the selector:
+The checked-in IQN-CP experiment configurations explicitly select a prediction
+head. To switch between the partially monotonic and paper-style cosine designs,
+change the selector:
 
 ```yaml
 model:
@@ -383,9 +383,41 @@ the full-range training loss. The partially monotonic head ignores the cosine
 depth, embedding, and interval options and always evaluates its nondecreasing
 function directly.
 
-IQN training is unchanged: it always minimizes pinball loss at uniformly
-sampled quantile levels, with `model.num_taus` samples per example. Checkpoint
-validation is configured separately through `training.validation_loss`:
+Both heads support two training objectives through `training.tau_mode`:
+
+- `sampled_quantiles` (default, including when omitted) retains full
+  quantile-function training: each observation uses `model.num_taus` fresh
+  uniformly sampled levels and the raw differentiable pinball loss.
+- `target_quantiles` evaluates the raw head at every sorted distinct level in
+  `model.target_quantiles` for every observation, then averages the same pinball
+  loss over observations and levels. It does not sample training levels and
+  ignores `model.num_taus` for training. This is a fixed-level diagnostic, not
+  supervision of the entire quantile function. The architecture is unchanged.
+
+Training mode is independent of both checkpoint validation and interval
+construction. In particular, target-only training with cosine
+`interval_mode: sampling` emits a warning but is not rejected or overridden:
+sampling still evaluates levels not supervised by that training objective.
+For an endpoint-learning diagnostic, use direct intervals and matched
+target-level checkpoint validation:
+
+```yaml
+model:
+  prediction_head: cosine_embedding
+  target_quantiles:
+    - [0.95, 0.05]
+  interval_mode: direct
+training:
+  tau_mode: target_quantiles
+  validation_loss: target_quantiles
+```
+
+The target-quantile pairs retain their existing `[upper, lower]` convention;
+training uses their sorted distinct endpoints, so the example supervises both
+0.05 and 0.95 for every observation. Raw cosine outputs can still cross.
+
+Checkpoint validation is configured separately through
+`training.validation_loss`:
 
 - `target_quantiles` averages pinball loss over validation observations and
   the sorted distinct levels in `model.target_quantiles`, using the selected
@@ -396,16 +428,19 @@ validation is configured separately through `training.validation_loss`:
   batch index, and restores the caller's RNG state afterward. Repeating a
   validation epoch therefore scores the same samples without changing later
   training randomness.
-- `sampled_quantiles` averages over fresh uniformly sampled levels and
-  preserves the legacy raw-head validation behavior independently of interval
+- `sampled_quantiles` averages over `model.num_taus` fresh uniformly sampled
+  levels and preserves the legacy raw-head validation behavior independently of interval
   construction mode. Configurations that omit `training.validation_loss` also
   fall back to `sampled_quantiles` for backward compatibility.
 
-The checked-in ordinary IQN configurations and tuning grids explicitly use
-`target_quantiles`. To compare the checkpoint criteria in one grid, use:
+The checked-in ordinary IQN configurations default to
+`tau_mode: sampled_quantiles`; their checkpoint criterion and the tuning grids
+explicitly use `validation_loss: target_quantiles`. To compare training modes
+or checkpoint criteria in a grid, add either or both axes:
 
 ```yaml
 grid:
+  training.tau_mode: [sampled_quantiles, target_quantiles]
   training.validation_loss: [target_quantiles, sampled_quantiles]
 ```
 
@@ -415,8 +450,9 @@ paper-style cosine architecture is also not directly compatible with cosine
 checkpoints from the earlier implementation, which used a two-linear-layer
 PReLU embedding, a learned context input projection, residual multiplicative
 conditioning, and a Softplus/dropout prediction head. Retrain those models.
-Within the new cosine architecture, `interval_mode` and `sampling_num` do not
-add state-dictionary entries, but `iqn_num_layers`, `iqn_hidden_dim`,
+Within the new cosine architecture, `interval_mode`, `sampling_num`, and
+`training.tau_mode` do not add state-dictionary entries or change checkpoint
+architecture compatibility, but `iqn_num_layers`, `iqn_hidden_dim`,
 `cos_emb_dim`, and the context width must match the saved weights. Each
 ordinary run writes `resolved_config.yaml` beside its checkpoints, and the
 checked-in monotonic experiments use head-specific `saving_dir` values to
@@ -426,8 +462,10 @@ changes the ordinary run directory. For separate tuning invocations, likewise
 use a distinct `--save-dir`; a single grid run already keeps its head choices
 in distinct trials. Configurations that omit the selector retain the legacy
 `cosine_embedding` behavior. The Slurm launchers still use
-`IQN_PREDICTION_HEAD` only to select the head; interval mode comes from the
-selected YAML. IQN-CP currently supports `model.prediction_step: 1`.
+`IQN_PREDICTION_HEAD` to select the head, overriding the YAML selector; interval
+and training modes come from the selected YAML. For the cosine diagnostic,
+submit with `IQN_PREDICTION_HEAD=cosine_embedding` as well as setting the YAML
+options above. IQN-CP currently supports `model.prediction_step: 1`.
 
 ## Data split strategy
 
@@ -630,7 +668,7 @@ approximate because split boundaries are integer-valued.
 | Method | Training | Validation | Calibration | Test |
 | --- | --- | --- | --- | --- |
 | QR-CP | First 50%. Fits the shared encoder and fixed quantile heads with quantile loss. | Next 16%. Selects the checkpoint and controls early stopping. It does not update model parameters. | None. QR-CP directly estimates conditional residual quantiles and has no separate conformal calibration step. | Final approximately 34%. The frozen checkpoint produces residual quantiles used for coverage, width, and Winkler-score reporting. |
-| IQN-CP | First 60%. Fits the shared encoder and tau-conditioned IQN head with sampled quantile loss. | Next 20%. Selects the checkpoint and controls early stopping. It does not update model parameters. | None. IQN-CP directly estimates conditional residual quantiles and has no separate conformal calibration step. | Final approximately 20%. The frozen checkpoint produces residual quantiles used for reporting. |
+| IQN-CP | First 60%. Fits the shared encoder and tau-conditioned IQN head with sampled quantile loss by default, or fixed target-level loss when `training.tau_mode: target_quantiles`. | Next 20%. Selects the checkpoint and controls early stopping. It does not update model parameters. | None. IQN-CP directly estimates conditional residual quantiles and has no separate conformal calibration step. | Final approximately 20%. The frozen checkpoint produces residual quantiles used for reporting. |
 | Local-CP | First 60%. Fits the encoder and auxiliary residual quantile head with quantile loss at `model.training_quantiles`; the hidden state supplies the similarity representation. | Next approximately 10%. Uses quantile loss at the same `model.training_quantiles` to select the checkpoint and control early stopping; it is not used for calibration. | Next approximately 10%. This is a dedicated calibration partition that is not used for fitting or checkpoint selection. The latest `model.calibration_size=500` eligible examples initialize the calibration pool; set a different cap to control its memory size. Each representation for time `t` is paired with its target residual `r_t`. | Final approximately 20%, processed sequentially with batch size one. The network stays frozen. With `model.rolling_calibration: true` (default), `(representation_t, r_t)` replaces the oldest pool pair after the interval is constructed and `r_t` is observed. With `false`, the initial pool is retained throughout inference. |
 
 Thus, `data.calibration_ratio` controls how much data is reserved and eligible

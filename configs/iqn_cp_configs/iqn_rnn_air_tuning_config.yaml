@@ -13,6 +13,7 @@ grid:
   training.learning_rate: [0.001]
   training.epochs: [50]
   training.early_stop: [3]
+  # training.tau_mode: [sampled_quantiles, target_quantiles] # fixed-level diagnostic: prefer cosine interval_mode direct
   training.validation_loss: [target_quantiles] # Add sampled_quantiles to compare legacy random-level validation.
 
 

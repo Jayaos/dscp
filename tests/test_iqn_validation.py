@@ -574,7 +574,8 @@ class IQNValidationIntegrationTests(unittest.TestCase):
                     config.training.validation_loss,
                     "target_quantiles",
                 )
-                self.assertEqual(config.model.interval_mode, "sampling")
+                self.assertEqual(config.training.tau_mode, "sampled_quantiles")
+                self.assertIn(config.model.interval_mode, ("direct", "sampling"))
                 self.assertEqual(config.model.sampling_num, 1000)
                 self.assertEqual(config.model.iqn_num_layers, 1)
 

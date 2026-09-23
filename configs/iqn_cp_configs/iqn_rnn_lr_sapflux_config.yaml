@@ -31,6 +31,7 @@ model:
 
 
 training:
+  tau_mode: sampled_quantiles # or target_quantiles for fixed-level training
   batch_size: 32
   learning_rate: 0.001
   epochs: 100

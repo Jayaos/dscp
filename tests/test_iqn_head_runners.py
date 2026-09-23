@@ -333,11 +333,14 @@ class IQNPredictionHeadRunnerTests(unittest.TestCase):
         for config_name in config_names:
             with self.subTest(config=config_name):
                 config = OmegaConf.load(config_dir / config_name)
-                monotonic_dir = config.saving_dir
-                self.assertEqual(
+                self.assertIn(
                     config.model.prediction_head,
-                    "partially_monotonic",
+                    ("partially_monotonic", "cosine_embedding"),
                 )
+                # Exercise both routes without constraining the experiment's
+                # currently selected head.
+                config.model.prediction_head = "partially_monotonic"
+                monotonic_dir = config.saving_dir
                 self.assertIn("partially_monotonic", monotonic_dir)
 
                 config.model.prediction_head = "cosine_embedding"

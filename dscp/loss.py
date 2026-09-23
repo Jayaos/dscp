@@ -1,4 +1,5 @@
 import math
+import warnings
 from numbers import Integral, Real
 
 import torch
@@ -106,23 +107,25 @@ def _local_cp_quantile_loss(model, quantile_predictions, target):
     return torch.maximum((taus - 1.0) * errors, taus * errors).mean()
 
 
-def resolve_iqn_validation_quantiles(training_config, target_quantiles):
-    """Resolve checkpoint loss without changing the sampled IQN training objective.
-
-    Target mode uses each distinct interval endpoint once. Sampled mode preserves
-    the legacy validation behavior and does not supply explicit quantile levels.
-    """
-    mode = str(training_config.get("validation_loss", "sampled_quantiles")).strip().lower()
+def _resolve_iqn_quantiles(
+    training_config,
+    target_quantiles,
+    *,
+    config_key,
+    purpose,
+):
+    mode = str(training_config.get(config_key, "sampled_quantiles")).strip().lower()
     if mode not in ("sampled_quantiles", "target_quantiles"):
         raise ValueError(
-            "training.validation_loss must be 'sampled_quantiles' or 'target_quantiles'."
+            f"training.{config_key} must be 'sampled_quantiles' or 'target_quantiles'."
         )
     if mode == "sampled_quantiles":
         return mode, None
 
     error = (
         "model.target_quantiles must contain nonempty interval pairs of distinct, "
-        "finite quantile levels strictly between 0 and 1 for target_quantiles validation."
+        "finite quantile levels strictly between 0 and 1 for target_quantiles "
+        f"{purpose}."
     )
     try:
         pairs = list(target_quantiles)
@@ -150,6 +153,53 @@ def resolve_iqn_validation_quantiles(training_config, target_quantiles):
     return mode, sorted(levels)
 
 
+def resolve_iqn_validation_quantiles(training_config, target_quantiles):
+    """Resolve checkpoint-loss levels independently of the training tau mode.
+
+    Target mode uses each distinct interval endpoint once. Sampled mode preserves
+    the legacy validation behavior and does not supply explicit quantile levels.
+    """
+    return _resolve_iqn_quantiles(
+        training_config,
+        target_quantiles,
+        config_key="validation_loss",
+        purpose="validation",
+    )
+
+
+def resolve_iqn_training_quantiles(training_config, target_quantiles):
+    """Resolve the IQN training tau mode and any fixed interval endpoints."""
+    return _resolve_iqn_quantiles(
+        training_config,
+        target_quantiles,
+        config_key="tau_mode",
+        purpose="training",
+    )
+
+
+def warn_iqn_training_interval_mismatch(tau_mode, model_config):
+    """Warn when endpoint-only cosine training is paired with sampled inference."""
+    normalized_tau_mode = str(tau_mode).strip().lower()
+    prediction_head = str(
+        model_config.get("prediction_head", "cosine_embedding")
+    ).strip().lower()
+    interval_mode = str(
+        model_config.get("interval_mode", "sampling")
+    ).strip().lower()
+    if (
+        normalized_tau_mode == "target_quantiles"
+        and prediction_head == "cosine_embedding"
+        and interval_mode == "sampling"
+    ):
+        warnings.warn(
+            "IQN target_quantiles training leaves other tau levels untrained, "
+            "but cosine_embedding interval_mode='sampling' evaluates those levels; "
+            "use interval_mode='direct'.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+
 @torch.no_grad()
 def compute_iqn_interval_validation_loss(
     model,
@@ -165,7 +215,7 @@ def compute_iqn_interval_validation_loss(
     The caller must put the model in evaluation mode. Cosine heads use their
     configured direct or sampling interval mode, including ``sampling_num``;
     partially monotonic heads always evaluate the requested levels directly.
-    This validation-only helper does not change the sampled training objective.
+    This validation-only helper does not choose or change the training tau mode.
 
     A supplied seed gives reproducible Monte Carlo draws without advancing the
     caller's CPU or selected CUDA-device RNG state. Runners reuse a seed for
@@ -221,8 +271,8 @@ def compute_loss_iqn_transformer(model, x, target, num_taus, current_feature=Non
 
     :param x: input, (batch_size, window_size, feature_dim)
     :param target: target_residual, (batch_size, 1)
-    :param num_taus: number of quantile fractions to sample per instance
-    :param taus: optional fixed levels; None preserves full-range sampled training
+    :param num_taus: number of quantile fractions to sample when taus is None
+    :param taus: optional fixed levels; when omitted, the model samples num_taus levels
     """
     device = x.device
     target = target.to(device)
@@ -247,8 +297,8 @@ def compute_loss_iqn_rnn(model, x, target, num_taus, current_feature=None, *, ta
 
     :param x: input, (batch_size, window_size, feature_dim)
     :param target: target_residual, (batch_size, 1)
-    :param num_taus: number of quantile fractions to sample per instance
-    :param taus: optional fixed levels; None preserves full-range sampled training
+    :param num_taus: number of quantile fractions to sample when taus is None
+    :param taus: optional fixed levels; when omitted, the model samples num_taus levels
     """
     device = x.device
     target = target.to(device)

@@ -10,7 +10,14 @@ from dscp.models.iqn_transformer import IQNTransformer
 from dscp.models.iqn_rnn import IQNRNN
 from dscp.models.iqn import build_iqn_optimizer
 from dscp.data import ConformalPredictionData
-from dscp.loss import compute_loss_iqn_transformer, compute_loss_iqn_rnn, resolve_iqn_validation_quantiles, compute_iqn_interval_validation_loss
+from dscp.loss import (
+    compute_loss_iqn_transformer,
+    compute_loss_iqn_rnn,
+    resolve_iqn_training_quantiles,
+    resolve_iqn_validation_quantiles,
+    compute_iqn_interval_validation_loss,
+    warn_iqn_training_interval_mismatch,
+)
 from utils.utils import load_data, save_data, read_setup, generate_strided_feature, get_interval_quantile_indices
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, construct_interval_endpoints, summarize_evaluation_results
 from utils.plotting import plot_cp_prediction_intervals
@@ -82,6 +89,11 @@ def run_transformer_iqn_cp(config_path):
 
     config = load_experiment_config(config_path)
     _materialize_prediction_head_selector(config.model)
+    tau_mode, training_quantiles = resolve_iqn_training_quantiles(
+        config.training, config.model.target_quantiles
+    )
+    config.training.tau_mode = tau_mode
+    warn_iqn_training_interval_mismatch(tau_mode, config.model)
     validation_mode, validation_quantiles = resolve_iqn_validation_quantiles(
         config.training, config.model.target_quantiles
     )
@@ -99,6 +111,10 @@ def run_transformer_iqn_cp(config_path):
                                              config.data.valid_ratio,
                                              normalize=config.data.normalize)
     device = config.device
+    training_kwargs = (
+        {"taus": torch.tensor(training_quantiles, dtype=torch.float32, device=device)}
+        if training_quantiles is not None else {}
+    )
     validation_kwargs = (
         {"taus": torch.tensor(validation_quantiles, dtype=torch.float32, device=device)}
         if validation_quantiles is not None else {}
@@ -108,6 +124,7 @@ def run_transformer_iqn_cp(config_path):
 
     print("Experiment setup")
     print("Method: IQN - Transformer")
+    print("Training tau mode: {} (levels: {})".format(tau_mode, training_quantiles))
     print("Validation/checkpoint loss: {} (levels: {})".format(validation_mode, validation_quantiles))
     print("Prediction head: {}".format(
         config.model.get("prediction_head", "cosine_embedding")
@@ -188,6 +205,7 @@ def run_transformer_iqn_cp(config_path):
                         target_residual,
                         config.model.num_taus,
                         target_x,
+                        **training_kwargs,
                     )
                 else:
                     loss = compute_loss_iqn_transformer(
@@ -195,6 +213,7 @@ def run_transformer_iqn_cp(config_path):
                         strided_feature,
                         target_residual,
                         config.model.num_taus,
+                        **training_kwargs,
                     )
                 loss.backward()
                 optimizer.step()
@@ -382,6 +401,8 @@ def run_transformer_iqn_cp(config_path):
                     "interval_mode": iqn_transformer.iqn.interval_mode,
                     "sampling_num": getattr(iqn_transformer.iqn, "sampling_num", None),
                     "model_config": OmegaConf.to_container(config.model, resolve=True),
+                    "tau_mode": tau_mode,
+                    "training_quantiles": training_quantiles,
                     "validation_loss": validation_mode,
                     "validation_quantiles": validation_quantiles,
                     "train_loss": train_loss,
@@ -427,6 +448,11 @@ def run_rnn_iqn_cp(config_path):
 
     config = load_experiment_config(config_path)
     _materialize_prediction_head_selector(config.model)
+    tau_mode, training_quantiles = resolve_iqn_training_quantiles(
+        config.training, config.model.target_quantiles
+    )
+    config.training.tau_mode = tau_mode
+    warn_iqn_training_interval_mismatch(tau_mode, config.model)
     validation_mode, validation_quantiles = resolve_iqn_validation_quantiles(
         config.training, config.model.target_quantiles
     )
@@ -444,6 +470,10 @@ def run_rnn_iqn_cp(config_path):
                                              config.data.valid_ratio,
                                              normalize=config.data.normalize)
     device = config.device
+    training_kwargs = (
+        {"taus": torch.tensor(training_quantiles, dtype=torch.float32, device=device)}
+        if training_quantiles is not None else {}
+    )
     validation_kwargs = (
         {"taus": torch.tensor(validation_quantiles, dtype=torch.float32, device=device)}
         if validation_quantiles is not None else {}
@@ -453,6 +483,7 @@ def run_rnn_iqn_cp(config_path):
 
     print("Experiment setup")
     print("Method: IQN - RNN")
+    print("Training tau mode: {} (levels: {})".format(tau_mode, training_quantiles))
     print("Validation/checkpoint loss: {} (levels: {})".format(validation_mode, validation_quantiles))
     print("Prediction head: {}".format(
         config.model.get("prediction_head", "cosine_embedding")
@@ -532,6 +563,7 @@ def run_rnn_iqn_cp(config_path):
                         target_residual,
                         config.model.num_taus,
                         target_x,
+                        **training_kwargs,
                     )
                 else:
                     loss = compute_loss_iqn_rnn(
@@ -539,6 +571,7 @@ def run_rnn_iqn_cp(config_path):
                         strided_feature,
                         target_residual,
                         config.model.num_taus,
+                        **training_kwargs,
                     )
                 loss.backward()
                 optimizer.step()
@@ -726,6 +759,8 @@ def run_rnn_iqn_cp(config_path):
                     "interval_mode": iqn_rnn.iqn.interval_mode,
                     "sampling_num": getattr(iqn_rnn.iqn, "sampling_num", None),
                     "model_config": OmegaConf.to_container(config.model, resolve=True),
+                    "tau_mode": tau_mode,
+                    "training_quantiles": training_quantiles,
                     "validation_loss": validation_mode,
                     "validation_quantiles": validation_quantiles,
                     "train_loss": train_loss,
