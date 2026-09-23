@@ -7,26 +7,28 @@ data:
   normalize: True
   strided_features: "xry"
 
+
 model:
   rnn_type: "lstm"
-  dim_model: 16
-  num_layers: 2
+  dim_model: 64
+  num_layers: 1
   dropout: 0.
   use_current_feature: False
   # Choose "partially_monotonic" or the paper-style "cosine_embedding" IQN head.
-  prediction_head: "partially_monotonic"
-  interval_mode: "sampling" # cosine only: direct or sampling
+  prediction_head: "cosine_embedding"
+  interval_mode: "direct" # cosine only: direct or sampling
   sampling_num: 1000 # cosine sampling validation/inference only; distinct from training num_taus
-  iqn_hidden_dim: 16
+  iqn_hidden_dim: 64
   iqn_num_layers: 1 # cosine prediction MLP hidden-layer count; embedding stays one layer
-  monotonic_num_layers: 2
+  monotonic_num_layers: 1
   monotonic_activation: "tanh"
-  cos_emb_dim: 16
+  cos_emb_dim: 64
   num_taus: 64
   target_quantiles:
     - [0.95, 0.05]
   prediction_step: 1
   window_size: 100
+
 
 training:
   tau_mode: sampled_quantiles # or target_quantiles for fixed-level training
@@ -35,6 +37,7 @@ training:
   epochs: 50
   early_stop: 3
   validation_loss: "target_quantiles"
+  
 
 plotting:
   plotting: True

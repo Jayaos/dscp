@@ -3,11 +3,11 @@
 #SBATCH --account=gts-yxie77-paid
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --array=0
+#SBATCH --array=0-5
 #SBATCH --gres=gpu:1 -C V100
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH -t60
+#SBATCH -t120
 #SBATCH -qinferno
 #SBATCH -o Report-iqn-cp-solar-%A_%a.out
 #SBATCH --mail-type=ALL
