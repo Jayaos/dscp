@@ -4,8 +4,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --array=0
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=16G
+#SBATCH --cpus-per-task=24
+#SBATCH --mem=96G
 #SBATCH -t30
 #SBATCH -qinferno
 #SBATCH -o Report-kowcpi-sapflux-%A_%a.out
