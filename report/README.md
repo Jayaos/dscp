@@ -63,3 +63,26 @@ from report.inspect_run_results import inspect_results
 
 summary = inspect_results("results/rescp/air/lstm/run", rolling_window_size=100)
 ```
+
+# Plot saved base predictions
+
+Use `plot_predictions.py` with any base predictor's `*_data.pkl` file from
+Sapflux, solar, or air. NumPy and Matplotlib are required.
+
+```bash
+python report/plot_predictions.py data/sapflux-solo3-large/lstm/lstm_sapflux-solo3-large_data.pkl --plot-len 1000 --save-dir report/plots/sapflux
+python report/plot_predictions.py data/solar_prediction/lr/lr_nsdb-60m_data.pkl --plot-len 1000 --save-dir report/plots/solar
+python report/plot_predictions.py data/air-10_prediction/chronos/chronos_air-10_data.pkl --plot-len 1000 --save-dir report/plots/air
+```
+
+The script saves one PDF for **every sequence**, plotting `heldout_y` against
+`heldout_predictions` for the first `--plot-len` held-out steps. Shorter sequences
+are plotted in full. It accepts lists, one-dimensional arrays, and column
+vectors, and checks that targets and predictions have equal lengths. The x-axis
+is the zero-based held-out step; timestamps are not stored in these artifacts.
+Values are plotted on their saved scale.
+
+The output directory is created automatically. PDF filenames include the input
+artifact name, sequence index and identifier, and actual plotted length. Running
+the same command again replaces the corresponding PDFs. `--saving-dir` is an
+alias for `--save-dir`. Relative paths are resolved from the current directory.
