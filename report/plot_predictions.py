@@ -15,10 +15,15 @@ import pickle
 import re
 
 
-def _positive_int(raw_value):
-    value = int(raw_value)
+def _plot_length(raw_value):
+    if raw_value.strip().lower() == "all":
+        return "all"
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("value must be a positive integer or 'all'") from exc
     if value <= 0:
-        raise argparse.ArgumentTypeError("value must be a positive integer")
+        raise argparse.ArgumentTypeError("value must be a positive integer or 'all'")
     return value
 
 
@@ -47,11 +52,14 @@ def _filename_part(value):
 def plot_predictions(data_path, plot_len, save_dir):
     """Plot the first plot_len held-out steps for every series; return PDF paths.
 
+    Set plot_len="all" to plot each complete held-out sequence.
     Lists, 1-D arrays, and (N, 1) arrays are accepted. Targets and predictions
     must have equal lengths before slicing. Saved values retain their scale.
     """
-    if isinstance(plot_len, bool) or not isinstance(plot_len, Integral) or plot_len <= 0:
-        raise ValueError("plot_len must be a positive integer.")
+    if isinstance(plot_len, str) and plot_len.strip().lower() == "all":
+        plot_len = None
+    elif isinstance(plot_len, bool) or not isinstance(plot_len, Integral) or plot_len <= 0:
+        raise ValueError("plot_len must be a positive integer or 'all'.")
 
     data_path = Path(data_path)
     save_dir = Path(save_dir)
@@ -126,8 +134,8 @@ def build_parser():
     )
     parser.add_argument("data_path", type=Path, help="Path to a base predictor's *_data.pkl file.")
     parser.add_argument(
-        "--plot-len", type=_positive_int, required=True,
-        help="Number of initial held-out steps to plot (capped at each sequence's length).",
+        "--plot-len", type=_plot_length, required=True, metavar="N|all",
+        help="Number of initial held-out steps to plot, or 'all' for each complete sequence.",
     )
     parser.add_argument(
         "--save-dir", "--saving-dir", dest="save_dir", type=Path, required=True,
