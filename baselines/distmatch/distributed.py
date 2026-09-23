@@ -224,7 +224,7 @@ def merge_shards(config):
     config, root, manifest, data = _load_run(config)
     del data
     with _claim(root / "merge.lock"):
-        outputs = ("log.pkl", "summary_results.pkl", "run_metadata.yaml")
+        outputs = ("log.pkl", "summary_results.pkl", "run_metadata.yaml", "excluded_points.csv")
         if any((root / name).exists() for name in outputs):
             raise FileExistsError("Merged outputs already exist; refusing to overwrite this run.")
         expected = {f"shard_{index:04d}.pkl" for index in range(manifest["num_shards"])}

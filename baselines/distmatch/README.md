@@ -337,7 +337,7 @@ environment variables are `DISTMATCH_GRID_CONFIG`,
 ## Verify
 
 ```bash
-python -m pytest tests/test_distmatch_model.py tests/test_distmatch_data_usage.py tests/test_distmatch_normalization.py tests/test_distmatch_tuning.py tests/test_distmatch_cli.py tests/test_distmatch_progress.py tests/test_distmatch_distributed.py tests/test_distmatch_solar_launch.py
+python -m pytest tests/test_distmatch_model.py tests/test_distmatch_data_usage.py tests/test_distmatch_normalization.py tests/test_distmatch_tuning.py tests/test_distmatch_cli.py tests/test_distmatch_progress.py tests/test_distmatch_distributed.py tests/test_distmatch_solar_launch.py tests/test_distmatch_exclusions.py tests/test_distmatch_exclusion_persistence.py tests/test_distmatch_report_exclusions.py
 ```
 
 These checks cover KS/reference agreement, causality, normalization boundaries,
@@ -355,3 +355,38 @@ weight each series equally, including unequal-length series. Run metadata
 records package versions, worker counts, and elapsed time; per-series metadata
 records split boundaries, model/cache diagnostics, and training/replay/test
 timings. Enabling plotting writes the standard interval PDFs under `plots/`.
+
+During final test evaluation, a QRF crossed-bound error excludes the entire
+timestamp from all requested coverage levels. The observation still updates
+the model exactly once, preserving subsequent history and random seeds. Only
+this specific numerical error is recoverable; unrelated errors and crossed
+bounds during validation tuning still stop evaluation.
+
+All per-point result arrays contain only successful predictions, including
+targets, forecasts, intervals, metric values, and original `target_indices`.
+Plots omit excluded points. Rolling coverage in `report/inspect_run_results.py`
+uses successive successful predictions: a window of 100 means 100 retained
+points, even if their original indices contain gaps. Coverage, width and
+Winkler scores therefore describe the retained subset of the test period.
+
+`excluded_points.csv` records every excluded timestamp, including sequence,
+predictor/dataset, seeds, zero-based test offset and held-out target index,
+target/forecast, triggering and excluded quantile pairs, tree, beta, invalid
+residual bounds, units, reason, and action. Bound values are the failing QRF's
+residual quantiles, before tree averaging or adding the forecast; `bound_scale`
+and `residual_scale` specify their units. Even a run without exclusions writes
+the CSV header. Workers immediately flush separate `exclusions/*.jsonl`
+journals, preserving diagnostics if the run is interrupted. The final CSV is
+assembled from completed sequence results, so journals from interrupted
+attempts do not introduce duplicate records. Distributed runs create the CSV
+when shards are merged.
+
+Sequence metadata preserves the complete original target indices and a
+`valid_prediction_mask`. Per-sequence results, summaries, and run metadata
+report total/evaluated/excluded points and exclusion rates. Sequences with no
+successful predictions remain in `log.pkl` with empty arrays, unavailable
+averages (`None`), and `evaluation_status: no_valid_predictions`; they are
+omitted from plots and metric averages and counted explicitly. If no sequence
+has a valid prediction, the run saves diagnostics and unavailable aggregate
+scores rather than inventing a numerical result. These exclusions and report
+handling apply only to DistMatch.

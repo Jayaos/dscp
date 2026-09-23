@@ -22,6 +22,14 @@ UPSTREAM_COMMIT = "d9fd84dde4a2b92cf5340a3cae578bd0fe489ccd"
 _CACHE_VERSION = "distmatch-equal-window-strict-ks-v1"
 
 
+class DistMatchCrossedBoundsError(ValueError):
+    """A failed QRF interval, with enough context to record an exclusion."""
+
+    def __init__(self, message="DistMatch QRF returned crossed interval bounds.", **diagnostics):
+        super().__init__(message)
+        self.diagnostics = diagnostics
+
+
 def _integer(name, value, minimum=1):
     if isinstance(value, (bool, np.bool_)) or not isinstance(value, Integral) or value < minimum:
         raise ValueError(f"{name} must be an integer at least {minimum}.")
@@ -421,7 +429,12 @@ class DistMatchResidualIntervalEstimator:
                 uppers = predictions[np.searchsorted(quantiles, highs)]
                 best = int(np.argmin(uppers - lows))
                 if uppers[best] < lows[best]:
-                    raise ValueError("DistMatch QRF returned crossed interval bounds.")
+                    raise DistMatchCrossedBoundsError(
+                        tree_index=tree_index, triggering_quantile_pair=list(pair),
+                        beta=float(betas[best]), lower_quantile=float(betas[best]),
+                        upper_quantile=float(highs[best]), lower_bound=float(lows[best]),
+                        upper_bound=float(uppers[best]),
+                    )
                 per_pair[pair].append((float(lows[best]), float(uppers[best]), float(betas[best])))
         return {
             pair: (float(np.mean([v[0] for v in values])), float(np.mean([v[1] for v in values])), [v[2] for v in values])

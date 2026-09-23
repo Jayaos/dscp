@@ -24,7 +24,10 @@ from baselines.distmatch.config import (
     validate_config,
 )
 from baselines.distmatch.data import prepare_sequence
-from baselines.distmatch.model import DistMatchResidualIntervalEstimator, UPSTREAM_COMMIT
+from baselines.distmatch.exclusions import ExclusionJournal, write_excluded_points
+from baselines.distmatch.model import (
+    DistMatchCrossedBoundsError, DistMatchResidualIntervalEstimator, UPSTREAM_COMMIT,
+)
 from baselines.distmatch.progress import SequenceProgress
 from utils.reporting import (
     compute_coverage,
@@ -93,24 +96,48 @@ def _evaluate_sequence(key, item, config, split, progress):
     } for pair in pairs}
     started = time.perf_counter()
     evaluation_size = len(prepared["residuals"])
+    valid_mask = np.zeros(evaluation_size, dtype=bool)
+    excluded_points = []
     progress.update(split, 0, evaluation_size)
-    for index, residual in enumerate(prepared["residuals"], 1):
-        # All coverage levels share the same history. The current target is
-        # supplied exactly once, only after every interval has been issued.
-        intervals = estimator.predict_intervals([tuple(sorted(pair)) for pair in pairs])
-        for pair in pairs:
-            lower, upper, betas = intervals[tuple(sorted(pair))]
-            # Upstream residuals use normalized target units internally. Restore
-            # forecast-artifact units for every saved endpoint and metric.
-            results[pair]["lower_residual_quantile"].append(float(lower) * residual_scale)
-            results[pair]["upper_residual_quantile"].append(float(upper) * residual_scale)
-            results[pair]["selected_beta_per_tree"].append([float(beta) for beta in betas])
-        estimator.observe(float(residual))
-        progress.update(split, index, evaluation_size)
+    with ExclusionJournal(config, key, split) as journal:
+        for offset, residual in enumerate(prepared["residuals"]):
+            # The prediction call is atomic across coverage levels. A known
+            # numerical failure excludes this timestamp from every level.
+            try:
+                intervals = estimator.predict_intervals([tuple(sorted(pair)) for pair in pairs])
+            except DistMatchCrossedBoundsError as exc:
+                # Tuning must not improve a candidate's score by discarding
+                # failed validation predictions.
+                if split != "test":
+                    raise
+                event = _excluded_point(key, config, prepared, pairs, seed, offset, exc)
+                excluded_points.append(event)
+                journal.record(event)
+            else:
+                for pair in pairs:
+                    lower, upper, betas = intervals[tuple(sorted(pair))]
+                    # Restore artifact units for saved endpoints and metrics.
+                    results[pair]["lower_residual_quantile"].append(float(lower) * residual_scale)
+                    results[pair]["upper_residual_quantile"].append(float(upper) * residual_scale)
+                    results[pair]["selected_beta_per_tree"].append([float(beta) for beta in betas])
+                valid_mask[offset] = True
+            # Failed predictions still consume their observation, exactly once.
+            # This preserves the history, memory, and observation-based seeds.
+            estimator.observe(float(residual))
+            progress.update(split, offset + 1, evaluation_size)
     evaluation_seconds = time.perf_counter() - started
 
-    targets = torch.as_tensor(prepared["y"], dtype=torch.float64)
-    predictions = torch.as_tensor(prepared["predictions"], dtype=torch.float64)
+    evaluated_points = int(valid_mask.sum())
+    counts = {
+        "total_points": evaluation_size,
+        "evaluated_points": evaluated_points,
+        "excluded_points_count": len(excluded_points),
+        "exclusion_rate": len(excluded_points) / evaluation_size if evaluation_size else 0.0,
+    }
+    status = ("no_valid_predictions" if not evaluated_points else
+              "completed_with_exclusions" if excluded_points else "complete")
+    targets = torch.as_tensor(prepared["y"][valid_mask], dtype=torch.float64)
+    predictions = torch.as_tensor(prepared["predictions"][valid_mask], dtype=torch.float64)
     for pair, result in results.items():
         lo = torch.tensor(result["lower_residual_quantile"], dtype=torch.float64)
         hi = torch.tensor(result["upper_residual_quantile"], dtype=torch.float64)
@@ -126,7 +153,7 @@ def _evaluate_sequence(key, item, config, split, progress):
             "upper_interval": upper.tolist(),
             "target_y": targets.tolist(),
             "target_predictions": predictions.tolist(),
-            "target_indices": prepared["target_indices"].tolist(),
+            "target_indices": prepared["target_indices"][valid_mask].tolist(),
             "coverage": compute_coverage(upper, lower, targets),
             "interval_width": compute_interval_width(upper, lower),
             # Beta-selected bounds do not retain the configured tail levels.
@@ -136,17 +163,25 @@ def _evaluate_sequence(key, item, config, split, progress):
                 alpha if config["model"]["use_beta_search"] else pair,
             ),
             "target_coverage": coverage,
+            "evaluation_status": status,
+            **counts,
         })
-        result["avg_coverage"] = float(np.mean(result["coverage"]))
-        result["avg_delta_coverage"] = result["avg_coverage"] - coverage
-        result["avg_interval_width"] = float(np.mean(result["interval_width"]))
-        result["avg_winkler_score"] = float(np.mean(result["winkler_score"]))
+        for metric in ("coverage", "interval_width", "winkler_score"):
+            result[f"avg_{metric}"] = float(np.mean(result[metric])) if evaluated_points else None
+        result["avg_delta_coverage"] = result["avg_coverage"] - coverage if evaluated_points else None
     return {
         "evaluation_results": results,
         "metadata": {
+            "method": "distmatch",
             "split": split,
             "boundaries": prepared["boundaries"],
             "target_indices": prepared["target_indices"].tolist(),
+            "valid_prediction_mask": valid_mask.tolist(),
+            "excluded_points": excluded_points,
+            "evaluation_status": status,
+            "exclusion_policy": "skip_crossed_bounds_timestamp_all_coverage_levels",
+            "reporting_timeline": "successful_predictions_only",
+            **counts,
             "seed": config["seed"],
             "sequence_seed": seed,
             "upstream_commit": UPSTREAM_COMMIT,
@@ -163,6 +198,27 @@ def _evaluate_sequence(key, item, config, split, progress):
             "evaluation_seconds": evaluation_seconds,
             "diagnostics": estimator.diagnostics(),
         },
+    }
+
+
+def _excluded_point(key, config, prepared, pairs, seed, offset, exc):
+    """Keep original data/index values and label the QRF's residual units."""
+    raw_path = config["data"].get("data_path")
+    artifact = Path(raw_path) if raw_path else None
+    return {
+        **exc.diagnostics,
+        "dataset": artifact.parent.parent.name if artifact else None,
+        "predictor": artifact.parent.name if artifact else None,
+        "sequence_key": str(key), "seed": config["seed"], "sequence_seed": seed,
+        "split": "test", "test_offset": offset,
+        "target_index": int(prepared["target_indices"][offset]),
+        "target_y": float(prepared["y"][offset]),
+        "target_prediction": float(prepared["predictions"][offset]),
+        "target_residual": float(prepared["y"][offset] - prepared["predictions"][offset]),
+        "excluded_quantile_pairs": [list(pair) for pair in pairs],
+        "bound_scale": "normalized_residual" if prepared["normalization"]["enabled"] else "original_residual",
+        "residual_scale": float(prepared["normalization"]["target_std"]),
+        "reason": str(exc), "action": "excluded_from_metrics",
     }
 
 
@@ -265,21 +321,65 @@ def _run_metadata(config, num_sequences, elapsed):
     }
 
 
+def _summarize_distmatch_results(log, pairs):
+    """Preserve equal sequence weighting, omitting only unavailable scores."""
+    summaries = {}
+    for pair in pairs:
+        eligible = {key: item for key, item in log.items()
+                    if item["evaluation_results"][pair]["coverage"]}
+        if eligible:
+            result = summarize_evaluation_results(eligible, [pair])[pair]
+        else:
+            result = {f"avg_{metric}_{stat}": None
+                      for metric in ("coverage", "delta_coverage", "interval_width", "winkler_score")
+                      for stat in ("mean", "std")}
+        evaluated = sum(len(item["evaluation_results"][pair]["coverage"]) for item in log.values())
+        total = sum(item.get("metadata", {}).get(
+            "total_points", len(item["evaluation_results"][pair]["coverage"]),
+        ) for item in log.values())
+        result.update({
+            "num_sequences": len(eligible), "num_total_sequences": len(log),
+            "num_no_valid_sequences": len(log) - len(eligible),
+            "total_points": total, "evaluated_points": evaluated,
+            "excluded_points_count": total - evaluated,
+            "exclusion_rate": (total - evaluated) / total if total else 0.0,
+            "evaluation_status": "no_valid_predictions" if not eligible else
+                                 "completed_with_exclusions" if evaluated < total else "complete",
+        })
+        summaries[pair] = result
+    return summaries
+
+
 def _write_run_results(config, log, metadata):
     """Write the same result format for ordinary runs and completed shard sets."""
     output_dir = Path(config["saving_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
     OmegaConf.save(config=OmegaConf.create(config), f=output_dir / "resolved_config.yaml", resolve=True)
     pairs = target_quantiles(config)
-    summary = summarize_evaluation_results(log, pairs)
+    summary = _summarize_distmatch_results(log, pairs)
+    first = summary[pairs[0]]
+    metadata = {**metadata, "method": "distmatch", **{
+        name: first[name] for name in (
+            "total_points", "evaluated_points", "excluded_points_count", "exclusion_rate",
+            "num_no_valid_sequences", "evaluation_status",
+        )
+    }, "exclusion_policy": "skip_crossed_bounds_timestamp_all_coverage_levels",
+        "reporting_timeline": "successful_predictions_only",
+        "excluded_points_file": "excluded_points.csv"}
+    write_excluded_points(log, output_dir)
     _save_pickle(output_dir / "log.pkl", log)
     _save_pickle(output_dir / "summary_results.pkl", summary)
     OmegaConf.save(config=OmegaConf.create(metadata), f=output_dir / "run_metadata.yaml")
     for pair, result in summary.items():
+        if result["evaluation_status"] == "no_valid_predictions":
+            print(f"{pair}: no valid predictions ({result['excluded_points_count']} excluded)", flush=True)
+            continue
         print(
             f"{pair}: coverage={result['avg_coverage_mean']:.4f}, "
             f"width={result['avg_interval_width_mean']:.6g}, "
-            f"Winkler={result['avg_winkler_score_mean']:.6g}", flush=True,
+            f"Winkler={result['avg_winkler_score_mean']:.6g}, "
+            f"evaluated={result['evaluated_points']}/{result['total_points']}, "
+            f"excluded={result['excluded_points_count']}", flush=True,
         )
     if config.get("plotting", {}).get("plotting", False):
         import matplotlib
@@ -287,7 +387,11 @@ def _write_run_results(config, log, metadata):
         from utils.plotting import plot_cp_prediction_intervals
 
         length = positive_integer(config["plotting"].get("plotting_seq_len", 200), "plotting.plotting_seq_len")
-        plot_cp_prediction_intervals(log, pairs, length, str(output_dir / "plots"))
+        # Arrays already contain only successful timestamps. Empty sequences
+        # remain in log.pkl, but have no points to plot.
+        plotted = {key: item for key, item in log.items()
+                   if item["evaluation_results"][pairs[0]]["coverage"]}
+        plot_cp_prediction_intervals(plotted, pairs, length, str(output_dir / "plots"))
     return log
 
 

@@ -117,6 +117,17 @@ code details; it does not claim that the code and paper are interchangeable.
   adapter uses the exact minimum and maximum targets with positive weight in
   the fitted forest's queried leaves. It preserves all interior quantiles
   exactly as returned; it does not sort, rearrange, or clip their values.
+- Interior quantiles can also cross because the dependency accepts a CDF up
+  to `1e-6` below the requested quantile and then extrapolates with a linear
+  interpolation fraction greater than one. The estimator raises a diagnostic
+  `DistMatchCrossedBoundsError` for the selected negative-width candidate.
+  Final test evaluation records and excludes that entire timestamp across
+  coverage levels, then observes its residual exactly once. It does not repair
+  or reorder quantiles. Validation tuning continues to raise on this failure.
+  Saved metrics, plots, and rolling windows use only successful predictions;
+  exclusions and their counts are explicit. This is a DSCP evaluation policy,
+  not an upstream algorithm feature or a guarantee of coverage on the full
+  test set. Other numerical and programming errors remain fatal.
 
 `use_beta_search=False` is a labeled ablation that uses the requested lower and
 upper quantiles directly. Other constructor changes, normalization, and the

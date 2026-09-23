@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 import copy
+import csv
 import os
 from pathlib import Path
 import pickle
@@ -11,6 +12,7 @@ from omegaconf import OmegaConf
 import pytest
 
 from baselines.distmatch.distributed import merge_shards, prepare_shards, run_shard
+from baselines.distmatch.model import DistMatchCrossedBoundsError, DistMatchResidualIntervalEstimator
 from baselines.distmatch.run_distmatch import run_distmatch
 
 
@@ -55,7 +57,7 @@ def _experiment(directory, count=3, plotting=False):
 
 def _assert_not_published(config):
     output = Path(config["saving_dir"])
-    for name in ("log.pkl", "summary_results.pkl", "run_metadata.yaml", "plots"):
+    for name in ("log.pkl", "summary_results.pkl", "run_metadata.yaml", "excluded_points.csv", "plots"):
         assert not (output / name).exists(), f"Published {name} before validating all shards"
 
 
@@ -116,7 +118,7 @@ def test_two_local_shards_match_ordinary_run_and_publish_standard_outputs(tmp_pa
             assert actual[key]["metadata"][field] == expected[key]["metadata"][field]
 
     output = Path(config["saving_dir"])
-    for name in ("log.pkl", "summary_results.pkl", "resolved_config.yaml", "run_metadata.yaml"):
+    for name in ("log.pkl", "summary_results.pkl", "resolved_config.yaml", "run_metadata.yaml", "excluded_points.csv"):
         assert (output / name).is_file()
     assert _read_pickle(output / "log.pkl") == actual
     assert _read_pickle(output / "summary_results.pkl") == _read_pickle(tmp_path / "ordinary" / "summary_results.pkl")
@@ -132,6 +134,53 @@ def test_two_local_shards_match_ordinary_run_and_publish_standard_outputs(tmp_pa
     assert metadata.distributed.run_id == manifest["run_id"]
     assert list(metadata.distributed.sequence_counts) == [2, 1]
     assert list(metadata.distributed.effective_workers_per_shard) == [1, 1]
+
+
+def test_exclusions_from_all_shards_are_merged_once_in_original_order(tmp_path, monkeypatch):
+    data, config = _experiment(tmp_path)
+    predict = DistMatchResidualIntervalEstimator.predict_intervals
+
+    def cross_first_prediction(self, pairs):
+        if not getattr(self, "_first_prediction_seen", False):
+            self._first_prediction_seen = True
+            raise DistMatchCrossedBoundsError(
+                triggering_quantile_pair=pairs[0], tree_index=0, beta=0.1,
+                lower_quantile=0.1, upper_quantile=0.9,
+                lower_bound=1.0000001, upper_bound=1.0,
+            )
+        return predict(self, pairs)
+
+    monkeypatch.setattr(DistMatchResidualIntervalEstimator, "predict_intervals", cross_first_prediction)
+    prepare_shards(config, 2)
+    run_shard(config, 1)
+    run_shard(config, 0)
+    output = Path(config["saving_dir"])
+    assert len(list((output / "exclusions").glob("*.jsonl"))) == len(data)
+    _assert_not_published(config)
+    log = merge_shards(config)
+    with (output / "excluded_points.csv").open(encoding="utf-8", newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    assert [row["sequence_key"] for row in rows] == [str(key) for key in data]
+    assert [row["test_offset"] for row in rows] == ["0"] * len(data)
+    for entry in log.values():
+        assert len(entry["metadata"]["excluded_points"]) == 1
+        assert entry["metadata"]["valid_prediction_mask"][0] is False
+        for result in entry["evaluation_results"].values():
+            assert result["target_indices"] == entry["metadata"]["target_indices"][1:]
+
+
+def test_existing_exclusions_csv_prevents_merge_overwrite(completed_shards):
+    _, config, _, _ = completed_shards
+    path = Path(config["saving_dir"]) / "excluded_points.csv"
+    sentinel = b"Existing exclusions must remain unchanged\n"
+    try:
+        path.write_bytes(sentinel)
+        with pytest.raises(FileExistsError, match="already exist"):
+            merge_shards(config)
+        assert path.read_bytes() == sentinel
+        assert not (path.parent / "log.pkl").exists()
+    finally:
+        path.unlink()
 
 
 @pytest.mark.parametrize("count", [None, True, -1, 0, 1, 1.5, "2", 4])
