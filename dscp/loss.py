@@ -1,8 +1,10 @@
 import math
-from numbers import Real
+from numbers import Integral, Real
 
 import torch
 from utils.utils import get_sorted_unique_quantiles
+
+from .models.iqn import ImplicitQuantileNetwork
 
 
 def compute_loss_quantile_regression_transformer(model, x, target, target_quantiles, current_feature=None):
@@ -146,6 +148,71 @@ def resolve_iqn_validation_quantiles(training_config, target_quantiles):
             raise ValueError(error)
         levels.update(float(level) for level in endpoints)
     return mode, sorted(levels)
+
+
+@torch.no_grad()
+def compute_iqn_interval_validation_loss(
+    model,
+    x,
+    target,
+    quantiles,
+    current_feature=None,
+    *,
+    sampling_seed=None,
+):
+    """Score requested endpoints using the model's deployed interval rule.
+
+    The caller must put the model in evaluation mode. Cosine heads use their
+    configured direct or sampling interval mode, including ``sampling_num``;
+    partially monotonic heads always evaluate the requested levels directly.
+    This validation-only helper does not change the sampled training objective.
+
+    A supplied seed gives reproducible Monte Carlo draws without advancing the
+    caller's CPU or selected CUDA-device RNG state. Runners reuse a seed for
+    each validation batch across epochs so checkpoint comparisons use common
+    random numbers.
+    """
+    if target.ndim != 2 or target.shape != (x.shape[0], 1):
+        raise ValueError("IQN interval validation requires target shape (batch_size, 1).")
+    taus = ImplicitQuantileNetwork._prepare_taus(
+        taus=quantiles,
+        batch_size=x.shape[0],
+        device=x.device,
+        dtype=x.dtype,
+    )
+    if taus.shape[1] == 0:
+        raise ValueError("IQN interval validation requires at least one quantile level.")
+
+    def predict():
+        return model.predict_quantiles(
+            src=x,
+            quantiles=taus,
+            current_feature=current_feature,
+        )
+
+    if sampling_seed is None:
+        quantile_values = predict()
+    else:
+        if isinstance(sampling_seed, bool) or not isinstance(sampling_seed, Integral):
+            raise TypeError("sampling_seed must be an integer or None.")
+        cuda_devices = [x.device.index] if x.device.type == "cuda" else []
+        with torch.random.fork_rng(devices=cuda_devices):
+            # Seed only the generators whose states are saved by fork_rng.
+            # torch.manual_seed would also modify unrelated CUDA-device states.
+            cpu_generator = torch.Generator(device="cpu").manual_seed(int(sampling_seed))
+            torch.set_rng_state(cpu_generator.get_state())
+            if x.device.type == "cuda":
+                device_generator = torch.Generator(device=x.device).manual_seed(
+                    int(sampling_seed)
+                )
+                torch.cuda.set_rng_state(device_generator.get_state(), device=x.device)
+            quantile_values = predict()
+
+    if quantile_values.shape != taus.shape:
+        raise ValueError("IQN interval predictions must have shape (batch_size, num_quantiles).")
+    errors = target.to(device=quantile_values.device) - quantile_values
+    taus = taus.to(dtype=quantile_values.dtype)
+    return torch.maximum((taus - 1.0) * errors, taus * errors).mean()
 
 
 def compute_loss_iqn_transformer(model, x, target, num_taus, current_feature=None, *, taus=None):

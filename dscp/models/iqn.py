@@ -30,12 +30,14 @@ class QuantileEmbedding(torch.nn.Module):
 
     def __init__(self, output_dim: int, n_cos_embedding: int = 64):
         super().__init__()
-        self.output_dim = output_dim
-        self.n_cos_embedding = n_cos_embedding
+        self.output_dim = _positive_integer(output_dim, "output_dim")
+        self.n_cos_embedding = _positive_integer(
+            n_cos_embedding,
+            "n_cos_embedding",
+        )
         self.output_layer = torch.nn.Sequential(
-            torch.nn.Linear(n_cos_embedding, n_cos_embedding),
-            torch.nn.PReLU(),
-            torch.nn.Linear(n_cos_embedding, output_dim),
+            torch.nn.Linear(self.n_cos_embedding, self.output_dim),
+            torch.nn.ReLU(),
         )
 
     def forward(self, taus: torch.Tensor) -> torch.Tensor:
@@ -53,10 +55,11 @@ class QuantileEmbedding(torch.nn.Module):
 
 class ImplicitQuantileNetwork(torch.nn.Module):
     """
-    Legacy cosine-embedding IQN head for RNN or Transformer representations.
+    Cosine-embedding IQN head for RNN or Transformer representations.
 
-    Its prediction method retains the existing sampling-based rearrangement
-    behavior for backward compatibility.
+    Its default prediction mode retains the existing sampling-based
+    rearrangement behavior for backward compatibility. ``interval_mode`` may
+    instead select direct evaluation of the raw conditional quantile head.
 
     Input:
         hidden_repr: (B, D) or (B, T, D)
@@ -75,26 +78,49 @@ class ImplicitQuantileNetwork(torch.nn.Module):
         hidden_dim: Optional[int] = None,
         n_cos_embedding: int = 64,
         dropout: float = 0.1,
+        interval_mode: str = "sampling",
+        sampling_num: int = 1000,
+        iqn_num_layers: int = 1,
     ):
         super().__init__()
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim or input_dim
-
-        if self.hidden_dim == input_dim:
-            self.input_projection = torch.nn.Identity()
-        else:
-            self.input_projection = torch.nn.Linear(input_dim, self.hidden_dim)
+        self.input_dim = _positive_integer(input_dim, "input_dim")
+        self.hidden_dim = (
+            self.input_dim
+            if hidden_dim is None
+            else _positive_integer(hidden_dim, "hidden_dim")
+        )
+        self.iqn_num_layers = _positive_integer(
+            iqn_num_layers,
+            "iqn_num_layers",
+        )
+        interval_mode = str(interval_mode).strip().lower()
+        if interval_mode not in ("direct", "sampling"):
+            raise ValueError(
+                "interval_mode must be either 'direct' or 'sampling'."
+            )
+        self.interval_mode = interval_mode
+        self.sampling_num = _positive_integer(sampling_num, "sampling_num")
 
         self.quantile_embedding = QuantileEmbedding(
-            output_dim=self.hidden_dim,
+            output_dim=self.input_dim,
             n_cos_embedding=n_cos_embedding,
         )
-        self.output_layer = torch.nn.Sequential(
-            torch.nn.Linear(self.hidden_dim, self.hidden_dim),
-            torch.nn.Softplus(),
-            torch.nn.Dropout(dropout),
-            torch.nn.Linear(self.hidden_dim, 1),
-        )
+        output_layers = []
+        layer_input_dim = self.input_dim
+        for _ in range(self.iqn_num_layers):
+            output_layers.extend(
+                [
+                    torch.nn.Linear(layer_input_dim, self.hidden_dim),
+                    torch.nn.ReLU(),
+                ]
+            )
+            layer_input_dim = self.hidden_dim
+        output_layers.append(torch.nn.Linear(self.hidden_dim, 1))
+        self.output_layer = torch.nn.Sequential(*output_layers)
+
+        # Retained in the signature for compatibility with existing callers.
+        # Dropout applies in the sequence encoders, not in the cosine IQN head.
+        del dropout
 
     def forward(
         self,
@@ -103,7 +129,6 @@ class ImplicitQuantileNetwork(torch.nn.Module):
         num_taus: int = 1,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         hidden_repr = self._prepare_hidden_repr(hidden_repr)
-        hidden_repr = self.input_projection(hidden_repr)
 
         if taus is None:
             taus = self.sample_taus(
@@ -121,7 +146,7 @@ class ImplicitQuantileNetwork(torch.nn.Module):
             )
 
         embedded_taus = self.quantile_embedding(taus)
-        conditioned_hidden = hidden_repr.unsqueeze(1) * (1.0 + embedded_taus)
+        conditioned_hidden = hidden_repr.unsqueeze(1) * embedded_taus
         quantile_values = self.output_layer(conditioned_hidden).squeeze(-1)
 
         return quantile_values, taus
@@ -131,7 +156,7 @@ class ImplicitQuantileNetwork(torch.nn.Module):
         self,
         hidden_repr: torch.Tensor,
         quantiles: torch.Tensor,
-        sampling_num: int = 1000,
+        sampling_num: Optional[int] = None,
     ) -> torch.Tensor:
         batch_size = hidden_repr.shape[0]
         quantiles = self._prepare_taus(
@@ -141,10 +166,20 @@ class ImplicitQuantileNetwork(torch.nn.Module):
             dtype=hidden_repr.dtype,
         )
 
-        if sampling_num < 1:
-            raise ValueError("sampling_num must be a positive integer.")
+        if self.interval_mode == "direct":
+            quantile_values, _ = self(hidden_repr, taus=quantiles)
+            return quantile_values
 
-        sampled_values, _ = self(hidden_repr, taus=None, num_taus=sampling_num)
+        effective_sampling_num = (
+            self.sampling_num
+            if sampling_num is None
+            else _positive_integer(sampling_num, "sampling_num")
+        )
+        sampled_values, _ = self(
+            hidden_repr,
+            taus=None,
+            num_taus=effective_sampling_num,
+        )
         return torch.stack(
             [
                 torch.quantile(sampled_values[i], q=quantiles[i], dim=0)
@@ -253,6 +288,7 @@ class PartiallyMonotonicQuantileHead(torch.nn.Module):
     """
 
     head_type = PARTIALLY_MONOTONIC_HEAD
+    interval_mode = "direct"
 
     _ACTIVATIONS = {
         "sigmoid": torch.nn.Sigmoid,
@@ -393,7 +429,7 @@ class PartiallyMonotonicQuantileHead(torch.nn.Module):
         self,
         hidden_repr: torch.Tensor,
         quantiles: torch.Tensor,
-        sampling_num: int = 1000,
+        sampling_num: Optional[int] = None,
     ) -> torch.Tensor:
         # sampling_num is accepted for a shared API with the cosine IQN head.
         # This head evaluates g(h, tau) directly and performs no MC rearrangement.
@@ -425,6 +461,9 @@ def build_quantile_head(
     monotonic_num_layers: int = 1,
     monotonic_hidden_dims: Optional[Sequence[int]] = None,
     monotonic_activation: str = "tanh",
+    interval_mode: str = "sampling",
+    sampling_num: int = 1000,
+    iqn_num_layers: int = 1,
 ) -> torch.nn.Module:
     """Build one of the supported conditional-quantile prediction heads."""
     head_name = str(prediction_head).strip().lower()
@@ -435,6 +474,9 @@ def build_quantile_head(
             hidden_dim=hidden_dim,
             n_cos_embedding=n_cos_embedding,
             dropout=dropout,
+            interval_mode=interval_mode,
+            sampling_num=sampling_num,
+            iqn_num_layers=iqn_num_layers,
         )
 
     if head_name == PARTIALLY_MONOTONIC_HEAD:

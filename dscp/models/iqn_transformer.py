@@ -34,6 +34,9 @@ class IQNTransformer(torch.nn.Module):
         monotonic_num_layers: int = 1,
         monotonic_hidden_dims: Optional[Sequence[int]] = None,
         monotonic_activation: str = "tanh",
+        interval_mode: str = "sampling",
+        sampling_num: int = 1000,
+        iqn_num_layers: int = 1,
     ):
         super().__init__()
         self.dim_model = dim_model
@@ -65,8 +68,14 @@ class IQNTransformer(torch.nn.Module):
             monotonic_num_layers=monotonic_num_layers,
             monotonic_hidden_dims=monotonic_hidden_dims,
             monotonic_activation=monotonic_activation,
+            interval_mode=interval_mode,
+            sampling_num=sampling_num,
+            iqn_num_layers=iqn_num_layers,
         )
         self.prediction_head = self.iqn.head_type
+        self.interval_mode = self.iqn.interval_mode
+        self.sampling_num = getattr(self.iqn, "sampling_num", None)
+        self.iqn_num_layers = getattr(self.iqn, "iqn_num_layers", None)
 
     def forward(
         self,
@@ -123,7 +132,7 @@ class IQNTransformer(torch.nn.Module):
         src: torch.Tensor,
         quantiles: torch.Tensor,
         current_feature: Optional[torch.Tensor] = None,
-        sampling_num: int = 1000,
+        sampling_num: Optional[int] = None,
         src_key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         causal_mask = torch.nn.Transformer.generate_square_subsequent_mask(
@@ -148,7 +157,7 @@ class IQNTransformer(torch.nn.Module):
         x: torch.Tensor,
         quantiles: torch.Tensor,
         current_feature: Optional[torch.Tensor] = None,
-        sampling_num: int = 1000,
+        sampling_num: Optional[int] = None,
     ) -> torch.Tensor:
         return model.predict_quantiles(
             src=x,

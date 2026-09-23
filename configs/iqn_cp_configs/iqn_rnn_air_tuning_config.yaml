@@ -1,5 +1,8 @@
 grid:
   model.prediction_head: [partially_monotonic] # uncomment to compare both
+  # model.iqn_num_layers: [1, 2, 3] # cosine prediction MLP hidden-layer count
+  # model.interval_mode: [direct, sampling] # cosine_embedding only
+  # model.sampling_num: [1000] # cosine sampled validation/inference; separate from model.num_taus
   model.shared_dim: [32, 64]
   model.num_layers: [1, 2]
   model.use_current_feature: [True, False]

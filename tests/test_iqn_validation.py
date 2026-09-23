@@ -362,6 +362,14 @@ class IQNValidationIntegrationTests(unittest.TestCase):
 
         return loss_fn, records, validation_snapshots
 
+    @staticmethod
+    def _interval_loss_spy(raw_loss_fn):
+        def interval_loss(model, inputs, target, quantiles, current_feature=None, *, sampling_seed=None):
+            return raw_loss_fn(
+                model, inputs, target, 0, current_feature, taus=quantiles,
+            )
+        return interval_loss
+
     def test_runners_use_fixed_sample_weighted_validation_for_checkpoint(self):
         runners = {
             "transformer": (
@@ -396,6 +404,10 @@ class IQNValidationIntegrationTests(unittest.TestCase):
                     patch.object(run_iqn_cp.os, "makedirs"),
                     patch.object(run_iqn_cp.torch, "save") as save_model,
                     patch.object(run_iqn_cp, loss_name, side_effect=fake_loss),
+                    patch.object(
+                        run_iqn_cp, "compute_iqn_interval_validation_loss",
+                        side_effect=self._interval_loss_spy(fake_loss),
+                    ),
                     patch.object(
                         run_iqn_cp,
                         "tqdm",
@@ -492,6 +504,10 @@ class IQNValidationIntegrationTests(unittest.TestCase):
                 side_effect=fake_loss,
             ),
             patch.object(
+                tuning, "compute_iqn_interval_validation_loss",
+                side_effect=self._interval_loss_spy(fake_loss),
+            ),
+            patch.object(
                 tuning,
                 "_build_model",
                 side_effect=capture_built_model,
@@ -558,6 +574,9 @@ class IQNValidationIntegrationTests(unittest.TestCase):
                     config.training.validation_loss,
                     "target_quantiles",
                 )
+                self.assertEqual(config.model.interval_mode, "sampling")
+                self.assertEqual(config.model.sampling_num, 1000)
+                self.assertEqual(config.model.iqn_num_layers, 1)
 
     def test_checked_tuning_grids_default_target_and_both_modes_expand(self):
         sbatch_path = str(Path(__file__).resolve().parents[1] / "sbatch")
@@ -572,7 +591,7 @@ class IQNValidationIntegrationTests(unittest.TestCase):
         for architecture in ("rnn", "transformer"):
             with self.subTest(architecture=architecture):
                 base_config = OmegaConf.load(
-                    config_dir / f"iqn_{architecture}_air_config.yaml"
+                    config_dir / f"iqn_{architecture}_lr_air_config.yaml"
                 )
                 grid, _ = common.load_grid(
                     config_dir / f"iqn_{architecture}_air_tuning_config.yaml"

@@ -10,7 +10,7 @@ from dscp.models.iqn_transformer import IQNTransformer
 from dscp.models.iqn_rnn import IQNRNN
 from dscp.models.iqn import build_iqn_optimizer
 from dscp.data import ConformalPredictionData
-from dscp.loss import compute_loss_iqn_transformer, compute_loss_iqn_rnn, resolve_iqn_validation_quantiles
+from dscp.loss import compute_loss_iqn_transformer, compute_loss_iqn_rnn, resolve_iqn_validation_quantiles, compute_iqn_interval_validation_loss
 from utils.utils import load_data, save_data, read_setup, generate_strided_feature, get_interval_quantile_indices
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, construct_interval_endpoints, summarize_evaluation_results
 from utils.plotting import plot_cp_prediction_intervals
@@ -21,6 +21,9 @@ def _prediction_head_kwargs(model_config):
     """Resolve prediction-head options while preserving legacy configurations."""
     return {
         "prediction_head": model_config.get("prediction_head", "cosine_embedding"),
+        "iqn_num_layers": model_config.get("iqn_num_layers", 1),
+        "interval_mode": model_config.get("interval_mode", "sampling"),
+        "sampling_num": model_config.get("sampling_num", 1000),
         "monotonic_num_layers": model_config.get("monotonic_num_layers", 1),
         "monotonic_hidden_dims": model_config.get("monotonic_hidden_dims"),
         "monotonic_activation": model_config.get(
@@ -35,6 +38,11 @@ def _materialize_prediction_head_selector(model_config):
     model_config.prediction_head = str(
         model_config.get("prediction_head", "cosine_embedding")
     ).strip().lower()
+    model_config.interval_mode = str(
+        model_config.get("interval_mode", "sampling")
+    ).strip().lower()
+    model_config.sampling_num = model_config.get("sampling_num", 1000)
+    model_config.iqn_num_layers = model_config.get("iqn_num_layers", 1)
 
 
 def _prediction_head_dimensions(model_config):
@@ -104,6 +112,11 @@ def run_transformer_iqn_cp(config_path):
     print("Prediction head: {}".format(
         config.model.get("prediction_head", "cosine_embedding")
     ))
+    if config.model.prediction_head == "cosine_embedding":
+        print("Interval mode: {}; sampling_num: {} (sampling mode only)".format(
+            config.model.interval_mode, config.model.sampling_num,
+        ))
+        print("Cosine prediction hidden layers: {}".format(config.model.iqn_num_layers))
     print("Base predictor: {}".format(base_predictor))
     print("Data: {}".format(data_type))
     print("{} independent sequences".format(len(cpd.dataset)))
@@ -194,7 +207,7 @@ def run_transformer_iqn_cp(config_path):
             loss_sum = 0.0
             validation_weight = 0
             iqn_transformer.eval()
-            for strided_x, strided_residual, strided_y, target_x, target_residual, _, _ in tqdm(valid_dataloader):
+            for batch_index, (strided_x, strided_residual, strided_y, target_x, target_residual, _, _) in enumerate(tqdm(valid_dataloader)):
 
                 strided_feature = generate_strided_feature(strided_x,
                                                            strided_residual,
@@ -204,7 +217,16 @@ def run_transformer_iqn_cp(config_path):
                 target_residual = target_residual.to(device)
                 target_x = target_x.to(device)
                 with torch.no_grad():
-                    if config.model.use_current_feature:
+                    if validation_quantiles is not None:
+                        loss = compute_iqn_interval_validation_loss(
+                            iqn_transformer,
+                            strided_feature,
+                            target_residual,
+                            validation_kwargs["taus"],
+                            current_feature=target_x if config.model.use_current_feature else None,
+                            sampling_seed=int(config.get("seed", 0)) + batch_index,
+                        )
+                    elif config.model.use_current_feature:
                         loss = compute_loss_iqn_transformer(
                             iqn_transformer,
                             strided_feature,
@@ -356,6 +378,9 @@ def run_transformer_iqn_cp(config_path):
             evaluation_results[tuple_confidence_pair]["avg_winkler_score"] = avg_winkler_score
 
         log[key] = {"prediction_head": iqn_transformer.prediction_head,
+                    "iqn_num_layers": getattr(iqn_transformer.iqn, "iqn_num_layers", None),
+                    "interval_mode": iqn_transformer.iqn.interval_mode,
+                    "sampling_num": getattr(iqn_transformer.iqn, "sampling_num", None),
                     "model_config": OmegaConf.to_container(config.model, resolve=True),
                     "validation_loss": validation_mode,
                     "validation_quantiles": validation_quantiles,
@@ -432,6 +457,11 @@ def run_rnn_iqn_cp(config_path):
     print("Prediction head: {}".format(
         config.model.get("prediction_head", "cosine_embedding")
     ))
+    if config.model.prediction_head == "cosine_embedding":
+        print("Interval mode: {}; sampling_num: {} (sampling mode only)".format(
+            config.model.interval_mode, config.model.sampling_num,
+        ))
+        print("Cosine prediction hidden layers: {}".format(config.model.iqn_num_layers))
     print("Base predictor: {}".format(base_predictor))
     print("Data: {}".format(data_type))
     print("{} independent sequences".format(len(cpd.dataset)))
@@ -521,7 +551,7 @@ def run_rnn_iqn_cp(config_path):
             loss_sum = 0.0
             validation_weight = 0
             iqn_rnn.eval()
-            for strided_x, strided_residual, strided_y, target_x, target_residual, _, _ in tqdm(valid_dataloader):
+            for batch_index, (strided_x, strided_residual, strided_y, target_x, target_residual, _, _) in enumerate(tqdm(valid_dataloader)):
 
                 strided_feature = generate_strided_feature(strided_x,
                                                            strided_residual,
@@ -531,7 +561,16 @@ def run_rnn_iqn_cp(config_path):
                 target_residual = target_residual.to(device)
                 target_x = target_x.to(device)
                 with torch.no_grad():
-                    if config.model.use_current_feature:
+                    if validation_quantiles is not None:
+                        loss = compute_iqn_interval_validation_loss(
+                            iqn_rnn,
+                            strided_feature,
+                            target_residual,
+                            validation_kwargs["taus"],
+                            current_feature=target_x if config.model.use_current_feature else None,
+                            sampling_seed=int(config.get("seed", 0)) + batch_index,
+                        )
+                    elif config.model.use_current_feature:
                         loss = compute_loss_iqn_rnn(
                             iqn_rnn,
                             strided_feature,
@@ -683,6 +722,9 @@ def run_rnn_iqn_cp(config_path):
             evaluation_results[tuple_confidence_pair]["avg_winkler_score"] = avg_winkler_score
 
         log[key] = {"prediction_head": iqn_rnn.prediction_head,
+                    "iqn_num_layers": getattr(iqn_rnn.iqn, "iqn_num_layers", None),
+                    "interval_mode": iqn_rnn.iqn.interval_mode,
+                    "sampling_num": getattr(iqn_rnn.iqn, "sampling_num", None),
                     "model_config": OmegaConf.to_container(config.model, resolve=True),
                     "validation_loss": validation_mode,
                     "validation_quantiles": validation_quantiles,

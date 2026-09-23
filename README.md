@@ -319,16 +319,20 @@ RNN and Transformer IQN-CP support two choices through
 | Value | Quantile prediction |
 | --- | --- |
 | `partially_monotonic` | Implements the partially monotonic head. The quantile level is supplied directly, all weights along the quantile-dependent path are positive softplus transforms, and inference evaluates `g(h, tau)` directly. Quantiles are nondecreasing in `tau` by construction. |
-| `cosine_embedding` (legacy default) | Preserves the original cosine quantile embedding and sampling-based rearrangement behavior, including compatibility with existing configurations and checkpoints. The raw embedded head itself is not constrained to be monotonic. |
+| `cosine_embedding` (default when the selector is omitted) | Implements the paper-style cosine quantile embedding and multiplicative context conditioning. Its raw head is not constrained to be monotonic, and `model.interval_mode` selects direct evaluation or sampling-based empirical rearrangement when constructing intervals. |
 
 The checked-in IQN-CP experiment configurations explicitly select the
-partially monotonic design. To switch back to the legacy embedding design,
+partially monotonic design. To select the paper-style cosine design,
 change only the selector:
 
 ```yaml
 model:
   prediction_head: partially_monotonic # or cosine_embedding
-  iqn_hidden_dim: 32
+  interval_mode: sampling # cosine only: direct or sampling
+  sampling_num: 1000 # cosine sampled validation/inference; separate from num_taus
+  cos_emb_dim: 32 # cosine feature count M
+  iqn_hidden_dim: 32 # cosine final-head width H; monotonic hidden width
+  iqn_num_layers: 1 # cosine final-head hidden-layer count L
   monotonic_num_layers: 2
   monotonic_activation: tanh
 ```
@@ -337,23 +341,65 @@ For the monotonic head, `iqn_hidden_dim` is the common width of its hidden
 layers and `monotonic_num_layers` is K. An optional
 `monotonic_hidden_dims: [32, 16, 8]` overrides both settings when different
 layer widths are wanted. Supported monotonic activations are `tanh`,
-`sigmoid`, and `softplus`. The `cos_emb_dim` setting is used only by the
-legacy cosine head.
+`sigmoid`, and `softplus`. It ignores `iqn_num_layers`, `cos_emb_dim`, and the
+cosine interval settings.
 
-IQN training always minimizes pinball loss at uniformly sampled quantile
-levels, with `model.num_taus` samples per example. Checkpoint validation is
-configured separately through `training.validation_loss`:
+For the cosine head, let `D` be the context width: `dim_model` when current
+features are disabled, or `dim_model + current_feature_dim` when they are
+enabled. Let `M = cos_emb_dim`, `H = iqn_hidden_dim`, and
+`L = iqn_num_layers`. Its architecture is:
+
+```text
+tau -> M cosine features -> Linear(M, D) -> ReLU --+
+                                                      elementwise multiply
+h in R^D ------------------------------------------+
+          -> L x [Linear -> ReLU], width H -> Linear(H, 1)
+```
+
+The cosine embedding always has exactly one learned linear/ReLU layer;
+`iqn_num_layers` counts only the final prediction MLP's hidden layers, not its
+output layer. The context is fused as `h * embedding(tau)`, without an input
+projection or a residual `1 + embedding(tau)` term. The cosine head itself has
+no dropout; `model.dropout` still applies to the RNN or Transformer encoder.
+Every final-head hidden layer has width `iqn_hidden_dim`.
+
+For the cosine head, both RNN and Transformer models support two interval
+construction modes through `model.interval_mode`:
+
+- `direct` evaluates the raw learned function `g(h, tau)` at every requested
+  level. It is deterministic in evaluation mode, but the unconstrained cosine
+  head can cross, and no sorting is applied.
+- `sampling` draws `model.sampling_num` uniformly distributed levels in one
+  call and returns empirical quantiles of the corresponding raw outputs. All
+  requested endpoints share that sample, so sorted requested levels produce
+  noncrossing endpoints within the call. Test-time inference remains
+  stochastic unless the caller controls the random seed.
+
+The default is `interval_mode: sampling` with `sampling_num: 1000`.
+`model.sampling_num` controls cosine sampling-based interval construction and
+the matching `target_quantiles` validation path. It is separate from
+`model.num_taus`, the number of uniformly sampled levels used per example by
+the full-range training loss. The partially monotonic head ignores the cosine
+depth, embedding, and interval options and always evaluates its nondecreasing
+function directly.
+
+IQN training is unchanged: it always minimizes pinball loss at uniformly
+sampled quantile levels, with `model.num_taus` samples per example. Checkpoint
+validation is configured separately through `training.validation_loss`:
 
 - `target_quantiles` averages pinball loss over validation observations and
-  the sorted distinct levels in `model.target_quantiles`. It evaluates the raw
-  prediction head directly at those levels for both head types. This exactly
-  matches deployed endpoint evaluation for `partially_monotonic`; for
-  `cosine_embedding`, it intentionally does not use the unchanged
-  sampling-based empirical rearrangement used at inference.
+  the sorted distinct levels in `model.target_quantiles`, using the selected
+  interval inference mode. Thus direct cosine validation scores direct
+  endpoints, sampling cosine validation scores empirical-rearranged endpoints,
+  and partially monotonic validation scores its direct endpoints. Sampling
+  validation uses a fixed per-batch seed, `config.seed` (default `0`) plus the
+  batch index, and restores the caller's RNG state afterward. Repeating a
+  validation epoch therefore scores the same samples without changing later
+  training randomness.
 - `sampled_quantiles` averages over fresh uniformly sampled levels and
-  preserves the legacy validation behavior. Configurations that omit
-  `training.validation_loss` also fall back to `sampled_quantiles` for
-  backward compatibility.
+  preserves the legacy raw-head validation behavior independently of interval
+  construction mode. Configurations that omit `training.validation_loss` also
+  fall back to `sampled_quantiles` for backward compatibility.
 
 The checked-in ordinary IQN configurations and tuning grids explicitly use
 `target_quantiles`. To compare the checkpoint criteria in one grid, use:
@@ -364,16 +410,24 @@ grid:
 ```
 
 The two head choices have different state-dictionary layouts, so a checkpoint
-must be reconstructed with the complete matching model configuration. Each
-ordinary run now writes `resolved_config.yaml` beside its checkpoints, and the
+must be reconstructed with the complete matching model configuration. The
+paper-style cosine architecture is also not directly compatible with cosine
+checkpoints from the earlier implementation, which used a two-linear-layer
+PReLU embedding, a learned context input projection, residual multiplicative
+conditioning, and a Softplus/dropout prediction head. Retrain those models.
+Within the new cosine architecture, `interval_mode` and `sampling_num` do not
+add state-dictionary entries, but `iqn_num_layers`, `iqn_hidden_dim`,
+`cos_emb_dim`, and the context width must match the saved weights. Each
+ordinary run writes `resolved_config.yaml` beside its checkpoints, and the
 checked-in monotonic experiments use head-specific `saving_dir` values to
-avoid overwriting legacy cosine-head results. Their output paths interpolate
-`model.prediction_head`, so changing the selector also changes the ordinary
-run directory. For separate tuning invocations, likewise use a distinct
-`--save-dir`; a single grid run already keeps its head choices in distinct
-trials. Configurations that omit the selector retain the legacy
-`cosine_embedding` behavior. IQN-CP currently supports
-`model.prediction_step: 1`.
+avoid overwriting cosine-head results. Their
+output paths interpolate `model.prediction_head`, so changing the selector also
+changes the ordinary run directory. For separate tuning invocations, likewise
+use a distinct `--save-dir`; a single grid run already keeps its head choices
+in distinct trials. Configurations that omit the selector retain the legacy
+`cosine_embedding` behavior. The Slurm launchers still use
+`IQN_PREDICTION_HEAD` only to select the head; interval mode comes from the
+selected YAML. IQN-CP currently supports `model.prediction_step: 1`.
 
 ## Data split strategy
 

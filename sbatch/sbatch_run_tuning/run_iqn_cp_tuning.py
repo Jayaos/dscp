@@ -8,7 +8,7 @@ from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
 from dscp.data import ConformalPredictionData
-from dscp.loss import compute_loss_iqn_rnn, compute_loss_iqn_transformer, resolve_iqn_validation_quantiles
+from dscp.loss import compute_loss_iqn_rnn, compute_loss_iqn_transformer, resolve_iqn_validation_quantiles, compute_iqn_interval_validation_loss
 from dscp.models.iqn import build_iqn_optimizer
 from dscp.models.iqn_rnn import IQNRNN
 from dscp.models.iqn_transformer import IQNTransformer
@@ -70,6 +70,9 @@ def _prediction_head_kwargs(model_config):
     """Resolve IQN prediction-head options for a tuning trial."""
     return {
         "prediction_head": model_config.get("prediction_head", "cosine_embedding"),
+        "iqn_num_layers": model_config.get("iqn_num_layers", 1),
+        "interval_mode": model_config.get("interval_mode", "sampling"),
+        "sampling_num": model_config.get("sampling_num", 1000),
         "monotonic_num_layers": model_config.get("monotonic_num_layers", 1),
         "monotonic_hidden_dims": model_config.get("monotonic_hidden_dims"),
         "monotonic_activation": model_config.get(
@@ -83,6 +86,11 @@ def _build_model(config, dim_feature: int, dim_x: int):
     config.model.prediction_head = str(
         config.model.get("prediction_head", "cosine_embedding")
     ).strip().lower()
+    config.model.interval_mode = str(
+        config.model.get("interval_mode", "sampling")
+    ).strip().lower()
+    config.model.sampling_num = config.model.get("sampling_num", 1000)
+    config.model.iqn_num_layers = config.model.get("iqn_num_layers", 1)
     use_current_feature = bool(config.model.use_current_feature)
     current_feature_dim = dim_x if use_current_feature else 0
     shared_dim = config.model.get("shared_dim")
@@ -255,7 +263,7 @@ def _run_single_trial(config, sequence_item, normalization_params):
         model.eval()
         loss_sum = 0.0
         validation_weight = 0
-        for strided_x, strided_residual, strided_y, target_x, target_residual, _, _ in model_selection_valid_dataloader:
+        for batch_index, (strided_x, strided_residual, strided_y, target_x, target_residual, _, _) in enumerate(model_selection_valid_dataloader):
             strided_feature = generate_strided_feature(
                 strided_x,
                 strided_residual,
@@ -265,7 +273,14 @@ def _run_single_trial(config, sequence_item, normalization_params):
             target_residual = target_residual.to(device)
             target_x = target_x.to(device)
             with torch.no_grad():
-                if use_current_feature:
+                if validation_quantiles is not None:
+                    loss = compute_iqn_interval_validation_loss(
+                        model, strided_feature, target_residual,
+                        validation_kwargs["taus"],
+                        current_feature=target_x if use_current_feature else None,
+                        sampling_seed=int(config.get("seed", 0)) + batch_index,
+                    )
+                elif use_current_feature:
                     loss = loss_fn(
                         model, strided_feature, target_residual, config.model.num_taus,
                         target_x, **validation_kwargs,
@@ -359,6 +374,9 @@ def _run_single_trial(config, sequence_item, normalization_params):
     return {
         "model_type": model_type,
         "prediction_head": model.prediction_head,
+        "iqn_num_layers": getattr(model.iqn, "iqn_num_layers", None),
+        "interval_mode": model.iqn.interval_mode,
+        "sampling_num": getattr(model.iqn, "sampling_num", None),
         "validation_loss": validation_mode,
         "validation_quantiles": validation_quantiles,
         "train_loss": train_loss,

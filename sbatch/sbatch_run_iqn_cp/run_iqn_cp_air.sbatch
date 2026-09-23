@@ -3,7 +3,7 @@
 #SBATCH --account=gts-yxie77-paid
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --array=0
+#SBATCH --array=0,3
 #SBATCH --gres=gpu:1 -C V100
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
