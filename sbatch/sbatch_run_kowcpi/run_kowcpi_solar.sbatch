@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH -J kowcpi_solar
 #SBATCH --account=gts-yxie77-paid
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --array=0-2
-#SBATCH --cpus-per-task=4
+#SBATCH --nodes=3
+#SBATCH --ntasks=3
+#SBATCH --array=0
+#SBATCH --cpus-per-task=17
 #SBATCH --mem=16G
-#SBATCH -t10
+#SBATCH -t60
 #SBATCH -qinferno
 #SBATCH -o Report-kowcpi-solar-%A_%a.out
 #SBATCH --mail-type=ALL
