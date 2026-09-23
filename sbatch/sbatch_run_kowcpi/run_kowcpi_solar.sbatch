@@ -3,7 +3,7 @@
 #SBATCH --account=gts-yxie77-paid
 #SBATCH --nodes=3
 #SBATCH --ntasks=3
-#SBATCH --array=0
+#SBATCH --array=0-2
 #SBATCH --cpus-per-task=17
 #SBATCH --mem=384G
 #SBATCH -t60
