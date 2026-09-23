@@ -4,18 +4,15 @@ data:
   calibration_ratio: 0.66 # Test uses the remaining 1 - calibration_ratio.
   normalize: False
 
-
 model:
   target_quantiles:
     - [0.05, 0.95]
   prediction_step: 1
   # KOWCPI residual-block size. This corresponds to `past_window`
   # in the original KOWCPI_Codes implementation.
-  past_window: 5
-
+  past_window: 100
   # If null, use a rolling residual history with the calibration length.
   history_window: null
-
   kernel: "epanechnikov"
   bandwidth: null
   bandwidth_range: [1.0, 10.0, 100]
@@ -23,17 +20,15 @@ model:
   # If False, only use the exact target_quantiles pair, e.g. [0.05, 0.95].
   use_beta_search: False
   bins: 5
-
   weigh_residuals: False
   residual_weight_decay: 0.995 # only used if `weigh_residuals` is True
   # Cap RNW training blocks to avoid O(n^2) AIC bandwidth memory on long Chronos sequences.
-  max_training_blocks: 2000
+  max_training_blocks: null
   min_training_blocks: 2
-
   use_adaptive_window: False
   update_with_test: True
 
-
+  
 plotting:
   plotting: True
   plotting_seq_len: 200
