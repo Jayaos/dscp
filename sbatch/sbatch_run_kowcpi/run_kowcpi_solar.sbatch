@@ -5,7 +5,7 @@
 #SBATCH --ntasks=3
 #SBATCH --array=0
 #SBATCH --cpus-per-task=17
-#SBATCH --mem=16G
+#SBATCH --mem=384G
 #SBATCH -t60
 #SBATCH -qinferno
 #SBATCH -o Report-kowcpi-solar-%A_%a.out
