@@ -13,7 +13,7 @@ model:
   kernel: "epanechnikov"
   bandwidth: null
   bandwidth_range: [1.0, 10.0, 100]
-  use_beta_search: False
+  use_beta_search: True
   bins: 5
   weigh_residuals: False
   residual_weight_decay: 0.995

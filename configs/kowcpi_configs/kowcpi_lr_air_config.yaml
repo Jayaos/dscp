@@ -11,7 +11,7 @@ model:
   prediction_step: 1
   # KOWCPI residual-block size. This corresponds to `past_window`
   # in the original KOWCPI_Codes implementation.
-  past_window: 5
+  past_window: 100
 
   # If null, use a rolling residual history with the calibration length.
   history_window: null
