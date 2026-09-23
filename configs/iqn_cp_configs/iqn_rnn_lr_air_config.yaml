@@ -18,7 +18,7 @@ model:
   use_current_feature: False
   # Choose "partially_monotonic" or the paper-style "cosine_embedding" IQN head.
   prediction_head: "cosine_embedding"
-  interval_mode: "direct" # cosine only: direct or sampling
+  interval_mode: "sampling" # cosine only: direct or sampling
   sampling_num: 1000 # cosine sampling validation/inference only; distinct from training num_taus
   iqn_hidden_dim: 64
   iqn_num_layers: 1 # cosine prediction MLP hidden-layer count; embedding stays one layer
