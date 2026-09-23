@@ -17,6 +17,31 @@ sequences in parallel, with BLAS/OpenMP threads limited to one per worker.
 Adjust resources with `sbatch --cpus-per-task=N --mem=SIZE --time=HH:MM:SS`
 as needed for longer sequences.
 
+## Synthetic simulation
+
+Submit the simulation from the repository root:
+
+```bash
+sbatch sbatch/sbatch_run_kowcpi/run_kowcpi_simulation.sbatch
+```
+
+This single job uses
+[`kowcpi_simulation_config.yaml`](../../configs/kowcpi_configs/kowcpi_simulation_config.yaml)
+and requires `data/kowcpi_sim_data.pkl` in the cluster checkout. The artifact
+contains synthetic targets and saved LightGBM predictions; the job evaluates
+KOWCPI without regenerating data or retraining LightGBM. Its single sequence
+uses one CPU, with the same environment, 16 GB memory, and 10-minute limit as
+the dataset jobs.
+
+The YAML controls experiment settings and writes results under
+`results/kowcpi/simulation/lightgbm/<timestamp>/`. Override the cluster
+repository path with `RUNPATH`, for example:
+
+```bash
+sbatch --export=ALL,RUNPATH=/path/to/DSCP \
+  sbatch/sbatch_run_kowcpi/run_kowcpi_simulation.sbatch
+```
+
 ## Array tasks and inputs
 
 | Task ID | Base predictor |

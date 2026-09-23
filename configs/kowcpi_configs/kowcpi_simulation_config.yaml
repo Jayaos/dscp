@@ -1,5 +1,5 @@
 data:
-  data_path: "C:/Users/jayao/Desktop/python_projects/DSCP/data/kowcpi_sim_data.pkl"
+  data_path: "./data/kowcpi_sim_data.pkl"
   calibration_ratio: 0.8 # Test uses the remaining 1 - calibration_ratio.
   normalize: False
 
