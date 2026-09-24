@@ -3,10 +3,10 @@
 #SBATCH --account=gts-yxie77-paid
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --array=0-2
+#SBATCH --array=0
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=384G
-#SBATCH -t60
+#SBATCH -t120
 #SBATCH -qinferno
 #SBATCH -o Report-kowcpi-air-%A_%a.out
 #SBATCH --mail-type=ALL

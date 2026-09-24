@@ -16,7 +16,7 @@ model:
   history_window: null
   kernel: "epanechnikov"
   bandwidth: null
-  bandwidth_range: [1.0, 10.0, 100]
+  bandwidth_range: [1.0, 5.0, 10.0, 20, 50, 100]
   # If True, KOWCPI searches asymmetric beta pairs in [0, alpha].
   # If False, only use the exact target_quantiles pair, e.g. [0.05, 0.95].
   use_beta_search: False
