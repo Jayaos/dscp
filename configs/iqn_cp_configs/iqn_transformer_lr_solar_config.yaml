@@ -28,7 +28,7 @@ model:
   cos_emb_dim: 64
   num_taus: 64
   target_quantiles:
-    - [0.95, 0.05]
+    - [0.975, 0.025]
   prediction_step: 1
   window_size: 100
 
