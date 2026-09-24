@@ -6,7 +6,7 @@
 #SBATCH --array=0-2
 #SBATCH --cpus-per-task=17
 #SBATCH --mem=384G
-#SBATCH -t60
+#SBATCH -t120
 #SBATCH -qinferno
 #SBATCH -o Report-kowcpi-solar-%A_%a.out
 #SBATCH --mail-type=ALL

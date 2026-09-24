@@ -166,7 +166,7 @@ class IQNPredictionHeadTests(unittest.TestCase):
                 self.assertEqual(actual.shape, (2, 2, output_dim))
                 torch.testing.assert_close(actual, expected)
 
-    def test_cosine_head_uses_direct_multiplicative_fusion(self):
+    def test_cosine_head_uses_residual_multiplicative_fusion(self):
         head = ImplicitQuantileNetwork(
             input_dim=3,
             hidden_dim=5,
@@ -180,7 +180,7 @@ class IQNPredictionHeadTests(unittest.TestCase):
         actual, prepared_taus = head(contexts, taus=taus)
         embedded_taus = head.quantile_embedding(prepared_taus)
         expected = head.output_layer(
-            contexts.unsqueeze(1) * embedded_taus
+            contexts.unsqueeze(1) * (1.0 + embedded_taus)
         ).squeeze(-1)
         torch.testing.assert_close(actual, expected)
         self.assertFalse(hasattr(head, "input_projection"))
@@ -190,6 +190,34 @@ class IQNPredictionHeadTests(unittest.TestCase):
             zero_values,
             zero_values[:, :1].expand_as(zero_values),
         )
+
+    def test_cosine_zero_embedding_preserves_context_and_encoder_gradient(self):
+        head = ImplicitQuantileNetwork(
+            input_dim=3,
+            hidden_dim=3,
+            n_cos_embedding=4,
+            interval_mode="direct",
+        )
+        output_weight = torch.tensor([[1.0, -2.0, 0.5]])
+        with torch.no_grad():
+            for parameter in head.quantile_embedding.parameters():
+                parameter.zero_()
+            head.output_layer[0].weight.copy_(torch.eye(3))
+            head.output_layer[0].bias.zero_()
+            head.output_layer[-1].weight.copy_(output_weight)
+            head.output_layer[-1].bias.zero_()
+
+        contexts = torch.tensor(
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+            requires_grad=True,
+        )
+        values, _ = head(contexts, taus=self.quantiles)
+        expected = F.linear(contexts, output_weight).expand_as(values)
+        torch.testing.assert_close(values, expected)
+
+        values.sum().backward()
+        expected_gradient = output_weight.expand_as(contexts) * len(self.quantiles)
+        torch.testing.assert_close(contexts.grad, expected_gradient)
 
     def test_cosine_head_depth_width_validation_and_signed_output(self):
         for depth in (1, 2, 3):

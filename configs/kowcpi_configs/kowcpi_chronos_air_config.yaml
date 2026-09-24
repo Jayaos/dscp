@@ -7,7 +7,7 @@ data:
 
 model:
   target_quantiles:
-    - [0.05, 0.95]
+    - [0.025, 0.975]
   prediction_step: 1
   # KOWCPI residual-block size. This corresponds to `past_window`
   # in the original KOWCPI_Codes implementation.

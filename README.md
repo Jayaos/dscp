@@ -319,7 +319,7 @@ RNN and Transformer IQN-CP support two choices through
 | Value | Quantile prediction |
 | --- | --- |
 | `partially_monotonic` | Implements the partially monotonic head. The quantile level is supplied directly, all weights along the quantile-dependent path are positive softplus transforms, and inference evaluates `g(h, tau)` directly. Quantiles are nondecreasing in `tau` by construction. |
-| `cosine_embedding` (default when the selector is omitted) | Implements the paper-style cosine quantile embedding and multiplicative context conditioning. Its raw head is not constrained to be monotonic, and `model.interval_mode` selects direct evaluation or sampling-based empirical rearrangement when constructing intervals. |
+| `cosine_embedding` (default when the selector is omitted) | Implements a cosine quantile embedding and residual multiplicative context conditioning, `h * (1 + embedding(tau))`. Its raw head is not constrained to be monotonic, and `model.interval_mode` selects direct evaluation or sampling-based empirical rearrangement when constructing intervals. |
 
 The checked-in IQN-CP experiment configurations explicitly select a prediction
 head. To switch between the partially monotonic and paper-style cosine designs,
@@ -350,18 +350,21 @@ enabled. Let `M = cos_emb_dim`, `H = iqn_hidden_dim`, and
 `L = iqn_num_layers`. Its architecture is:
 
 ```text
-tau -> M cosine features -> Linear(M, D) -> ReLU --+
-                                                      elementwise multiply
-h in R^D ------------------------------------------+
-          -> L x [Linear -> ReLU], width H -> Linear(H, 1)
+tau -> M cosine features -> Linear(M, D) -> ReLU -> e(tau)
+h * (1 + e(tau)) -> L x [Linear -> ReLU], width H -> Linear(H, 1)
 ```
 
 The cosine embedding always has exactly one learned linear/ReLU layer;
 `iqn_num_layers` counts only the final prediction MLP's hidden layers, not its
-output layer. The context is fused as `h * embedding(tau)`, without an input
-projection or a residual `1 + embedding(tau)` term. The cosine head itself has
-no dropout; `model.dropout` still applies to the RNN or Transformer encoder.
+output layer. The context is fused as `h * (1 + embedding(tau))`, without an
+input projection, so a zero embedding preserves the context. The cosine head
+itself has no dropout; `model.dropout` still applies to the RNN or Transformer encoder.
 Every final-head hidden layer has width `iqn_hidden_dim`.
+
+The residual fusion does not change checkpoint parameter names or shapes.
+Older checkpoints trained with `h * embedding(tau)` can still load, but their
+predictions change under the new fusion. Retrain for experiments with this
+architecture.
 
 For the cosine head, both RNN and Transformer models support two interval
 construction modes through `model.interval_mode`:

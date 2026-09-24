@@ -57,6 +57,9 @@ class ImplicitQuantileNetwork(torch.nn.Module):
     """
     Cosine-embedding IQN head for RNN or Transformer representations.
 
+    Quantile embeddings condition the context through residual multiplicative
+    fusion: h * (1 + embedding(tau)).
+
     Its default prediction mode retains the existing sampling-based
     rearrangement behavior for backward compatibility. ``interval_mode`` may
     instead select direct evaluation of the raw conditional quantile head.
@@ -146,7 +149,7 @@ class ImplicitQuantileNetwork(torch.nn.Module):
             )
 
         embedded_taus = self.quantile_embedding(taus)
-        conditioned_hidden = hidden_repr.unsqueeze(1) * embedded_taus
+        conditioned_hidden = hidden_repr.unsqueeze(1) * (1.0 + embedded_taus)
         quantile_values = self.output_layer(conditioned_hidden).squeeze(-1)
 
         return quantile_values, taus
