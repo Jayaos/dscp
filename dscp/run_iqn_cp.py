@@ -9,6 +9,11 @@ from tqdm import tqdm
 from dscp.models.iqn_transformer import IQNTransformer
 from dscp.models.iqn_rnn import IQNRNN
 from dscp.models.iqn import build_iqn_optimizer
+from dscp.qr_reporting import (
+    QuantileCrossingTracker,
+    summarize_crossing_results,
+    write_excluded_points,
+)
 from dscp.data import ConformalPredictionData
 from dscp.loss import (
     compute_loss_iqn_transformer,
@@ -85,10 +90,30 @@ def _save_resolved_config(config):
     )
 
 
+def _exclude_crossed_predictions(model_config):
+    """Only unconstrained direct cosine outputs need final-test exclusions."""
+    return (
+        model_config.prediction_head == "cosine_embedding"
+        and model_config.interval_mode == "direct"
+    )
+
+
+def _crossing_tracker(config, key, heldout_size, test_size):
+    return QuantileCrossingTracker(
+        config, key, heldout_size, test_size,
+        method="iqn_cp",
+        head_metadata={
+            "prediction_head": config.model.prediction_head,
+            "interval_mode": config.model.interval_mode,
+        },
+    )
+
+
 def run_transformer_iqn_cp(config_path):
 
     config = load_experiment_config(config_path)
     _materialize_prediction_head_selector(config.model)
+    exclude_crossings = _exclude_crossed_predictions(config.model)
     tau_mode, training_quantiles = resolve_iqn_training_quantiles(
         config.training, config.model.target_quantiles
     )
@@ -296,6 +321,10 @@ def run_transformer_iqn_cp(config_path):
             for confidence_pair in config.model.target_quantiles
         }
 
+        crossing_tracker = _crossing_tracker(
+            config, key, len(cpd.data[key]["heldout_y"]), len(test_dataset),
+        ) if exclude_crossings else None
+
         if config.data.normalize:
             residuals_noramlized_mu = cpd.data[key]["train_residuals_mu"]
             residuals_noramlized_std = cpd.data[key]["train_residuals_std"]
@@ -327,6 +356,11 @@ def run_transformer_iqn_cp(config_path):
 
             if config.device != "cpu":
                 pred_quantile_values = pred_quantile_values.cpu().detach()
+
+            if crossing_tracker is not None:
+                pred_quantile_values, target_residual, target_y, target_predictions = crossing_tracker.filter_batch(
+                    pred_quantile_values, target_residual, target_y, target_predictions,
+                )
 
             for confidence_pair in config.model.target_quantiles:
                 tuple_confidence_pair = tuple(confidence_pair)
@@ -383,10 +417,12 @@ def run_transformer_iqn_cp(config_path):
         for confidence_pair in config.model.target_quantiles:
             tuple_confidence_pair = tuple(confidence_pair)
             target_alpha = max(tuple_confidence_pair) - min(tuple_confidence_pair)
-            avg_coverage = np.mean(evaluation_results[tuple_confidence_pair]["coverage"])
-            avg_delta_coverage = avg_coverage - target_alpha
-            avg_interval_width = np.mean(evaluation_results[tuple_confidence_pair]["interval_width"])
-            avg_winkler_score = np.mean(evaluation_results[tuple_confidence_pair]["winkler_score"])
+            result = evaluation_results[tuple_confidence_pair]
+            has_predictions = bool(result["coverage"])
+            avg_coverage = np.mean(result["coverage"]) if has_predictions else None
+            avg_delta_coverage = avg_coverage - target_alpha if has_predictions else None
+            avg_interval_width = np.mean(result["interval_width"]) if has_predictions else None
+            avg_winkler_score = np.mean(result["winkler_score"]) if has_predictions else None
             print("avg coverage: {}".format(avg_coverage))
             print("avg delta coverage: {}".format(avg_delta_coverage))
             print("avg interval width: {}".format(avg_interval_width))
@@ -411,13 +447,25 @@ def run_transformer_iqn_cp(config_path):
                     "best_valid_loss": float(best_loss),
                     "evaluation_results": evaluation_results}
 
+        if crossing_tracker is not None:
+            log[key]["metadata"] = crossing_tracker.finalize(evaluation_results)
+
         torch.save(best_model, os.path.join(config.saving_dir, key + '_model.pt'))
         save_data(os.path.join(config.saving_dir, "log.pkl"), log)
 
-    summary_results = summarize_evaluation_results(log, config.model.target_quantiles)
+    if exclude_crossings:
+        summary_results = summarize_crossing_results(log, config.model.target_quantiles)
+        write_excluded_points(log, config.saving_dir)
+    else:
+        summary_results = summarize_evaluation_results(log, config.model.target_quantiles)
 
     for tuple_confidence_pair, summary in summary_results.items():
         print("Summary for confidence pair {}".format(tuple_confidence_pair))
+        if exclude_crossings:
+            print("Test points: evaluated={}, excluded={}, total={}, exclusion rate={:.6%}".format(
+                summary["evaluated_points"], summary["excluded_points_count"],
+                summary["total_points"], summary["exclusion_rate"],
+            ))
         print("avg_coverage mean: {}, std: {}".format(
             summary["avg_coverage_mean"],
             summary["avg_coverage_std"])
@@ -438,7 +486,9 @@ def run_transformer_iqn_cp(config_path):
     save_data(os.path.join(config.saving_dir, "summary_results.pkl"), summary_results)
 
     if config.plotting.plotting:
-        plot_cp_prediction_intervals(log,
+        plotted = {key: item for key, item in log.items()
+                   if any(result["coverage"] for result in item["evaluation_results"].values())}
+        plot_cp_prediction_intervals(plotted,
                                      config.model.target_quantiles,
                                      config.plotting.plotting_seq_len,
                                      os.path.join(config.saving_dir, "plots"))
@@ -448,6 +498,7 @@ def run_rnn_iqn_cp(config_path):
 
     config = load_experiment_config(config_path)
     _materialize_prediction_head_selector(config.model)
+    exclude_crossings = _exclude_crossed_predictions(config.model)
     tau_mode, training_quantiles = resolve_iqn_training_quantiles(
         config.training, config.model.target_quantiles
     )
@@ -654,6 +705,10 @@ def run_rnn_iqn_cp(config_path):
             for confidence_pair in config.model.target_quantiles
         }
 
+        crossing_tracker = _crossing_tracker(
+            config, key, len(cpd.data[key]["heldout_y"]), len(test_dataset),
+        ) if exclude_crossings else None
+
         if config.data.normalize:
             residuals_noramlized_mu = cpd.data[key]["train_residuals_mu"]
             residuals_noramlized_std = cpd.data[key]["train_residuals_std"]
@@ -685,6 +740,11 @@ def run_rnn_iqn_cp(config_path):
 
             if config.device != "cpu":
                 pred_quantile_values = pred_quantile_values.cpu().detach()
+
+            if crossing_tracker is not None:
+                pred_quantile_values, target_residual, target_y, target_predictions = crossing_tracker.filter_batch(
+                    pred_quantile_values, target_residual, target_y, target_predictions,
+                )
 
             for confidence_pair in config.model.target_quantiles:
                 tuple_confidence_pair = tuple(confidence_pair)
@@ -741,10 +801,12 @@ def run_rnn_iqn_cp(config_path):
         for confidence_pair in config.model.target_quantiles:
             tuple_confidence_pair = tuple(confidence_pair)
             target_alpha = max(tuple_confidence_pair) - min(tuple_confidence_pair)
-            avg_coverage = np.mean(evaluation_results[tuple_confidence_pair]["coverage"])
-            avg_delta_coverage = avg_coverage - target_alpha
-            avg_interval_width = np.mean(evaluation_results[tuple_confidence_pair]["interval_width"])
-            avg_winkler_score = np.mean(evaluation_results[tuple_confidence_pair]["winkler_score"])
+            result = evaluation_results[tuple_confidence_pair]
+            has_predictions = bool(result["coverage"])
+            avg_coverage = np.mean(result["coverage"]) if has_predictions else None
+            avg_delta_coverage = avg_coverage - target_alpha if has_predictions else None
+            avg_interval_width = np.mean(result["interval_width"]) if has_predictions else None
+            avg_winkler_score = np.mean(result["winkler_score"]) if has_predictions else None
             print("avg coverage: {}".format(avg_coverage))
             print("avg delta coverage: {}".format(avg_delta_coverage))
             print("avg interval width: {}".format(avg_interval_width))
@@ -769,13 +831,25 @@ def run_rnn_iqn_cp(config_path):
                     "best_valid_loss": float(best_loss),
                     "evaluation_results": evaluation_results}
 
+        if crossing_tracker is not None:
+            log[key]["metadata"] = crossing_tracker.finalize(evaluation_results)
+
         torch.save(best_model, os.path.join(config.saving_dir, key + '_model.pt'))
         save_data(os.path.join(config.saving_dir, "log.pkl"), log)
 
-    summary_results = summarize_evaluation_results(log, config.model.target_quantiles)
+    if exclude_crossings:
+        summary_results = summarize_crossing_results(log, config.model.target_quantiles)
+        write_excluded_points(log, config.saving_dir)
+    else:
+        summary_results = summarize_evaluation_results(log, config.model.target_quantiles)
 
     for tuple_confidence_pair, summary in summary_results.items():
         print("Summary for confidence pair {}".format(tuple_confidence_pair))
+        if exclude_crossings:
+            print("Test points: evaluated={}, excluded={}, total={}, exclusion rate={:.6%}".format(
+                summary["evaluated_points"], summary["excluded_points_count"],
+                summary["total_points"], summary["exclusion_rate"],
+            ))
         print("avg_coverage mean: {}, std: {}".format(
             summary["avg_coverage_mean"],
             summary["avg_coverage_std"])
@@ -796,7 +870,9 @@ def run_rnn_iqn_cp(config_path):
     save_data(os.path.join(config.saving_dir, "summary_results.pkl"), summary_results)
 
     if config.plotting.plotting:
-        plot_cp_prediction_intervals(log,
+        plotted = {key: item for key, item in log.items()
+                   if any(result["coverage"] for result in item["evaluation_results"].values())}
+        plot_cp_prediction_intervals(plotted,
                                      config.model.target_quantiles,
                                      config.plotting.plotting_seq_len,
                                      os.path.join(config.saving_dir, "plots"))

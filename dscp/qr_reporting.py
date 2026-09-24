@@ -1,4 +1,4 @@
-"""Final-test reporting for QR-CP's unconstrained quantile heads."""
+"""Shared final-test crossing exclusions for QR-CP and direct cosine IQN-CP."""
 
 import csv
 import json
@@ -36,8 +36,16 @@ class QuantileCrossingTracker:
     training, checkpoint validation, and tuning keep their original data.
     """
 
-    def __init__(self, config, key, heldout_size, test_size):
+    def __init__(
+        self, config, key, heldout_size, test_size, *,
+        method="qr_cp", head_metadata=None,
+    ):
         self.key = str(key)
+        self.method = method
+        self.method_label = {"qr_cp": "QR-CP", "iqn_cp": "IQN-CP"}.get(method, method)
+        self.head_metadata = (
+            {"head_type": "independent"} if head_metadata is None else dict(head_metadata)
+        )
         self.quantiles = get_sorted_unique_quantiles(config.model.target_quantiles)
         self.pairs = [list(pair) for pair in config.model.target_quantiles]
         self.target_indices = list(range(heldout_size - test_size, heldout_size))
@@ -48,7 +56,7 @@ class QuantileCrossingTracker:
     def filter_batch(self, quantile_values, target_residual, target_y, target_predictions):
         quantile_values = quantile_values.detach().cpu()
         if quantile_values.ndim != 2 or quantile_values.shape[1] != len(self.quantiles):
-            raise ValueError("QR-CP crossing exclusions require one-step quantile predictions.")
+            raise ValueError(f"{self.method_label} crossing exclusions require one-step quantile predictions.")
         if not torch.isfinite(quantile_values).all():
             raise ValueError(f"Nonfinite predicted quantiles for sequence {self.key!r}.")
         crossings = quantile_values[:, :-1] > quantile_values[:, 1:]
@@ -82,7 +90,7 @@ class QuantileCrossingTracker:
 
     def finalize(self, evaluation_results):
         if len(self.valid_mask) != len(self.target_indices):
-            raise ValueError("QR-CP prediction mask does not cover the full test timeline.")
+            raise ValueError(f"{self.method_label} prediction mask does not cover the full test timeline.")
         counts = _counts(len(self.valid_mask), sum(self.valid_mask))
         retained_indices = [index for index, valid in zip(self.target_indices, self.valid_mask) if valid]
         for result in evaluation_results.values():
@@ -93,8 +101,8 @@ class QuantileCrossingTracker:
             f"excluded={counts['excluded_points_count']}, total={counts['total_points']}"
         )
         return {
-            "method": "qr_cp",
-            "head_type": "independent",
+            "method": self.method,
+            **self.head_metadata,
             "split": "test",
             "target_indices": self.target_indices,
             "valid_prediction_mask": self.valid_mask,
@@ -105,7 +113,7 @@ class QuantileCrossingTracker:
         }
 
 
-def summarize_qr_results(log, pairs):
+def summarize_crossing_results(log, pairs):
     """Match DistMatch's equal sequence weighting and unavailable-score policy."""
     summaries = {}
     for configured_pair in pairs:
@@ -128,6 +136,10 @@ def summarize_qr_results(log, pairs):
         })
         summaries[pair] = result
     return summaries
+
+
+# Preserve the existing QR runner API while sharing the identical policy with IQN.
+summarize_qr_results = summarize_crossing_results
 
 
 def write_excluded_points(log, saving_dir):

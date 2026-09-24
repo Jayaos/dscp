@@ -16,7 +16,7 @@ model:
   dropout: 0.
   use_current_feature: False
   # Choose "partially_monotonic" or the paper-style "cosine_embedding" IQN head.
-  prediction_head: "partially_monotonic"
+  prediction_head: "cosine_embedding"
   interval_mode: "direct" # cosine only: direct or sampling
   sampling_num: 1000 # cosine sampling validation/inference only; distinct from training num_taus
   iqn_hidden_dim: 64
@@ -26,7 +26,7 @@ model:
   cos_emb_dim: 64
   num_taus: 64
   target_quantiles:
-    - [0.9, 0.1]
+    - [0.95, 0.05]
   prediction_step: 1
   window_size: 100
 

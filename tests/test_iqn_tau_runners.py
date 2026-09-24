@@ -63,6 +63,7 @@ class IQNTauRunnerTests(unittest.TestCase):
                 return_value=runner_fixtures.IQNPredictionHeadRunnerTests._artifact(),
             ),
             patch.object(run_iqn_cp, "save_data") as save_data,
+            patch.object(run_iqn_cp, "write_excluded_points"),
             patch.object(run_iqn_cp.os, "makedirs"),
             patch.object(run_iqn_cp.torch, "save") as save_model,
             patch.object(run_iqn_cp, loss_name, side_effect=raw_loss),

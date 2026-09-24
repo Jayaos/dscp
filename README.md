@@ -400,6 +400,28 @@ construction modes through `model.interval_mode`:
   noncrossing endpoints within the call. Test-time inference remains
   stochastic unless the caller controls the random seed.
 
+For `prediction_head: cosine_embedding` with `interval_mode: direct`, final
+test reporting uses the same crossing-exclusion policy as independent-head
+QR-CP. If any adjacent values at the sorted unique requested quantile levels
+are decreasing, that timestamp is excluded from **every** configured interval
+pair's coverage, width, Winkler score, and plotted data. Equal quantile values
+remain valid. Predictions are not sorted or repaired, and this check only
+covers the requested levels, not the entire learned quantile function.
+
+`log.pkl` records the full original target indices, a validity mask, excluded
+point diagnostics, and total/evaluated/excluded counts. Retained per-point
+results include their original target indices; `excluded_points.csv` records
+each exclusion. Summaries report the exclusion rate, weight nonempty sequences
+equally, and omit sequences with no valid predictions from metric averages.
+All-excluded sequences have empty metric arrays and unavailable (`None`)
+averages. The results inspector's rolling windows use retained points, skipping
+excluded timestamps, just as for QR-CP.
+
+These are metrics **conditional on noncrossing predictions**, not full-test
+coverage; report the exclusion rate alongside them. Training, checkpoint
+validation, hyperparameter tuning, sampling-mode reporting, and partially
+monotonic-head reporting are unchanged. No additional configuration is needed.
+
 The default is `interval_mode: sampling` with `sampling_num: 1000`.
 `model.sampling_num` controls cosine sampling-based interval construction and
 the matching `target_quantiles` validation path. It is separate from

@@ -120,6 +120,7 @@ class IQNPredictionHeadRunnerTests(unittest.TestCase):
                             patch.object(run_iqn_cp.OmegaConf, "save") as save_config,
                             patch.object(run_iqn_cp, "load_data", return_value=self._artifact()),
                             patch.object(run_iqn_cp, "save_data") as save_data,
+                            patch.object(run_iqn_cp, "write_excluded_points"),
                             patch.object(run_iqn_cp.os, "makedirs"),
                             patch.object(run_iqn_cp.torch, "save") as save_model,
                             patch.object(run_iqn_cp, "tqdm", side_effect=lambda items, **kwargs: items),
@@ -189,8 +190,13 @@ class IQNPredictionHeadRunnerTests(unittest.TestCase):
                         for result in sequence_log["evaluation_results"].values():
                             lower = np.asarray(result["lower_interval"])
                             upper = np.asarray(result["upper_interval"])
-                            self.assertEqual(lower.shape, (6,))
-                            self.assertEqual(upper.shape, (6,))
+                            expected_points = (
+                                sequence_log["metadata"]["evaluated_points"]
+                                if selected == "cosine_embedding" and expected_mode == "direct"
+                                else 6
+                            )
+                            self.assertEqual(lower.shape, (expected_points,))
+                            self.assertEqual(upper.shape, (expected_points,))
                             self.assertTrue(np.isfinite(lower).all())
                             self.assertTrue(np.isfinite(upper).all())
                             if selected == "partially_monotonic" or expected_mode == "sampling":

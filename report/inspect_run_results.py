@@ -73,6 +73,12 @@ def _prediction_exclusion_counts(metadata, context):
         method = "DistMatch"
     elif metadata.get("method") == "qr_cp" and metadata.get("head_type") == "independent":
         method = "QR-CP"
+    elif (metadata.get("method") == "iqn_cp"
+          and metadata.get("prediction_head") == "cosine_embedding"
+          and metadata.get("interval_mode") == "direct"):
+        method = "IQN-CP"
+        if metadata.get("exclusion_policy") != "skip_crossed_quantiles_timestamp_all_coverage_levels":
+            raise ValueError(f"{context}: {method} unsupported exclusion_policy.")
     else:
         return None
     counts = {}
@@ -325,7 +331,7 @@ def inspect_results(results_dir, rolling_window_size):
         rolling_count = result["num_rolling_sequences"]
         print(f"Sequences: {count}; rolling sequences: {rolling_count}/{count}")
         if "num_no_valid_sequences" in result:
-            print(f"  DistMatch sequences with no valid predictions: {result['num_no_valid_sequences']}"
+            print(f"  Sequences with no valid predictions: {result['num_no_valid_sequences']}"
                   f"/{result['num_total_sequences']} (excluded from metric averages).")
             print(f"  Points: evaluated={result['evaluated_points']}, excluded={result['excluded_points_count']},"
                   f" total={result['total_points']}; exclusion rate={result['exclusion_rate']:.6%}.")
