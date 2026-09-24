@@ -11,14 +11,14 @@ data:
 
 
 model:
-  head_type: nondecreasing # choices: nondecreasing, independent
+  head_type: independent # choices: nondecreasing, independent
   dim_model: 64
   num_heads: 4
   num_layers: 2
   dropout: 0.
   use_current_feature: True
   target_quantiles:
-    - [0.1, 0.9]
+    - [0.05, 0.95]
   prediction_step: 1
   window_size: 200
 

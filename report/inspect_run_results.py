@@ -63,32 +63,38 @@ def _metric_array(result, name, context, allow_empty=False):
     return values
 
 
-def _distmatch_exclusion_counts(metadata, context):
-    """Validate the explicit DistMatch exclusion schema without changing other logs."""
+def _prediction_exclusion_counts(metadata, context):
+    """Validate exclusions for supported methods without changing other logs."""
     import numpy as np
 
-    if not isinstance(metadata, Mapping) or metadata.get("method") != "distmatch":
+    if not isinstance(metadata, Mapping):
+        return None
+    if metadata.get("method") == "distmatch":
+        method = "DistMatch"
+    elif metadata.get("method") == "qr_cp" and metadata.get("head_type") == "independent":
+        method = "QR-CP"
+    else:
         return None
     counts = {}
     for name in ("total_points", "evaluated_points", "excluded_points_count"):
         value = metadata.get(name)
         if isinstance(value, bool) or not isinstance(value, Integral) or value < 0:
-            raise ValueError(f"{context}: DistMatch {name} must be a nonnegative integer.")
+            raise ValueError(f"{context}: {method} {name} must be a nonnegative integer.")
         counts[name] = int(value)
     if counts["evaluated_points"] + counts["excluded_points_count"] != counts["total_points"]:
-        raise ValueError(f"{context}: DistMatch evaluated and excluded point counts do not sum to total_points.")
+        raise ValueError(f"{context}: {method} evaluated and excluded point counts do not sum to total_points.")
     mask = np.asarray(metadata.get("valid_prediction_mask"))
     if (mask.ndim != 1 or mask.dtype != np.bool_ or len(mask) != counts["total_points"]
             or int(mask.sum()) != counts["evaluated_points"]):
-        raise ValueError(f"{context}: DistMatch valid_prediction_mask disagrees with point counts.")
+        raise ValueError(f"{context}: {method} valid_prediction_mask disagrees with point counts.")
     rate = metadata.get("exclusion_rate")
     expected_rate = counts["excluded_points_count"] / counts["total_points"] if counts["total_points"] else 0.0
     if (isinstance(rate, bool) or not isinstance(rate, (int, float))
             or not np.isfinite(rate) or not np.isclose(rate, expected_rate, rtol=1e-12, atol=1e-12)):
-        raise ValueError(f"{context}: DistMatch exclusion_rate disagrees with point counts.")
+        raise ValueError(f"{context}: {method} exclusion_rate disagrees with point counts.")
     no_valid = metadata.get("evaluation_status") == "no_valid_predictions"
     if no_valid != (counts["evaluated_points"] == 0):
-        raise ValueError(f"{context}: DistMatch evaluation_status disagrees with evaluated_points.")
+        raise ValueError(f"{context}: {method} evaluation_status disagrees with evaluated_points.")
     return counts
 
 
@@ -132,7 +138,7 @@ def summarize_results(log, rolling_window_size):
             expected_pairs = set(evaluations)
         elif set(evaluations) != expected_pairs:
             raise ValueError(f"Sequence {key!r}: quantile pairs differ between sequences.")
-        exclusion_counts = _distmatch_exclusion_counts(item.get("metadata"), f"Sequence {key!r}")
+        exclusion_counts = _prediction_exclusion_counts(item.get("metadata"), f"Sequence {key!r}")
         no_valid = exclusion_counts is not None and exclusion_counts["evaluated_points"] == 0
 
         for pair, result in evaluations.items():
@@ -151,13 +157,13 @@ def summarize_results(log, rolling_window_size):
             if any(len(values) != len(coverage) for values in arrays.values()):
                 raise ValueError(f"{context}: metric arrays have different lengths.")
             if exclusion_counts is not None and len(coverage) != exclusion_counts["evaluated_points"]:
-                raise ValueError(f"{context}: metric length disagrees with DistMatch evaluated_points.")
+                raise ValueError(f"{context}: metric length disagrees with evaluated_points.")
             values = per_pair.setdefault(pair, {name: [] for _, name in METRICS})
             counts = point_counts.setdefault(pair, {
-                "has_distmatch": False, "num_total_sequences": 0, "num_no_valid_sequences": 0,
+                "has_exclusions": False, "num_total_sequences": 0, "num_no_valid_sequences": 0,
                 "total_points": 0, "evaluated_points": 0, "excluded_points_count": 0,
             })
-            counts["has_distmatch"] |= exclusion_counts is not None
+            counts["has_exclusions"] |= exclusion_counts is not None
             counts["num_total_sequences"] += 1
             counts["num_no_valid_sequences"] += int(no_valid)
             for name in ("total_points", "evaluated_points", "excluded_points_count"):
@@ -191,8 +197,8 @@ def summarize_results(log, rolling_window_size):
         for _, name in METRICS:
             result[f"avg_{name}_mean"], result[f"avg_{name}_std"] = _mean_std(values[name])
         counts = point_counts[pair]
-        if counts["has_distmatch"]:
-            result.update({name: value for name, value in counts.items() if name != "has_distmatch"})
+        if counts["has_exclusions"]:
+            result.update({name: value for name, value in counts.items() if name != "has_exclusions"})
             result["exclusion_rate"] = (counts["excluded_points_count"] / counts["total_points"]
                                         if counts["total_points"] else 0.0)
         summary[pair] = result

@@ -90,6 +90,7 @@ class QuantileHeadRunnerTests(unittest.TestCase):
                             patch.object(run_qr_cp.OmegaConf, "load", return_value=config),
                             patch.object(run_qr_cp, "load_data", return_value=self._artifact()),
                             patch.object(run_qr_cp, "save_data") as save_data,
+                            patch.object(run_qr_cp, "write_excluded_points"),
                             patch.object(run_qr_cp.os, "makedirs"),
                             patch.object(run_qr_cp.torch, "save") as save_model,
                             patch.object(run_qr_cp, "tqdm", side_effect=lambda items, **kwargs: items),
@@ -110,6 +111,12 @@ class QuantileHeadRunnerTests(unittest.TestCase):
                         for key in ("train_loss", "valid_loss"):
                             self.assertEqual(len(sequence_log[key]), 1)
                             self.assertTrue(np.isfinite(sequence_log[key]).all())
+                        retained = 6
+                        if head_type == "independent":
+                            metadata = sequence_log["metadata"]
+                            self.assertEqual(len(metadata["valid_prediction_mask"]), 6)
+                            retained = sum(metadata["valid_prediction_mask"])
+                            self.assertEqual(metadata["evaluated_points"], retained)
                         for result in sequence_log["evaluation_results"].values():
                             for key in (
                                 "lower_interval",
@@ -118,7 +125,7 @@ class QuantileHeadRunnerTests(unittest.TestCase):
                                 "upper_residual_quantile",
                             ):
                                 endpoints = np.asarray(result[key])
-                                self.assertEqual(endpoints.shape, (6,))
+                                self.assertEqual(endpoints.shape, (retained,))
                                 self.assertTrue(np.isfinite(endpoints).all())
 
     def test_tuning_builder_selects_heads_and_defaults_for_both_encoders(self):

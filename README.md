@@ -306,6 +306,23 @@ quantile levels. Independent predictions and interval endpoints are not sorted
 after prediction. Omitting `head_type` preserves the existing nondecreasing
 method. The QR-CP pipeline currently supports `model.prediction_step: 1`.
 
+For `head_type: independent`, final test reporting excludes a timestamp from
+every coverage level if any predicted quantiles cross: a lower quantile level
+has a strictly larger value than a higher level. Equal predicted values are
+retained. Coverage, interval width, Winkler scores, and plots all use the same
+retained timestamps, following DistMatch's exclusion policy. Training and
+validation losses and hyperparameter tuning are unchanged.
+
+`log.pkl` records the full test `target_indices`, `valid_prediction_mask`,
+crossing diagnostics, and total/evaluated/excluded counts in each sequence's
+`metadata`. Each pair's arrays contain only retained points and their original
+`target_indices`. `excluded_points.csv` lists the excluded timestamps and raw
+quantile predictions, labeled with their residual scale. `summary_results.pkl`
+includes exclusion counts and rates. Sequences with no valid predictions have
+empty arrays and `None` scores; they contribute to exclusion counts but not
+metric averages or plots. The result inspector reports these exclusions and
+computes rolling coverage over retained points, as it does for DistMatch.
+
 The tuning runner inherits the choice from the base configuration. To compare
 both choices in a grid search, uncomment `model.head_type` in the QR-CP tuning
 YAML. Use a different `saving_dir` for each ordinary run when comparing the

@@ -388,5 +388,6 @@ successful predictions remain in `log.pkl` with empty arrays, unavailable
 averages (`None`), and `evaluation_status: no_valid_predictions`; they are
 omitted from plots and metric averages and counted explicitly. If no sequence
 has a valid prediction, the run saves diagnostics and unavailable aggregate
-scores rather than inventing a numerical result. These exclusions and report
-handling apply only to DistMatch.
+scores rather than inventing a numerical result. Independent-head QR-CP also
+uses this retained-point reporting convention for quantile crossings; the QRF
+error handling and exclusion diagnostics described here are specific to DistMatch.
