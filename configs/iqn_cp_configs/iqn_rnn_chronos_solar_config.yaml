@@ -16,7 +16,7 @@ model:
   dim_model: 64
   num_layers: 1
   dropout: 0.
-  use_current_feature: False
+  use_current_feature: True
   # Choose "partially_monotonic" or the paper-style "cosine_embedding" IQN head.
   prediction_head: "cosine_embedding"
   interval_mode: "direct" # cosine only: direct or sampling
