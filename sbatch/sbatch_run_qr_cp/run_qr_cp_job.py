@@ -31,7 +31,8 @@ def build_parser():
     parser.add_argument(
         "--head-type",
         choices=("nondecreasing", "independent"),
-        default="nondecreasing",
+        default=None,
+        help="Override model.head_type; otherwise use the selected YAML setting.",
     )
     parser.add_argument(
         "--output-root", type=Path, default=REPO_ROOT / "results" / "qr_cp"
@@ -62,7 +63,10 @@ def main(argv=None):
     template_path = REPO_ROOT / "configs" / "qr_cp_configs" / template_name
     config = load_experiment_config(template_path)
     config.base_predictor = predictor
-    config.model.head_type = args.head_type
+    head_type = args.head_type if args.head_type is not None else config.model.get("head_type", "nondecreasing")
+    if head_type not in ("nondecreasing", "independent"):
+        parser.error(f"Invalid model.head_type in {template_path}: {head_type!r}.")
+    config.model.head_type = head_type
     config.model.prediction_step = 1
     config.data.data_path = str(artifact_path)
     config.device = config.get("device", 0)
@@ -72,7 +76,7 @@ def main(argv=None):
     print(
         f"QR-CP task {args.task_id}: dataset={args.dataset}, "
         f"base_predictor={predictor}, encoder={encoder}, "
-        f"head_type={args.head_type}, seed={args.seed}",
+        f"head_type={head_type}, seed={args.seed}",
         flush=True,
     )
     print(f"Configuration template: {template_path}", flush=True)

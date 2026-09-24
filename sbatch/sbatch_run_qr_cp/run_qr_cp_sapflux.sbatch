@@ -16,7 +16,7 @@
 set -euo pipefail
 
 # Tasks 0/1/2: RNN on LR/LSTM/Chronos; 3/4/5: Transformer on LR/LSTM/Chronos.
-# Select direct quantile heads with --export=ALL,QR_HEAD_TYPE=independent.
+# Use the YAML head unless overridden with --export=ALL,QR_HEAD_TYPE=independent.
 RUNPATH="${RUNPATH:-/storage/project/r-yxie77-0/jlee3541/projects/dscp}"
 cd "$RUNPATH"
 
@@ -28,8 +28,13 @@ export MPLBACKEND=Agg
 module load anaconda3
 conda activate dscp
 
+head_args=()
+if [[ -n "${QR_HEAD_TYPE:-}" ]]; then
+  head_args=(--head-type "$QR_HEAD_TYPE")
+fi
+
 python -u -m sbatch_run_qr_cp.run_qr_cp_job sapflux \
   --task-id "${SLURM_ARRAY_TASK_ID}" \
-  --head-type "${QR_HEAD_TYPE:-nondecreasing}" \
+  "${head_args[@]}" \
   --output-root "${QR_OUTPUT_ROOT:-$RUNPATH/results/qr_cp}" \
   --seed "${QR_SEED:-2026}"

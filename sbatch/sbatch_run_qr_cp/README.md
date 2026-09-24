@@ -26,14 +26,17 @@ Each submission creates tasks `0-5` with this mapping:
 | 4 | Transformer | LSTM (`lstm`) |
 | 5 | Transformer | Chronos (`chronos`) |
 
-The RNN templates currently use an LSTM encoder. All tasks default to the
-existing `nondecreasing` quantile heads. Select direct independent heads,
-which allow quantile crossing, with `QR_HEAD_TYPE`:
+The RNN templates currently use an LSTM encoder. Each task uses `model.head_type`
+from its YAML template; omitting that setting falls back to `nondecreasing`.
+An explicit `QR_HEAD_TYPE` overrides the YAML for Slurm submissions. For example,
+select direct independent heads, which allow quantile crossing, with:
 
 ```bash
 sbatch --export=ALL,QR_HEAD_TYPE=independent sbatch/sbatch_run_qr_cp/run_qr_cp_air.sbatch
 ```
 
+The Python dispatcher likewise only overrides the YAML when `--head-type` is
+supplied. Its startup message and `resolved_config.yaml` show the selected head.
 The same option applies to Solar and Sapflux. To run only the RNN/LSTM-base
 combination, restrict the array:
 

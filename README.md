@@ -323,9 +323,14 @@ empty arrays and `None` scores; they contribute to exclusion counts but not
 metric averages or plots. The result inspector reports these exclusions and
 computes rolling coverage over retained points, as it does for DistMatch.
 
-The tuning runner inherits the choice from the base configuration. To compare
-both choices in a grid search, uncomment `model.head_type` in the QR-CP tuning
-YAML. Use a different `saving_dir` for each ordinary run when comparing the
+Ordinary Slurm jobs inherit `model.head_type` from the selected YAML unless
+`QR_HEAD_TYPE` (or the Python dispatcher's `--head-type`) explicitly overrides it.
+
+The tuning runner inherits the choice from the base configuration only when
+the tuning grid omits `model.head_type`. An active grid entry overrides the base
+configuration: use `[independent]` for independent heads, `[nondecreasing]` for
+nondecreasing heads, or `[nondecreasing, independent]` to compare both.
+Use a different `saving_dir` for each ordinary run when comparing the
 methods so that model checkpoints and results are retained separately.
 
 ## IQN-CP prediction heads

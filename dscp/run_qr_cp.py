@@ -22,7 +22,8 @@ def run_transformer_quantile_regression_cp(config_path):
     config = load_experiment_config(config_path)
     os.makedirs(config.saving_dir, exist_ok=True)
     _, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
-    exclude_crossings = config.model.get("head_type", "nondecreasing") == "independent"
+    head_type = config.model.get("head_type", "nondecreasing")
+    exclude_crossings = head_type == "independent"
 
     # load data
     data = load_data(config.data.data_path) # load predictor results here
@@ -38,6 +39,7 @@ def run_transformer_quantile_regression_cp(config_path):
 
     print("Experiment setup")
     print("Method: Quantile Regression - Transformer")
+    print("Quantile head: {}".format(head_type))
     print("Base predictor: {}".format(base_predictor))
     print("Data: {}".format(data_type))
     print("{} independent sequences".format(len(cpd.dataset)))
@@ -74,7 +76,7 @@ def run_transformer_quantile_regression_cp(config_path):
                                                     config.model.prediction_step, 
                                                     config.model.dropout,
                                                     current_feature_dim=dim_x,
-                                                    head_type=config.model.get("head_type", "nondecreasing"))
+                                                    head_type=head_type)
         else:
             # utilizing up to x_{t-1} to predict r_t
             qr_transformer = QuantileRegressionTransformer(dim_feature, 
@@ -86,7 +88,7 @@ def run_transformer_quantile_regression_cp(config_path):
                                                     config.model.prediction_step, 
                                                     config.model.dropout,
                                                     current_feature_dim=0,
-                                                    head_type=config.model.get("head_type", "nondecreasing"))
+                                                    head_type=head_type)
 
         qr_transformer.to(device)
         optimizer = torch.optim.AdamW(qr_transformer.parameters(), 
@@ -351,7 +353,8 @@ def run_rnn_quantile_regression_cp(config_path):
     config = load_experiment_config(config_path)
     os.makedirs(config.saving_dir, exist_ok=True)
     _, pair_to_indices = get_interval_quantile_indices(config.model.target_quantiles)
-    exclude_crossings = config.model.get("head_type", "nondecreasing") == "independent"
+    head_type = config.model.get("head_type", "nondecreasing")
+    exclude_crossings = head_type == "independent"
 
     # load data
     data = load_data(config.data.data_path) # load predictor results here
@@ -367,6 +370,7 @@ def run_rnn_quantile_regression_cp(config_path):
 
     print("Experiment setup")
     print("Method: Quantile Regression - RNN")
+    print("Quantile head: {}".format(head_type))
     print("Base predictor: {}".format(base_predictor))
     print("Data: {}".format(data_type))
     print("{} independent sequences".format(len(cpd.dataset)))
@@ -402,7 +406,7 @@ def run_rnn_quantile_regression_cp(config_path):
                                            config.model.prediction_step,
                                            config.model.dropout,
                                            current_feature_dim=dim_x,
-                                           head_type=config.model.get("head_type", "nondecreasing"))
+                                           head_type=head_type)
         else:
             # utilizing up to x_{t-1} to predict r_t
             qr_rnn = QuantileRegressionRNN(config.model.rnn_type,
@@ -413,7 +417,7 @@ def run_rnn_quantile_regression_cp(config_path):
                                            config.model.prediction_step,
                                            config.model.dropout,
                                            current_feature_dim=0,
-                                           head_type=config.model.get("head_type", "nondecreasing"))
+                                           head_type=head_type)
 
         qr_rnn.to(device)
         optimizer = torch.optim.AdamW(qr_rnn.parameters(), 

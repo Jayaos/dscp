@@ -21,15 +21,15 @@ with patch.object(sys, "path", [str(REPO_ROOT / "sbatch"), *sys.path]):
 class QRTuningPredictorTests(unittest.TestCase):
     def test_all_base_configs_preserve_default_prediction_and_result_paths(self):
         cases = [
-            (encoder, predictor, "air", "air-10_prediction", "air-10", "air")
+            (encoder, predictor, "air", "air-10_prediction", "air-10")
             for encoder in ("rnn", "transformer")
             for predictor in ("lr", "lstm", "chronos")
         ] + [
             (encoder, "lstm", "sapflux", "sapflux-solo3-large",
-             "sapflux-solo3-large", "sapflux_solo3_large")
+             "sapflux-solo3-large")
             for encoder in ("rnn", "transformer")
         ]
-        for encoder, predictor, dataset, directory, artifact, result_dataset in cases:
+        for encoder, predictor, dataset, directory, artifact in cases:
             with self.subTest(encoder=encoder, predictor=predictor, dataset=dataset):
                 initial = CONFIG_DIR / f"qr_{encoder}_{predictor}_{dataset}_config.yaml"
                 config, selected_path, save_dir = tuning.resolve_tuning_inputs(
@@ -43,8 +43,8 @@ class QRTuningPredictorTests(unittest.TestCase):
                     Path("data") / directory / predictor / f"{predictor}_{artifact}_data.pkl",
                 )
                 self.assertEqual(
-                    Path(config.saving_dir),
-                    Path("results") / f"qr_{encoder}_{predictor}_{result_dataset}",
+                    Path(config.saving_dir).parent,
+                    Path("results/qr_cp") / dataset / predictor / encoder / config.model.head_type,
                 )
                 self.assertEqual(
                     save_dir, REPO_ROOT / "unused" / f"qr_{encoder}_{predictor}_{dataset}"
@@ -74,7 +74,8 @@ class QRTuningPredictorTests(unittest.TestCase):
                         / f"{predictor}_air-10_data.pkl",
                     )
                     self.assertEqual(
-                        Path(config.saving_dir), Path("results") / f"qr_{encoder}_{predictor}_air"
+                        Path(config.saving_dir).parent,
+                        Path("results/qr_cp/air") / predictor / encoder / config.model.head_type,
                     )
                     self.assertEqual(save_dir, REPO_ROOT / "unused" / f"qr_{predictor}")
 
@@ -92,7 +93,8 @@ class QRTuningPredictorTests(unittest.TestCase):
             Path("data/sapflux-solo3-large/chronos/chronos_sapflux-solo3-large_data.pkl"),
         )
         self.assertEqual(
-            Path(config.saving_dir), Path("results/qr_rnn_chronos_sapflux_solo3_large")
+            Path(config.saving_dir).parent,
+            Path("results/qr_cp/sapflux/chronos/rnn") / config.model.head_type,
         )
 
     def test_legacy_config_preserves_explicit_paths_and_infers_output_predictor(self):
@@ -234,10 +236,15 @@ class QRTuningPredictorTests(unittest.TestCase):
                     REPO_ROOT / "data" / "sapflux-solo3-large" / predictor
                     / f"{predictor}_sapflux-solo3-large_data.pkl",
                 )
+                template = OmegaConf.load(
+                    CONFIG_DIR / f"qr_{encoder}_{predictor}_sapflux_config.yaml"
+                )
+                expected_head = template.model.get("head_type", "nondecreasing")
+                self.assertEqual(config.model.head_type, expected_head)
                 self.assertEqual(
-                    Path(config.saving_dir),
+                    Path(config.saving_dir).parent,
                     REPO_ROOT / "results" / "qr_cp" / "sapflux" / predictor / encoder
-                    / "nondecreasing",
+                    / expected_head,
                 )
 
 
