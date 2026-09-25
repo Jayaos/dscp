@@ -508,11 +508,14 @@ output paths interpolate `model.prediction_head`, so changing the selector also
 changes the ordinary run directory. For separate tuning invocations, likewise
 use a distinct `--save-dir`; a single grid run already keeps its head choices
 in distinct trials. Configurations that omit the selector retain the legacy
-`cosine_embedding` behavior. The Slurm launchers still use
-`IQN_PREDICTION_HEAD` to select the head, overriding the YAML selector; interval
-and training modes come from the selected YAML. For the cosine diagnostic,
-submit with `IQN_PREDICTION_HEAD=cosine_embedding` as well as setting the YAML
-options above. IQN-CP currently supports `model.prediction_step: 1`.
+`cosine_embedding` behavior. The ordinary Slurm launchers use the selected
+YAML's `model.prediction_head` by default. An explicitly set, nonempty
+`IQN_PREDICTION_HEAD` overrides it; direct dispatcher calls can likewise pass
+`--prediction-head`. Leave that environment variable unset or empty to use
+the YAML choice. Interval and training modes also come from the selected YAML.
+Tuning uses its own YAML grid: set `model.prediction_head: [cosine_embedding]`
+there, or list both heads to compare them. IQN-CP currently supports
+`model.prediction_step: 1`.
 
 ## Data split strategy
 

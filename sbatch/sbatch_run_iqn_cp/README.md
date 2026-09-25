@@ -27,18 +27,31 @@ Each submission creates tasks `0-5` with this mapping:
 | 4 | Transformer | LSTM (`lstm`) |
 | 5 | Transformer | Chronos (`chronos`) |
 
-The RNN templates currently use an LSTM encoder. All tasks default to the
-`partially_monotonic` prediction head, which evaluates requested quantiles
-directly and prevents quantile crossing by construction. Select the paper-style
-cosine-embedding head, whose YAML `model.interval_mode` chooses direct
-evaluation or sampling and empirical rearrangement, with `IQN_PREDICTION_HEAD`:
+The RNN templates currently use an LSTM encoder. Each task uses
+`model.prediction_head` from its selected YAML config by default:
+
+```yaml
+model:
+  prediction_head: cosine_embedding # or partially_monotonic
+```
+
+The partially monotonic head prevents quantile crossing by construction.
+For the cosine head, YAML `model.interval_mode` selects direct evaluation or
+sampling and empirical rearrangement. Configs without a head selector retain
+the core runner's legacy `cosine_embedding` default.
+
+To explicitly override the YAML choice for a submission, set
+`IQN_PREDICTION_HEAD`:
 
 ```bash
 sbatch --export=ALL,IQN_PREDICTION_HEAD=cosine_embedding \
   sbatch/sbatch_run_iqn_cp/run_iqn_cp_air.sbatch
 ```
 
-The same option applies to Solar and Sapflux. To run only the RNN/LSTM-base
+The same option applies to Solar and Sapflux. Leave `IQN_PREDICTION_HEAD`
+unset or empty to use the YAML choice; no environment override is needed for
+cosine mode. Direct dispatcher calls accept the optional `--prediction-head`
+override as well. To run only the RNN/LSTM-base
 combination, restrict the array:
 
 ```bash
@@ -90,9 +103,8 @@ training:
   validation_loss: target_quantiles
 ```
 
-Also submit with `IQN_PREDICTION_HEAD=cosine_embedding`: the launcher overrides
-the YAML head selector with this environment setting (default
-`partially_monotonic`). Target-only training does not supervise other quantile
+No prediction-head environment override is needed for this YAML configuration.
+Target-only training does not supervise other quantile
 levels, so combining it with cosine sampling intervals emits a warning without
 changing the chosen modes. Use a separate output directory when comparing
 training modes; `tau_mode` does not change the checkpoint architecture or add
@@ -140,9 +152,11 @@ requiring the data artifact:
 ```bash
 PYTHONPATH="$PWD:$PWD/sbatch:${PYTHONPATH:-}" \
   python -m sbatch_run_iqn_cp.run_iqn_cp_job air \
-  --task-id 1 --prediction-head cosine_embedding --dry-run
+  --task-id 1 --dry-run
 ```
 
-This preview needs the Python configuration dependencies, but does not need
+This preview uses the YAML head; add `--prediction-head cosine_embedding` or
+`--prediction-head partially_monotonic` only to override it.
+It needs the Python configuration dependencies, but does not need
 Slurm. Actual `.sbatch` array runs require the cluster environment described
 above.

@@ -16,7 +16,7 @@
 set -euo pipefail
 
 # Tasks 0/1/2: RNN on LR/LSTM/Chronos; 3/4/5: Transformer on LR/LSTM/Chronos.
-# Select the legacy sampled head with --export=ALL,IQN_PREDICTION_HEAD=cosine_embedding.
+# Use model.prediction_head from YAML unless IQN_PREDICTION_HEAD is explicitly set.
 RUNPATH="${RUNPATH:-/storage/project/r-yxie77-0/jlee3541/projects/dscp}"
 cd "$RUNPATH"
 
@@ -28,8 +28,13 @@ export MPLBACKEND=Agg
 module load anaconda3
 conda activate dscp
 
-python -u -m sbatch_run_iqn_cp.run_iqn_cp_job solar \
-  --task-id "${SLURM_ARRAY_TASK_ID}" \
-  --prediction-head "${IQN_PREDICTION_HEAD:-partially_monotonic}" \
-  --output-root "${IQN_OUTPUT_ROOT:-$RUNPATH/results/iqn_cp}" \
+job_args=(
+  --task-id "${SLURM_ARRAY_TASK_ID}"
+  --output-root "${IQN_OUTPUT_ROOT:-$RUNPATH/results/iqn_cp}"
   --seed "${IQN_SEED:-2026}"
+)
+if [[ -n "${IQN_PREDICTION_HEAD:-}" ]]; then
+  job_args+=(--prediction-head "$IQN_PREDICTION_HEAD")
+fi
+
+python -u -m sbatch_run_iqn_cp.run_iqn_cp_job solar "${job_args[@]}"

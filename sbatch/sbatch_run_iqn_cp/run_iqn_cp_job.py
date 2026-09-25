@@ -32,7 +32,8 @@ def build_parser():
     parser.add_argument(
         "--prediction-head",
         choices=PREDICTION_HEADS,
-        default="partially_monotonic",
+        default=None,
+        help="Override model.prediction_head from the selected YAML config.",
     )
     parser.add_argument(
         "--output-root", type=Path, default=REPO_ROOT / "results" / "iqn_cp"
@@ -66,7 +67,16 @@ def main(argv=None):
     template_path = REPO_ROOT / "configs" / "iqn_cp_configs" / template_name
     config = load_experiment_config(template_path)
     config.base_predictor = predictor
-    config.model.prediction_head = args.prediction_head
+    prediction_head = (
+        args.prediction_head if args.prediction_head is not None
+        else str(config.model.get("prediction_head", "cosine_embedding")).strip().lower()
+    )
+    if prediction_head not in PREDICTION_HEADS:
+        parser.error(
+            f"Invalid model.prediction_head {prediction_head!r} in {template_path}. "
+            f"Choose one of: {', '.join(PREDICTION_HEADS)}."
+        )
+    config.model.prediction_head = prediction_head
     config.model.prediction_step = 1
     config.data.data_path = str(artifact_path)
     config.device = config.get("device", 0)
@@ -76,7 +86,7 @@ def main(argv=None):
     print(
         f"IQN-CP task {args.task_id}: dataset={args.dataset}, "
         f"base_predictor={predictor}, encoder={encoder}, "
-        f"prediction_head={args.prediction_head}, seed={args.seed}",
+        f"prediction_head={prediction_head}, seed={args.seed}",
         flush=True,
     )
     print(f"Configuration template: {template_path}", flush=True)
