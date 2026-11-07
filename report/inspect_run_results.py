@@ -11,6 +11,8 @@ target (upper quantile minus lower quantile), including for rolling coverage.
 Rolling undercoverage averages max(target - window coverage, 0) within each
 sequence, then reports mean/std across those per-sequence averages.
 Sequences shorter than the window contribute only to the non-rolling metrics.
+Explicit finite/nonempty efficiency scopes mask width and Winkler only; coverage
+and rolling coverage retain the complete evaluation timeline.
 """
 
 import argparse
@@ -37,7 +39,7 @@ METHOD_NAMES = {
     "distmatch": "DistMatch", "hopcpt": "HopCPT", "nexcp": "NexCP",
     "kowcpi": "KOWCPI", "local_cp": "Local-CP", "lcp": "Local-CP",
     "iqn_cp": "IQN-CP", "iqn": "IQN-CP", "qr_cp": "QR-CP",
-    "qr": "QR-CP", "spci": "SPCI",
+    "qr": "QR-CP", "spci": "SPCI", "aci": "ACI", "lqt": "LQT", "sqt_ar": "SQT+AR", "cop": "COP",
 }
 
 
@@ -104,6 +106,60 @@ def _prediction_exclusion_counts(metadata, context):
     return counts
 
 
+
+def _conditional_efficiency_info(result, arrays, context):
+    """Validate the explicit ACI efficiency scope without filtering coverage."""
+    import numpy as np
+
+    scope = result.get("metrics_scope")
+    if not isinstance(scope, Mapping):
+        return None
+    declared = "finite_nonempty_intervals_only"
+    fields = ("avg_interval_width", "avg_winkler_score")
+    if not any(scope.get(name) == declared for name in fields):
+        return None
+    if (not all(scope.get(name) == declared for name in fields)
+            or scope.get("coverage") != "all_test_predictions"):
+        raise ValueError(f"{context}: inconsistent conditional efficiency metrics_scope.")
+    size = len(arrays["coverage"])
+    mask = np.asarray(result.get("finite_interval_mask"))
+    if mask.ndim != 1 or mask.dtype != np.bool_ or len(mask) != size:
+        raise ValueError(f"{context}: finite_interval_mask must be a matching boolean array.")
+    kinds = np.asarray(result.get("interval_kind"))
+    if (kinds.ndim != 1 or len(kinds) != size
+            or not np.isin(kinds, ["regular", "full", "empty"]).all()
+            or not np.array_equal(mask, kinds == "regular")):
+        raise ValueError(f"{context}: interval_kind disagrees with finite_interval_mask.")
+    full, empty = kinds == "full", kinds == "empty"
+    if not np.all(arrays["coverage"][full] == 1) or not np.all(arrays["coverage"][empty] == 0):
+        raise ValueError(f"{context}: coverage must count full sets as hits and empty sets as misses.")
+    for name in ("interval_width", "winkler_score"):
+        if not np.isfinite(arrays[name][mask]).all() or np.any(arrays[name][mask] < 0):
+            raise ValueError(f"{context}: ordinary-interval {name} must be finite and nonnegative.")
+    if (not np.isposinf(arrays["interval_width"][full]).all()
+            or not np.all(arrays["interval_width"][empty] == 0)
+            or not np.isposinf(arrays["winkler_score"][full | empty]).all()):
+        raise ValueError(f"{context}: full/empty metrics disagree with their declared conventions.")
+    counts = {
+        "num_test_points": size,
+        "num_finite_intervals": int(mask.sum()),
+        "num_full_sets": int(full.sum()),
+        "num_empty_sets": int(empty.sum()),
+    }
+    for name, expected in counts.items():
+        value = result.get(name)
+        if isinstance(value, bool) or not isinstance(value, Integral) or value != expected:
+            raise ValueError(f"{context}: {name} disagrees with interval classifications.")
+    for name, count in (("full_set_rate", counts["num_full_sets"]),
+                        ("empty_set_rate", counts["num_empty_sets"])):
+        value = result.get(name)
+        expected = count / size if size else 0.0
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not np.isfinite(value) or not np.isclose(value, expected, rtol=1e-12, atol=1e-12)):
+            raise ValueError(f"{context}: {name} disagrees with interval classifications.")
+    return {"mask": mask, **counts}
+
+
 def _mean_std(values):
     import numpy as np
 
@@ -131,6 +187,9 @@ def summarize_results(log, rolling_window_size):
         raise ValueError("Expected a nonempty sequence dictionary in log.pkl.")
     per_pair = {}
     point_counts = {}
+    efficiency_counts = {}
+    expected_scopes = {}
+    full_test_metrics = {}
     expected_pairs = None
     for key, item in log.items():
         if key == "summary_results":
@@ -164,6 +223,27 @@ def summarize_results(log, rolling_window_size):
                 raise ValueError(f"{context}: metric arrays have different lengths.")
             if exclusion_counts is not None and len(coverage) != exclusion_counts["evaluated_points"]:
                 raise ValueError(f"{context}: metric length disagrees with evaluated_points.")
+            efficiency = _conditional_efficiency_info(result, arrays, context)
+            conditional = efficiency is not None
+            if pair in expected_scopes and expected_scopes[pair] != conditional:
+                raise ValueError(f"{context}: conditional efficiency scope differs between sequences.")
+            expected_scopes[pair] = conditional
+            if conditional and exclusion_counts is not None:
+                raise ValueError(f"{context}: all-test coverage cannot also declare removed predictions.")
+            if conditional:
+                efficiency_totals = efficiency_counts.setdefault(pair, {
+                    "num_test_points": 0, "num_finite_intervals": 0,
+                    "num_full_sets": 0, "num_empty_sets": 0,
+                    "num_efficiency_sequences": 0, "num_undefined_efficiency_sequences": 0,
+                })
+                for name in ("num_test_points", "num_finite_intervals", "num_full_sets", "num_empty_sets"):
+                    efficiency_totals[name] += efficiency[name]
+                has_finite = efficiency["num_finite_intervals"] > 0
+                efficiency_totals["num_efficiency_sequences"] += int(has_finite)
+                efficiency_totals["num_undefined_efficiency_sequences"] += int(not has_finite)
+                diagnostics = full_test_metrics.setdefault(pair, {"interval_width": [], "winkler_score": []})
+                for name in diagnostics:
+                    diagnostics[name].append(float(np.mean(arrays[name])))
             values = per_pair.setdefault(pair, {name: [] for _, name in METRICS})
             counts = point_counts.setdefault(pair, {
                 "has_exclusions": False, "num_total_sequences": 0, "num_no_valid_sequences": 0,
@@ -178,7 +258,9 @@ def summarize_results(log, rolling_window_size):
             if no_valid:
                 continue
             for name, array in arrays.items():
-                values[name].append(float(np.mean(array)))
+                selected = array[efficiency["mask"]] if conditional and name != "coverage" else array
+                if selected.size:
+                    values[name].append(float(np.mean(selected)))
             values["delta_coverage"].append(values["coverage"][-1] - target)
 
             if len(coverage) >= rolling_window_size:
@@ -207,6 +289,21 @@ def summarize_results(log, rolling_window_size):
             result.update({name: value for name, value in counts.items() if name != "has_exclusions"})
             result["exclusion_rate"] = (counts["excluded_points_count"] / counts["total_points"]
                                         if counts["total_points"] else 0.0)
+        if pair in efficiency_counts:
+            result.update(efficiency_counts[pair])
+            result.update({
+                "total_points": result["num_test_points"],
+                "evaluated_points": result["num_test_points"],
+                "excluded_points_count": 0,
+                "efficiency_scope": "finite_nonempty_intervals_only",
+                "coverage_scope": "all_test_predictions",
+                "full_set_rate": result["num_full_sets"] / result["num_test_points"],
+                "empty_set_rate": result["num_empty_sets"] / result["num_test_points"],
+            })
+            for name, sequence_means in full_test_metrics[pair].items():
+                mean, std = _mean_std(sequence_means)
+                result[f"full_test_avg_{name}_mean"] = mean
+                result[f"full_test_avg_{name}_std"] = std
         summary[pair] = result
     return summary
 
@@ -338,6 +435,19 @@ def inspect_results(results_dir, rolling_window_size):
             print("  Metrics use successful predictions; rolling windows skip excluded points.")
         if rolling_count < count:
             print(f"  {count - rolling_count} sequence(s) shorter than the window excluded from rolling metrics.")
+        if result.get("efficiency_scope") == "finite_nonempty_intervals_only":
+            print("  Coverage and rolling coverage include every test prediction.")
+            print("  Width/Winkler scope: finite, nonempty intervals only.")
+            print(f"  Points: evaluated={result['evaluated_points']}, excluded=0, total={result['total_points']}.")
+            print(f"  Finite intervals: {result['num_finite_intervals']}/{result['num_test_points']}; "
+                  f"full sets: {result['num_full_sets']} ({result['full_set_rate']:.6%}); "
+                  f"empty sets: {result['num_empty_sets']} ({result['empty_set_rate']:.6%}).")
+            print(f"  Efficiency sequences: {result['num_efficiency_sequences']}/{count}; "
+                  f"undefined efficiency sequences: {result['num_undefined_efficiency_sequences']}.")
+            print("  Full-test mean width: " + format_value(result["full_test_avg_interval_width_mean"]))
+            print("  Full-test extended mean Winkler score: "
+                  + format_value(result["full_test_avg_winkler_score_mean"])
+                  + " (full/empty sets assigned infinity).")
         print(f"  {'Metric':<25}{'Mean':>14}{'Std':>14}")
         for label, name in METRICS:
             mean = format_value(result[f"avg_{name}_mean"])

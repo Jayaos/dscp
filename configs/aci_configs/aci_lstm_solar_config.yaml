@@ -1,0 +1,31 @@
+# Original simple ACI update; hyperparameters stay fixed unless tuning is enabled.
+num_cores: 1
+
+data:
+  data_path: "./data/solar_prediction/lstm/lstm_nsdb-60m_data.pkl"
+  calibration_ratio: 0.66
+  test_ratio: 0.34
+
+model:
+  target_quantiles:
+    - [0.05, 0.95]
+  gamma: 0.005
+  window_size: 1250
+  initial_alpha: null
+  quantile_method: linear
+  score_type: absolute
+  prediction_step: 1
+
+# Candidate evaluation is restricted to a chronological tail of calibration.
+tuning:
+  enabled: false
+  validation_ratio: 0.2
+  gamma_grid: [0.001, 0.005, 0.01, 0.05]
+  window_size_grid: [1250]
+  coverage_tolerance: 0.01
+
+plotting:
+  plotting: true
+  plotting_seq_len: 200
+
+saving_dir: "./results/aci/solar/lstm/${now:%Y-%m-%d_%H-%M-%S_%f}/"

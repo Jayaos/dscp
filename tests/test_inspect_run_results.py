@@ -43,6 +43,42 @@ def make_log():
     }
 
 
+def make_aci_log(include_no_finite=False):
+    scope = {
+        "coverage": "all_test_predictions",
+        "avg_interval_width": "finite_nonempty_intervals_only",
+        "avg_winkler_score": "finite_nonempty_intervals_only",
+    }
+    result = {
+        "coverage": [True, True, True, False, False, True],
+        "interval_width": [2, math.inf, math.inf, 0, 4, 6],
+        "winkler_score": [2, math.inf, math.inf, math.inf, 24, 6],
+        "finite_interval_mask": [True, False, False, False, True, True],
+        "interval_kind": ["regular", "full", "full", "empty", "regular", "regular"],
+        "target_indices": [100, 101, 102, 103, 104, 105],
+        "num_test_points": 6, "num_finite_intervals": 3,
+        "num_full_sets": 2, "num_empty_sets": 1,
+        "full_set_rate": 2 / 6, "empty_set_rate": 1 / 6,
+        "metrics_scope": dict(scope),
+        # Cached averages must still not replace recomputation from raw scores.
+        "avg_interval_width": -100, "avg_winkler_score": -100,
+    }
+    log = {"first": {"metadata": {"method": "aci"}, "evaluation_results": {PAIR: result}}}
+    if include_no_finite:
+        exceptional = {
+            "coverage": [True, False],
+            "interval_width": [math.inf, 0], "winkler_score": [math.inf, math.inf],
+            "finite_interval_mask": [False, False], "interval_kind": ["full", "empty"],
+            "target_indices": [20, 21],
+            "num_test_points": 2, "num_finite_intervals": 0,
+            "num_full_sets": 1, "num_empty_sets": 1,
+            "full_set_rate": 0.5, "empty_set_rate": 0.5,
+            "metrics_scope": dict(scope),
+        }
+        log["second"] = {"metadata": {"method": "aci"}, "evaluation_results": {PAIR: exceptional}}
+    return log
+
+
 class RunResultSummaryTests(unittest.TestCase):
     def test_sequences_receive_equal_weight_and_population_std(self):
         values = summarize_results(make_log(), 2)[PAIR]
@@ -202,6 +238,88 @@ class RunResultSummaryTests(unittest.TestCase):
                 summarize_results(log, 2)
 
 
+class ACIResultSummaryTests(unittest.TestCase):
+    def test_conditional_efficiency_keeps_complete_coverage_and_rolling_timeline(self):
+        log = make_aci_log()
+        row = summarize_results(log, 2)[PAIR]
+        self.assertAlmostEqual(row["avg_coverage_mean"], 4 / 6)
+        self.assertAlmostEqual(row["avg_rolling_coverage_mean"], 0.6)
+        self.assertAlmostEqual(row["avg_rolling_undercoverage_mean"], 0.28)
+        self.assertEqual(row["avg_interval_width_mean"], 4)
+        self.assertAlmostEqual(row["avg_winkler_score_mean"], 32 / 3)
+        self.assertEqual(row["num_test_points"], 6)
+        self.assertEqual(row["total_points"], 6)
+        self.assertEqual(row["evaluated_points"], 6)
+        self.assertEqual(row["excluded_points_count"], 0)
+        self.assertEqual(row["num_full_sets"], 2)
+        self.assertEqual(row["num_empty_sets"], 1)
+        self.assertEqual(row["full_test_avg_interval_width_mean"], math.inf)
+        self.assertIsNone(row["full_test_avg_interval_width_std"])
+        self.assertEqual(log["first"]["evaluation_results"][PAIR]["target_indices"],
+                         [100, 101, 102, 103, 104, 105])
+
+    def test_no_finite_sequence_still_contributes_coverage_and_exception_counts(self):
+        row = summarize_results(make_aci_log(include_no_finite=True), 2)[PAIR]
+        self.assertEqual(row["num_sequences"], 2)
+        self.assertEqual(row["num_rolling_sequences"], 2)
+        self.assertEqual(row["num_efficiency_sequences"], 1)
+        self.assertEqual(row["num_undefined_efficiency_sequences"], 1)
+        self.assertAlmostEqual(row["avg_coverage_mean"], (4 / 6 + 0.5) / 2)
+        self.assertAlmostEqual(row["avg_rolling_coverage_mean"], 0.55)
+        self.assertEqual(row["avg_interval_width_mean"], 4)
+        self.assertEqual(row["avg_interval_width_std"], 0)
+        self.assertEqual(row["num_test_points"], 8)
+        self.assertEqual(row["num_finite_intervals"], 3)
+        self.assertEqual(row["full_set_rate"], 3 / 8)
+        self.assertEqual(row["empty_set_rate"], 2 / 8)
+
+    def test_all_exceptional_sets_leave_efficiency_undefined(self):
+        log = make_aci_log(include_no_finite=True)
+        del log["first"]
+        row = summarize_results(log, 2)[PAIR]
+        self.assertEqual(row["avg_coverage_mean"], 0.5)
+        self.assertEqual(row["avg_rolling_coverage_mean"], 0.5)
+        for metric in ("interval_width", "winkler_score"):
+            self.assertIsNone(row[f"avg_{metric}_mean"])
+            self.assertIsNone(row[f"avg_{metric}_std"])
+        self.assertEqual(row["num_efficiency_sequences"], 0)
+        self.assertEqual(row["num_undefined_efficiency_sequences"], 1)
+
+    def test_invalid_scope_mask_and_exception_diagnostics_are_rejected(self):
+        changes = (
+            ("finite_interval_mask", [True]),
+            ("finite_interval_mask", [1, 0, 0, 0, 1, 1]),
+            ("finite_interval_mask", [True, True, False, False, True, True]),
+            ("interval_kind", ["regular"] * 6),
+            ("num_full_sets", 1),
+            ("num_empty_sets", True),
+            ("full_set_rate", 0.9),
+            ("coverage", [True, False, True, False, False, True]),
+            ("interval_width", [2, math.inf, math.inf, -math.inf, 4, 6]),
+            ("winkler_score", [2, math.inf, math.inf, math.inf, math.inf, 6]),
+        )
+        for name, invalid in changes:
+            log = make_aci_log()
+            log["first"]["evaluation_results"][PAIR][name] = invalid
+            with self.subTest(name=name, invalid=invalid), self.assertRaises(ValueError):
+                summarize_results(log, 2)
+        log = make_aci_log()
+        del log["first"]["evaluation_results"][PAIR]["metrics_scope"]["avg_winkler_score"]
+        with self.assertRaisesRegex(ValueError, "metrics_scope"):
+            summarize_results(log, 2)
+
+    def test_mixed_scopes_between_sequences_are_rejected(self):
+        log = make_aci_log(include_no_finite=True)
+        del log["second"]["evaluation_results"][PAIR]["metrics_scope"]
+        with self.assertRaisesRegex(ValueError, "scope differs"):
+            summarize_results(log, 2)
+
+    def test_undeclared_efficiency_mask_does_not_change_legacy_behavior(self):
+        log = make_log()
+        log["first"]["evaluation_results"][PAIR]["finite_interval_mask"] = [False] * 5
+        self.assertEqual(summarize_results(log, 2), summarize_results(make_log(), 2))
+
+
 class RunResultInspectionTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -255,6 +373,24 @@ class RunResultInspectionTests(unittest.TestCase):
         self.assertIn("rolling", result.stdout.lower())
         self.assertIn("Rolling undercoverage", result.stdout)
         self.assertIn("winkler", result.stdout.lower())
+
+    def test_inspection_prints_aci_scope_exception_frequencies_and_full_test_diagnostics(self):
+        with (self.results_dir / "log.pkl").open("wb") as stream:
+            pickle.dump(make_aci_log(include_no_finite=True), stream)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            summary = inspect_results(self.results_dir, 2)
+        rendered = output.getvalue()
+        for expected in (
+            "Coverage and rolling coverage include every test prediction",
+            "Width/Winkler scope: finite, nonempty intervals only",
+            "evaluated=8, excluded=0, total=8",
+            "full sets: 3 (37.500000%)", "empty sets: 2 (25.000000%)",
+            "undefined efficiency sequences: 1", "Full-test mean width: inf",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, rendered)
+        self.assertEqual(summary[PAIR]["num_sequences"], 2)
 
     def test_cli_help_and_invalid_window(self):
         help_result = subprocess.run(

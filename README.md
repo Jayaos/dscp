@@ -1,5 +1,56 @@
 # DSCP
 
+## COP baseline
+
+COP implements Hu et al.'s Conformal Optimistic Prediction using the authors'
+ECDF update. Defaults use two signed-residual tails, a 100-score window, scale
+0.5, and proportional learning rates. The original four-rate grid is selected
+on NexCP's calibration prefix; the selected method replays calibration and
+continues into the full test suffix with independent states per series and tail.
+It uses the existing dscp environment without additional dependencies.
+
+```bash
+python sbatch/sbatch_run_cop/run_cop.py --dataset air --base-predictor lr --dry-run
+sbatch sbatch/sbatch_run_cop/run_cop_air.sbatch
+```
+
+See the [COP guide](baselines/cop/README.md), [source details](baselines/cop/UPSTREAM.md),
+and [configuration presets](configs/cop_configs/). The guide distinguishes the
+authors' update from this benchmark's calibration selector and empty-set reporting.
+
+## Areces et al. LQT and SQT+AR baselines
+
+LQT and SQT+AR use the authors' experimental algorithms and calibration-only
+hyperparameter grids with NexCP's calibration/test boundary. Each series and
+coverage level has its own parameters and fresh online state at testing.
+Both run in `envs/env-dscp.yml`, which now includes CVXPY and Clarabel.
+
+```bash
+python sbatch/sbatch_run_conformalopt/run_conformalopt.py --method lqt --dataset air --base-predictor lr --dry-run
+```
+
+Use `--method sqt_ar` for SQT+AR. See the [baseline guide](baselines/conformalopt/README.md),
+[publication provenance](baselines/conformalopt/UPSTREAM.md), and
+[Slurm launchers](sbatch/sbatch_run_conformalopt/).
+
+## ACI baseline
+
+ACI applies Gibbs and Candes' original online adaptive-level update to saved
+point forecasts. Defaults use gamma 0.005, a rolling 1250-score window, linear
+quantiles matching the author R code, and 90% nominal coverage. Its calibration/
+test boundary matches NexCP; optional YAML-controlled tuning uses calibration
+data only. Full and empty sets remain in coverage and are separately reported;
+width and Winkler summaries are explicitly conditional on finite, nonempty sets.
+
+```bash
+python -m sbatch.sbatch_run_aci.run_aci --dataset air --base-predictor lr --dry-run
+```
+
+See the [ACI guide](baselines/aci/README.md),
+[provenance](baselines/aci/UPSTREAM.md), and
+[Slurm jobs](sbatch/sbatch_run_aci/README.md).
+
+
 ## SplitCP baseline
 
 SplitCP calibrates a fixed absolute-residual interval independently for each
