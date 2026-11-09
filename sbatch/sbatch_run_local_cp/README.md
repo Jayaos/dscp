@@ -9,8 +9,9 @@ sbatch sbatch/sbatch_run_local_cp/run_local_cp_solar.sbatch
 sbatch sbatch/sbatch_run_local_cp/run_local_cp_sapflux.sbatch
 ```
 
-The scripts follow the QR-CP jobs: one V100 GPU, four CPUs, 16 GB memory and a
-10-minute time limit, using the configured Slurm account and `inferno` QoS.
+The scripts request one V100 GPU and four CPUs, using the configured Slurm
+account and `inferno` QoS. Air uses 16 GB memory and a two-hour limit; Sapflux
+uses 32 GB and two hours; Solar uses 32 GB and four hours.
 They require the cluster's `anaconda3` module and `dscp` conda environment.
 Adjust the account, resource settings, repository path and notification
 address for another cluster before submitting.
@@ -94,12 +95,50 @@ preserves these settings:
   observed prediction; `false` keeps the initial calibration pool fixed.
   Current templates use `true`.
 
+## Epanechnikov experiment
+
+The existing arrays retain softmax weighting. Separate arrays opt into the
+Epanechnikov kernel on cosine-derived chord distance. Set `LOCAL_CP_BANDWIDTH`
+explicitly; `1.0` below is an example, not a selected or recommended bandwidth:
+
+```bash
+sbatch --export=ALL,LOCAL_CP_BANDWIDTH=1.0 sbatch/sbatch_run_local_cp/run_local_cp_epanechnikov_air.sbatch
+sbatch --export=ALL,LOCAL_CP_BANDWIDTH=1.0 sbatch/sbatch_run_local_cp/run_local_cp_epanechnikov_solar.sbatch
+sbatch --export=ALL,LOCAL_CP_BANDWIDTH=1.0 sbatch/sbatch_run_local_cp/run_local_cp_epanechnikov_sapflux.sbatch
+```
+
+These arrays use the same task mapping, resources, templates, training, and
+rolling calibration as their corresponding softmax arrays. The dispatcher sets
+`model.kernel: epanechnikov`, `model.bandwidth`, and
+`model.similarity_fn: cos_similarity`. Temperature is unused for this kernel.
+The existing `model.sampling_num` and sampled residual quantiles are retained.
+An empty kernel neighborhood returns zero residual quantiles, matching the
+manuscript's point-mass-at-zero fallback. This kernel satisfies the kernel
+conditions in A.22; it does not establish the local-mass or other asymptotic
+assumptions.
+
+Preview the configuration using the explicit CLI options:
+
+```bash
+PYTHONPATH="$PWD:$PWD/sbatch:${PYTHONPATH:-}" \
+  python -m sbatch_run_local_cp.run_local_cp_job air \
+  --task-id 1 --kernel epanechnikov --bandwidth 1.0 --dry-run
+```
+
+`--kernel` overrides `model.kernel` in the template; absent both, the default is
+`softmax`. Epanechnikov requires a finite positive `--bandwidth` or
+`model.bandwidth` value. The default Epanechnikov output root is
+`results/local_cp_epanechnikov/bandwidth_<value>/seed_<seed>/`, with the
+template's dataset/predictor/encoder/run suffix preserved. `LOCAL_CP_OUTPUT_ROOT`
+or `--output-root` can override this root. Each job trains its own encoder;
+these launchers do not reuse a frozen checkpoint across submitted jobs.
+
 ## Outputs and reproducibility
 
 Each run writes its resolved settings and outputs under:
 
 ```text
-results/local_cp/{dataset}/{predictor}/{encoder}/
+results/local_cp/{dataset}/{predictor}/{encoder}/{configured_run_suffix}/
     resolved_config.yaml
     *_model.pt
     log.pkl
@@ -107,10 +146,11 @@ results/local_cp/{dataset}/{predictor}/{encoder}/
     plots/
 ```
 
-The encoder directory is `rnn` or `transformer`. Repeating the same combination
-reuses its output directory. Use a separate `--output-root` for each experiment
-or seed whose results should be retained. The dispatcher defaults to seed
-`2026`, configurable with `--seed`.
+The encoder directory is `rnn` or `transformer`. The dispatcher preserves the
+template's run suffix, including a timestamp when configured. A template without
+a unique run suffix reuses its output directory; use a separate `--output-root`
+to retain those runs. The dispatcher defaults to seed `2026`, configurable with
+`--seed`.
 
 For array submissions, use `LOCAL_CP_OUTPUT_ROOT` and `LOCAL_CP_SEED`;
 `RUNPATH` overrides the repository path. For example:

@@ -139,8 +139,10 @@ def _delta(value, reference):
     return _number(value-reference)
 
 
-def run_reproduction(data_path, targets_path, methods=None):
-    """Print every published candidate and reference; never select by Table 2."""
+def run_reproduction(data_path, targets_path, methods=None, lqt_order=1):
+    """Print every rate candidate; order 1 is the empirically recovered setup."""
+    if lqt_order not in (1, 2):
+        raise ValueError("lqt_order must be 1 (recovered Table 2 setup) or 2 (released YAML).")
     chosen = tuple(LEARNING_RATES) if methods is None else tuple(name.lower() for name in methods)
     if not chosen or len(set(chosen)) != len(chosen) or set(chosen)-set(LEARNING_RATES):
         raise ValueError("methods must be a nonempty unique subset of aci, lqt, cop.")
@@ -155,7 +157,9 @@ def run_reproduction(data_path, targets_path, methods=None):
     print("Protocol: uninterrupted stream; no calibration/test split; no forecaster retraining.")
     print("Scores: forecast-y and y-forecast; alpha=0.05 per tail; ahead=1; T_burnin=100.")
     print("ACI: author window_length=10000000; unclipped infinite thresholds are retained.")
-    print("LQT: author's AMZN p_order=2, bias=5; fixed rate; source first-100-score initialization.")
+    print(f"LQT: p_order={lqt_order}, bias=5; fixed rate; source first-100-score initialization.")
+    print("LQT provenance: order 1 is empirically recovered from Table 2; order 2 is the released AMZN YAML. "
+          "The paper does not explicitly identify its selected order.")
     print("COP: source ECDF, scale=0.5, proportional rate, stale trailing window of 100.")
     print("Intervals: author's minsize=0 endpoint reordering; no exceptional-set exclusions.")
     print(f"Coverage: indices 101:{len(y)} ({len(y)-101} points).")
@@ -178,7 +182,7 @@ def run_reproduction(data_path, targets_path, methods=None):
         started = time.perf_counter()
         function = {"aci": aci, "lqt": LQT, "cop": COP}[method]
         kwargs = {"window_length": 10000000} if method == "aci" else (
-            {"p_order": 2, "bias": 5.} if method == "lqt" else {})
+            {"p_order": lqt_order, "bias": 5.} if method == "lqt" else {})
         for rate in LEARNING_RATES[method]:
             thresholds = [function(score, ALPHA/2, rate, T_burnin=BURNIN, ahead=1, **kwargs)["q"]
                           for score in scores]
@@ -211,6 +215,6 @@ def run_reproduction(data_path, targets_path, methods=None):
         else:
             print(f"{method.upper()}: no matching candidate in the released setup / paper-listed rate grid.")
             if method == "lqt":
-                print("LQT's Table 2 grid point is not disclosed; the released AMZN settings p=2,bias=5 "
-                      "must not be described as an exact reproduction of that row.")
+                print(f"LQT p={lqt_order},bias=5 did not match Table 2 on these inputs. "
+                      "The paper does not explicitly document its selected order.")
     return output

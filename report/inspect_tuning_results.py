@@ -1,12 +1,14 @@
 """Inspect a tuning_results.pkl or an individual trial's result.pkl.
 
 Examples:
-    python view/inspect_tuning_results.py results/tuning/example/tuning_results.pkl
-    python view/inspect_tuning_results.py results/tuning/example/tuning_results.pkl --all
-    python view/inspect_tuning_results.py results/tuning/example/trial_0001/result.pkl
+    python report/inspect_tuning_results.py results/tuning/example/tuning_results.pkl
+    python report/inspect_tuning_results.py results/tuning/example/tuning_results.pkl --top-k 5
+    python report/inspect_tuning_results.py results/tuning/example/tuning_results.pkl --all
+    python report/inspect_tuning_results.py results/tuning/example/trial_0001/result.pkl
 """
 
 import argparse
+import math
 import pickle
 from pathlib import Path
 from pprint import pformat
@@ -51,7 +53,22 @@ def print_trial(trial, config_path, rank=None):
                   "".join(f"{format_value(values.get(key)):>13}" for _, key in columns))
 
 
-def inspect_results(path, show_all=False):
+def ranking_key(trial):
+    try:
+        score = float(trial["result"]["selection_score"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"Trial {trial['trial_index']} has no numeric selection_score.") from exc
+    if math.isnan(score):
+        raise ValueError(f"Trial {trial['trial_index']} has a NaN selection_score; cannot rank it.")
+    return score, trial["trial_index"]
+
+
+def inspect_results(path, show_all=False, top_k=None):
+    if top_k is not None:
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
+            raise ValueError("top_k must be a positive integer.")
+        if show_all:
+            raise ValueError("--top-k cannot be combined with --all.")
     with path.open("rb") as stream:
         payload = pickle.load(stream)
     if not isinstance(payload, dict):
@@ -59,10 +76,12 @@ def inspect_results(path, show_all=False):
 
     is_summary = "top_trials" in payload and "all_trials" in payload
     if is_summary:
-        trials = payload["all_trials"] if show_all else payload["top_trials"]
+        trials = payload["all_trials"] if show_all or top_k is not None else payload["top_trials"]
         if not isinstance(trials, list):
             raise ValueError("Expected a list of trial records.")
     elif "trial_index" in payload and "result" in payload:
+        if top_k is not None:
+            raise ValueError("--top-k requires tuning_results.pkl, not an individual trial.")
         trials = [payload]
     else:
         raise ValueError("Expected tuning_results.pkl or a trial's result.pkl.")
@@ -72,6 +91,13 @@ def inspect_results(path, show_all=False):
                 or not isinstance(trial.get("trial_index"), int)
                 or not isinstance(trial.get("result"), dict)):
             raise ValueError("Invalid trial record: expected trial_index and result.")
+
+    if top_k is not None:
+        eligible_trials = [
+            trial for trial in trials
+            if trial["result"].get("coverage_eligible", trial["result"].get("positive_delta_coverage"))
+        ]
+        trials = sorted(eligible_trials, key=ranking_key)[:top_k]
 
     print(f"File: {path}")
     for label, key in [
@@ -99,7 +125,11 @@ def inspect_results(path, show_all=False):
             trials = sorted(trials, key=lambda trial: trial["trial_index"])
             print(f"Showing all {len(trials)} trials in trial-index order.")
         else:
-            print(f"Showing {len(trials)} saved top trials, best first (lower Winkler is better).")
+            if top_k is None:
+                print(f"Showing {len(trials)} saved top trials, best first (lower Winkler is better).")
+            else:
+                print(f"Showing top {len(trials)} of {len(eligible_trials)} eligible trials "
+                      f"(requested {top_k}), best first (lower Winkler is better).")
             if not trials:
                 print("No trials passed the coverage filter. Use --all to inspect every trial.")
 
@@ -109,13 +139,28 @@ def inspect_results(path, show_all=False):
         print_trial(trial, trial_dir / "resolved_config.yaml", rank=rank)
 
 
+def positive_int(value):
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("K must be a positive integer.") from exc
+    if number <= 0:
+        raise argparse.ArgumentTypeError("K must be a positive integer.")
+    return number
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("results_file", type=Path, help="Path to tuning_results.pkl or a trial's result.pkl.")
-    parser.add_argument("--all", action="store_true", help="Show all trials, including those failing coverage.")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--all", action="store_true", help="Show all trials, including those failing coverage.")
+    selection.add_argument(
+        "--top-k", type=positive_int, metavar="K",
+        help="Show the best K coverage-eligible trials from all saved trials, ranked by Winkler score.",
+    )
     args = parser.parse_args()
     try:
-        inspect_results(args.results_file.expanduser().resolve(), show_all=args.all)
+        inspect_results(args.results_file.expanduser().resolve(), show_all=args.all, top_k=args.top_k)
     except ImportError as exc:
         parser.exit(1, f"Error: {exc}. Run this script in the Python environment used for tuning.\n")
     except (OSError, pickle.UnpicklingError, EOFError, AttributeError, TypeError, ValueError) as exc:

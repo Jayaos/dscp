@@ -27,6 +27,7 @@ class COPTable2CLITests(unittest.TestCase):
             REPO_ROOT / "data" / "amzn_prophet_targets.csv",
         ))
         self.assertEqual(args.method, "all")
+        self.assertEqual(args.lqt_order, 1)
 
     def test_dry_run_validates_inputs_prints_metadata_and_never_runs_methods(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -73,8 +74,13 @@ class COPTable2CLITests(unittest.TestCase):
                     ])
                     self.assertIs(result, expected)
                     run.assert_called_once_with(
-                        forecast, targets, methods=None if method == "all" else (method,),
+                        forecast, targets, methods=None if method == "all" else (method,), lqt_order=1,
                     )
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    patch(RUNNER_MODULE + ".run_reproduction", return_value=expected) as run:
+                cli.main(["--data-path", str(forecast), "--targets-path", str(targets),
+                          "--method", "lqt", "--lqt-order", "2"])
+                run.assert_called_once_with(forecast, targets, methods=("lqt",), lqt_order=2)
             self.assertEqual(before, set(Path(directory).rglob("*")))
 
     def test_missing_input_fails_before_algorithm_dispatch(self):

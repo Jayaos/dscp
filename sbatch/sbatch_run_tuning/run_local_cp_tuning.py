@@ -306,6 +306,8 @@ def _run_single_trial(config, sequence_item, normalization_params):
             config.model.similarity_fn,
             config.model.temperature,
             device,
+            kernel=config.model.get("kernel", "softmax"),
+            bandwidth=config.model.get("bandwidth"),
         )
         pred_quantile_values = local_cp.approximate_quantile(query_repr, sorted_quantiles, config.model.sampling_num)
 

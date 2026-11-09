@@ -64,6 +64,33 @@ from report.inspect_run_results import inspect_results
 summary = inspect_results("results/rescp/air/lstm/run", rolling_window_size=100)
 ```
 
+# Inspect tuning results
+
+From the repository root, display the best five coverage-eligible configurations:
+
+```bash
+python report/inspect_tuning_results.py results/tuning/lcp_rnn_lr_air/tuning_results.pkl --top-k 5
+```
+
+`--top-k K` ranks eligible entries from `all_trials` by increasing Winkler score,
+breaking ties by trial index. It can show more configurations than the tuner
+originally included in `top_trials`. If fewer than K trials passed the coverage
+filter, it shows all eligible trials. K must be a positive integer.
+
+Without either option, the inspector displays the saved `top_trials`. Use `--all`
+to show every trial, including rejected configurations, in trial-index order;
+`--all` and `--top-k` cannot be combined. The report includes hyperparameters,
+coverage, width, Winkler score, and the path to each trial's resolved YAML.
+
+Individual completed trials can also be inspected while tuning is still running:
+
+```bash
+python report/inspect_tuning_results.py results/tuning/lcp_rnn_lr_air/trial_0001/result.pkl
+```
+
+`--top-k` requires the combined `tuning_results.pkl`, which is written when the
+tuning run finishes.
+
 # Plot saved base predictions
 
 Use `plot_predictions.py` with any base predictor's `*_data.pkl` file from

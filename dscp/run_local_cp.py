@@ -254,7 +254,9 @@ def run_transformer_local_cp(config_path):
                                                 calib_residual, 
                                                 config.model.similarity_fn, 
                                                 config.model.temperature,
-                                                device)
+                                                device,
+                                                kernel=config.model.get("kernel", "softmax"),
+                                                bandwidth=config.model.get("bandwidth"))
             
             # (len(target_quantiles), query_size)
             pred_quantile_values = local_cp.approximate_quantile(query_repr, 
@@ -569,7 +571,9 @@ def run_rnn_local_cp(config_path):
                                                 calib_residual,
                                                 config.model.similarity_fn,
                                                 config.model.temperature,
-                                                device)
+                                                device,
+                                                kernel=config.model.get("kernel", "softmax"),
+                                                bandwidth=config.model.get("bandwidth"))
 
             # (len(target_quantiles), query_size)
             pred_quantile_values = local_cp.approximate_quantile(query_repr,

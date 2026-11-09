@@ -131,6 +131,145 @@ class LocalCPWeightTests(unittest.TestCase):
                 torch.testing.assert_close(quantiles, expected_quantiles)
                 self.assertTrue((quantiles[1:] >= quantiles[:-1]).all())
 
+    def test_epanechnikov_chord_weights_and_support_boundary(self):
+        # At bandwidth 2 the cosine scores 1, 0, -1 give raw weights 1, 1/2, 0.
+        model = self.model(similarity_fn="cos_similarity", kernel="epanechnikov", bandwidth=2.0)
+        expected = torch.tensor([[2 / 3, 1 / 3, 0.0], [0.25, 0.5, 0.25]])
+        weights = model.compute_weights(self.queries)
+        torch.testing.assert_close(weights, expected)
+        torch.testing.assert_close(weights.sum(dim=1), torch.ones(2))
+        self.assertEqual(weights[0, 2].item(), 0.0)  # d == b has no positive weight.
+        narrower = self.model(
+            similarity_fn="cos_similarity", kernel="epanechnikov", bandwidth=1.0
+        ).compute_weights(self.queries)
+        torch.testing.assert_close(narrower, torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]))
+
+    def test_epanechnikov_normalization_handles_tiny_and_large_nonzero_vectors(self):
+        model = self.model(
+            similarity_fn="cos_similarity", kernel="epanechnikov", bandwidth=2.0,
+            encoded_rep=torch.tensor([[2e30, 0.0], [0.0, 1e-30], [-1e-30, 0.0]]),
+        )
+        weights = model.compute_weights(torch.tensor([[2e-30, 0.0], [0.0, 3e30]]))
+        torch.testing.assert_close(
+            weights, torch.tensor([[2 / 3, 1 / 3, 0.0], [0.25, 0.5, 0.25]])
+        )
+
+    def test_epanechnikov_weights_do_not_depend_on_temperature(self):
+        for temperature in (-10.0, 0.0, 10.0, float("nan"), float("inf"), None):
+            with self.subTest(temperature=temperature):
+                weights = self.model(
+                    similarity_fn="cos_similarity", temperature=temperature,
+                    kernel="epanechnikov", bandwidth=2.0,
+                ).compute_weights(self.queries)
+                torch.testing.assert_close(
+                    weights, torch.tensor([[2 / 3, 1 / 3, 0.0], [0.25, 0.5, 0.25]])
+                )
+
+    def test_epanechnikov_extreme_finite_bandwidths(self):
+        for bandwidth, expected in (
+            (1e-200, torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])),
+            (1e200, torch.full((2, 3), 1 / 3)),
+        ):
+            with self.subTest(bandwidth=bandwidth):
+                weights = self.model(
+                    similarity_fn="cos_similarity", kernel="epanechnikov", bandwidth=bandwidth,
+                ).compute_weights(self.queries)
+                torch.testing.assert_close(weights, expected)
+
+    def test_epanechnikov_requires_cosine_and_positive_finite_scalar_bandwidth(self):
+        for bandwidth in (
+            None, 0, -1.0, float("nan"), float("inf"), float("-inf"),
+            True, False, "2.0", [], [2.0], [1.0, 2.0], 1 + 2j,
+        ):
+            with self.subTest(bandwidth=bandwidth):
+                with self.assertRaisesRegex(ValueError, "bandwidth"):
+                    self.model(similarity_fn="cos_similarity", kernel="epanechnikov", bandwidth=bandwidth)
+        for similarity_fn in ("dot_product", "euclidean"):
+            with self.subTest(similarity_fn=similarity_fn):
+                with self.assertRaisesRegex(ValueError, "cos_similarity"):
+                    self.model(similarity_fn=similarity_fn, kernel="epanechnikov", bandwidth=1.0)
+        with self.assertRaisesRegex(ValueError, "kernel"):
+            self.model(kernel="unknown")
+
+    def test_epanechnikov_rejects_invalid_representations(self):
+        invalid_representations = (
+            torch.tensor([[0.0, 0.0]]), torch.tensor([[float("nan"), 1.0]]),
+            torch.tensor([[float("inf"), 1.0]]), torch.tensor([1.0, 2.0]),
+            torch.empty((1, 0)), torch.tensor([[1, 2]]), torch.tensor([[1 + 1j, 0j]]),
+        )
+        for representation in invalid_representations:
+            with self.subTest(representation=representation):
+                model = self.model(similarity_fn="cos_similarity", kernel="epanechnikov", bandwidth=1.0)
+                with self.assertRaisesRegex(ValueError, "representations"):
+                    model.compute_weights(representation)
+                model = self.model(
+                    similarity_fn="cos_similarity", kernel="epanechnikov", bandwidth=1.0,
+                    encoded_rep=representation,
+                )
+                with self.assertRaisesRegex(ValueError, "representations"):
+                    model.compute_weights(self.queries)
+        model = self.model(similarity_fn="cos_similarity", kernel="epanechnikov", bandwidth=1.0)
+        with self.assertRaisesRegex(ValueError, "dimension"):
+            model.compute_weights(torch.ones((1, 3)))
+
+    def test_epanechnikov_mixed_neighborhoods_keep_sampling_and_zero_fallback(self):
+        queries = torch.tensor([[3.0, 0.0], [-1.0, -1.0], [0.0, 2.0]])
+        samples = torch.tensor([[0, 0, 0, 1, 1], [0, 0, 0, 0, 0], [1, 1, 1, 0, 0]])
+        for target in (torch.tensor([-3.0, 8.0]), torch.tensor([[-3.0], [8.0]])):
+            with self.subTest(target_shape=tuple(target.shape)):
+                model = self.model(
+                    similarity_fn="cos_similarity", kernel="epanechnikov", bandwidth=1.5,
+                    encoded_rep=torch.tensor([[1.0, 0.0], [0.0, 1.0]]), target=target,
+                )
+                torch.testing.assert_close(
+                    model.compute_weights(queries),
+                    torch.tensor([[0.9, 0.1], [0.0, 0.0], [0.1, 0.9]]),
+                )
+                with patch("dscp.models.local_cp.torch.multinomial", return_value=samples) as sample:
+                    quantiles = model.approximate_quantile(queries, [0.375, 0.5, 0.75], 5)
+                sample.assert_called_once()
+                torch.testing.assert_close(
+                    sample.call_args.args[0], torch.tensor([[0.9, 0.1], [1.0, 0.0], [0.1, 0.9]])
+                )
+                self.assertEqual(sample.call_args.kwargs["num_samples"], 5)
+                self.assertIs(sample.call_args.kwargs["replacement"], True)
+                # The 2.5 endpoint checks that sampled torch.quantile interpolation is retained.
+                torch.testing.assert_close(
+                    quantiles, torch.tensor([[-3.0, 0.0, 2.5], [-3.0, 0.0, 8.0], [8.0, 0.0, 8.0]])
+                )
+
+    def test_epanechnikov_all_empty_neighborhoods_keep_draw_shape_and_zero_quantiles(self):
+        model = self.model(
+            similarity_fn="cos_similarity", kernel="epanechnikov", bandwidth=0.5,
+            encoded_rep=torch.tensor([[1.0, 0.0]]), target=torch.tensor([[9.0]]),
+        )
+        with patch("dscp.models.local_cp.torch.multinomial", wraps=torch.multinomial) as sample:
+            quantiles = model.approximate_quantile(torch.tensor([[-1.0, 0.0], [0.0, 1.0]]), [0.05, 0.95], 1000)
+        sample.assert_called_once()
+        torch.testing.assert_close(sample.call_args.args[0], torch.ones((2, 1)))
+        self.assertEqual(sample.call_args.kwargs["num_samples"], 1000)
+        self.assertIs(sample.call_args.kwargs["replacement"], True)
+        torch.testing.assert_close(quantiles, torch.zeros((2, 2)))
+
+    def test_epanechnikov_fallback_preserves_rng_state_for_later_encoder_training(self):
+        calibration = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
+        residuals = torch.tensor([-3.0, 8.0])
+        for queries in (
+            torch.tensor([[1.0, 0.0], [-1.0, -1.0], [0.0, 1.0]]),
+            torch.tensor([[-1.0, -1.0], [-2.0, -2.0]]),
+        ):
+            with self.subTest(query_count=len(queries)):
+                states = []
+                for kernel in ("softmax", "epanechnikov"):
+                    model = self.model(
+                        similarity_fn="cos_similarity", kernel=kernel, bandwidth=1.5,
+                        encoded_rep=calibration, target=residuals,
+                    )
+                    torch.manual_seed(12345)
+                    model.approximate_quantile(queries, [0.05, 0.95], 1000)
+                    states.append(torch.random.get_rng_state())
+                self.assertTrue(torch.equal(*states))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -80,6 +80,10 @@ class LocalCPQuantileRunnerTests(unittest.TestCase):
         def record_quantiles(local_cp, query, levels, sampling_num):
             quantile_calls.append(list(levels))
             self.assertFalse(query.requires_grad)
+            self.assertEqual(local_cp.kernel, config.model.get("kernel", "softmax"))
+            self.assertEqual(sampling_num, config.model.sampling_num)
+            if local_cp.kernel == "epanechnikov":
+                self.assertEqual(float(local_cp.bandwidth), config.model.bandwidth)
             return approximate(local_cp, query, levels, sampling_num)
 
         with (
@@ -136,6 +140,27 @@ class LocalCPQuantileRunnerTests(unittest.TestCase):
                         self.assertEqual(len(result["coverage"]), 8)
                         self.assertTrue(np.isfinite(result["lower_interval"]).all())
                         self.assertTrue(np.isfinite(result["upper_interval"]).all())
+
+    def test_epanechnikov_runs_without_changing_encoder_training_or_quantile_levels(self):
+        for architecture in ("transformer", "rnn"):
+            with self.subTest(architecture=architecture):
+                config = self._config(architecture)
+                baseline_state, baseline_log, baseline_calls = self._run(architecture, config)
+                config.model.kernel = "epanechnikov"
+                config.model.bandwidth = 1.0
+                state, log, calls = self._run(architecture, config)
+                self.assertEqual(calls, baseline_calls)
+                self.assertEqual(log["train_loss"], baseline_log["train_loss"])
+                self.assertEqual(log["valid_loss"], baseline_log["valid_loss"])
+                for name in state:
+                    torch.testing.assert_close(state[name], baseline_state[name], rtol=0, atol=0)
+                for result in log["evaluation_results"].values():
+                    self.assertEqual(len(result["coverage"]), 8)
+                    lower = np.asarray(result["lower_interval"])
+                    upper = np.asarray(result["upper_interval"])
+                    self.assertTrue(np.isfinite(lower).all())
+                    self.assertTrue(np.isfinite(upper).all())
+                    self.assertTrue((lower <= upper).all())
 
     def test_tuning_uses_training_levels_and_keeps_inference_independent(self):
         for architecture in ("transformer", "rnn"):

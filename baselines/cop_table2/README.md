@@ -19,7 +19,15 @@ python -B sbatch/sbatch_reproduce_cop_table2/run_amzn_prophet.py
 python -B sbatch/sbatch_reproduce_cop_table2/run_amzn_prophet.py --method aci
 ```
 
-`--method` accepts `all`, `aci`, `lqt`, or `cop`. Results are printed only to
+`--method` accepts `all`, `aci`, `lqt`, or `cop`. LQT defaults to order 1,
+with bias 5, the empirically recovered configuration for Table 2. To run the
+released AMZN YAML's order-2 configuration instead:
+
+```bash
+sbatch sbatch/sbatch_reproduce_cop_table2/run_amzn_prophet.sbatch --method lqt --lqt-order 2
+```
+
+Results are printed only to
 standard output, captured by the Slurm run log. The runner creates no result
 files, plots, caches, or checkpoints and makes no network requests. `-B`
 prevents Python bytecode cache writes.
@@ -54,14 +62,16 @@ endpoints with `min`/`max`; this behavior is preserved.
 | Method | Default configuration | Learning-rate candidates |
 | --- | --- | --- |
 | ACI | Burn-in 100; history window 10,000,000; the authors' quantile and infinite-set handling | 0.1, 0.05, 0.01, 0.005 |
-| LQT | Autoregressive order 2; bias feature 5; fixed learning rate; coefficients initialized using the first 100 scores | 10, 5, 1, 0.5, 0.1, 0.05, 0.01 |
+| LQT | Autoregressive order 1 (empirically recovered); bias feature 5; fixed learning rate; coefficients initialized using the first 100 scores | 10, 5, 1, 0.5, 0.1, 0.05, 0.01 |
 | COP | Empirical CDF; window 100; correction scale 0.5; learning rate scaled by the recent score range | 1, 0.5, 0.1, 0.05 |
 
 The rate candidates follow Appendix D. The released AMZN YAML lists only
 `[10, 1, 0.1, 0.01]` for LQT; this run also evaluates the three additional rates
-listed in the paper. LQT's order and bias come from the AMZN YAML. The authors
-mention a hyperparameter search without recording every choice used for Table 2,
-so these YAML settings cannot establish the exact configuration behind that row.
+listed in the paper. LQT's bias comes from the AMZN YAML, which specifies order 2.
+The default order 1 was recovered by comparing the unchanged upstream algorithm
+with Table 2; it is not an explicitly documented author choice. The paper mentions
+hyperparameter search without recording every selected value. Both the recovered
+order-1 setup and the released order-2 setup are available and identified in the log.
 
 The primary log metrics mirror the released executable scripts:
 
@@ -90,7 +100,7 @@ The log identifies agreement at the paper's displayed precision for each
 candidate and contains all measured values. Reproduction measurements are not
 written to this document or to result files.
 
-No automatic best-candidate selector is imposed. The paper does not identify the
+No automatic best-learning-rate selector is imposed. The paper does not identify the
 selected rates or a precise selection rule, so matching Table 2 exactly is not
 guaranteed. The released code also differs from the prose in two details: the
 stock input extends through 2017 although Section 4.3 says 2014, and the COP

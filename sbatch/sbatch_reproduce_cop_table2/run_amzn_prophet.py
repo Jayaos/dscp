@@ -32,6 +32,10 @@ def build_parser():
         help="Run all three methods (default), or a single method.",
     )
     parser.add_argument(
+        "--lqt-order", type=int, choices=(1, 2), default=1,
+        help="LQT order: 1 is the empirically recovered Table 2 setup (default); 2 is the released AMZN YAML.",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
         help="Load and validate the inputs and print metadata without running methods.",
     )
@@ -59,6 +63,7 @@ def main(argv=None):
         print("Forecast input: {}".format(data_path))
         print("Target input: {}".format(targets_path))
         print("Methods: {}".format("ACI, LQT, COP" if methods is None else args.method.upper()))
+        print("LQT order: {} (bias=5)".format(args.lqt_order))
         print("Results are printed to this log only.")
 
         if args.dry_run:
@@ -73,7 +78,7 @@ def main(argv=None):
 
         from baselines.cop_table2.run_reproduction import run_reproduction
 
-        return run_reproduction(data_path, targets_path, methods=methods)
+        return run_reproduction(data_path, targets_path, methods=methods, lqt_order=args.lqt_order)
     except (ValueError, TypeError, OSError, KeyError) as exc:
         parser.error(str(exc))
 

@@ -1,6 +1,7 @@
 """Run one Local-CP encoder/base-predictor combination from a Slurm array."""
 
 import argparse
+import math
 from pathlib import Path
 
 
@@ -17,6 +18,16 @@ DATASET_ARTIFACTS = {
 }
 
 
+def positive_bandwidth(value):
+    try:
+        bandwidth = float(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("bandwidth must be finite and positive") from exc
+    if isinstance(value, bool) or not math.isfinite(bandwidth) or bandwidth <= 0:
+        raise argparse.ArgumentTypeError("bandwidth must be finite and positive")
+    return bandwidth
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset", choices=tuple(DATASET_ARTIFACTS))
@@ -29,7 +40,20 @@ def build_parser():
         "3: Transformer/LR, 4: Transformer/LSTM, 5: Transformer/Chronos",
     )
     parser.add_argument(
-        "--output-root", type=Path, default=REPO_ROOT / "results" / "local_cp"
+        "--kernel",
+        choices=("softmax", "epanechnikov"),
+        default=None,
+        help="Override model.kernel; the default without a YAML setting is softmax.",
+    )
+    parser.add_argument(
+        "--bandwidth",
+        type=positive_bandwidth,
+        default=None,
+        help="Positive chord-distance bandwidth required for the Epanechnikov kernel.",
+    )
+    parser.add_argument(
+        "--output-root", type=Path, default=None,
+        help="Override the results root; Epanechnikov defaults separate bandwidths and seeds.",
     )
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument(
@@ -60,15 +84,39 @@ def main(argv=None):
     template_path = REPO_ROOT / "configs" / "lcp_configs" / template_name
     config = load_experiment_config(template_path)
     config.base_predictor = predictor
+    kernel = args.kernel if args.kernel is not None else config.model.get("kernel", "softmax")
+    if kernel not in ("softmax", "epanechnikov"):
+        parser.error(f"Invalid model.kernel in {template_path}: {kernel!r}.")
+    config.model.kernel = kernel
+    if kernel == "epanechnikov":
+        bandwidth = args.bandwidth if args.bandwidth is not None else config.model.get("bandwidth")
+        if bandwidth is None:
+            parser.error("Epanechnikov requires --bandwidth or model.bandwidth in the template.")
+        try:
+            bandwidth = positive_bandwidth(bandwidth)
+        except argparse.ArgumentTypeError as exc:
+            parser.error(str(exc))
+        config.model.bandwidth = bandwidth
+        config.model.similarity_fn = "cos_similarity"
+    elif args.bandwidth is not None:
+        parser.error("--bandwidth applies only to --kernel epanechnikov.")
     config.model.prediction_step = 1
     config.data.data_path = str(artifact_path)
     config.device = config.get("device", 0)
     config.seed = args.seed
-    output_dir = resolve_job_saving_dir(config, args.output_root)
+    output_root = args.output_root
+    if output_root is None:
+        output_root = REPO_ROOT / "results" / "local_cp"
+        if kernel == "epanechnikov":
+            output_root = (
+                REPO_ROOT / "results" / "local_cp_epanechnikov"
+                / f"bandwidth_{bandwidth}" / f"seed_{args.seed}"
+            )
+    output_dir = resolve_job_saving_dir(config, output_root)
 
     print(
         f"Local-CP task {args.task_id}: dataset={args.dataset}, "
-        f"base_predictor={predictor}, encoder={encoder}, seed={args.seed}",
+        f"base_predictor={predictor}, encoder={encoder}, kernel={kernel}, seed={args.seed}",
         flush=True,
     )
     print(f"Configuration template: {template_path}", flush=True)
