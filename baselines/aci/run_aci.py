@@ -200,8 +200,21 @@ def run_aci(config, num_cores=None):
     OmegaConf.save(OmegaConf.create(requested), output / "resolved_config.yaml", resolve=True)
     _save_pickle(output / "log.pkl", log)
     _save_pickle(output / "summary_results.pkl", summary)
+    print("ACI summary (mean +/- std across sequences; width and Winkler use "
+          "finite, nonempty intervals):", flush=True)
     for pair, result in summary.items():
-        print(f"Coverage pair {pair}: {result}", flush=True)
+        metrics = []
+        for label, metric in (("coverage", "avg_coverage"),
+                              ("width", "avg_interval_width"),
+                              ("Winkler", "avg_winkler_score")):
+            values = (result[f"{metric}_mean"], result[f"{metric}_std"])
+            formatted = " +/- ".join("N/A" if value is None else f"{value:.4f}" for value in values)
+            metrics.append(f"{label}={formatted}")
+        print(f"Coverage pair {pair}: " + ", ".join(metrics), flush=True)
+        print(f"  sequences={result['num_sequences']}, "
+              f"efficiency_sequences={result['num_efficiency_sequences']}, "
+              f"full_sets={result['num_full_sets']} ({result['full_set_rate']:.2%}), "
+              f"empty_sets={result['num_empty_sets']} ({result['empty_set_rate']:.2%})", flush=True)
     if requested["plotting"]["plotting"]:
         from baselines.aci.reporting import plot_aci_results
         plot_aci_results(log, pairs, requested["plotting"]["plotting_seq_len"], output / "plots")

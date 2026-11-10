@@ -272,9 +272,21 @@ def run_cop(config, num_cores=None):
     OmegaConf.save(OmegaConf.create(effective), destination / "resolved_config.yaml", resolve=True)
     _save_pickle(destination / "log.pkl", log)
     _save_pickle(destination / "summary_results.pkl", summary)
-    for pair, metrics in summary.items():
-        print(f"COP {pair}: coverage={metrics['avg_coverage_mean']:.4f}, "
-              f"width={metrics['avg_interval_width_mean']}, empty_rate={metrics['empty_set_rate']:.4f}", flush=True)
+    print("COP summary (mean +/- std across sequences; width and Winkler use "
+          "finite, nonempty intervals):", flush=True)
+    for pair, result in summary.items():
+        metrics = []
+        for label, metric in (("coverage", "avg_coverage"),
+                              ("width", "avg_interval_width"),
+                              ("Winkler", "avg_winkler_score")):
+            values = (result[f"{metric}_mean"], result[f"{metric}_std"])
+            formatted = " +/- ".join("N/A" if value is None else f"{value:.4f}" for value in values)
+            metrics.append(f"{label}={formatted}")
+        print(f"Coverage pair {pair}: " + ", ".join(metrics), flush=True)
+        print(f"  sequences={result['num_sequences']}, "
+              f"efficiency_sequences={result['num_efficiency_sequences']}, "
+              f"full_sets={result['num_full_sets']} ({result['full_set_rate']:.2%}), "
+              f"empty_sets={result['num_empty_sets']} ({result['empty_set_rate']:.2%})", flush=True)
     if effective["plotting"]["plotting"]:
         plot_aci_results(log, pairs, effective["plotting"]["plotting_seq_len"],
                          destination / "plots", method_name="COP")
