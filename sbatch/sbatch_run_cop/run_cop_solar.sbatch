@@ -4,8 +4,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --array=0-2
-#SBATCH --cpus-per-task=1
-#SBATCH --mem=4G
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=40G
 #SBATCH --time=04:00:00
 #SBATCH --qos=inferno
 #SBATCH -o Report-cop-solar-%A_%a.out
