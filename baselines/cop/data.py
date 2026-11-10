@@ -33,8 +33,22 @@ def prepare_sequence(item, config, key=None, split="test"):
         start = start[key]
     bounds = split_boundaries(len(targets), settings["calibration_ratio"], settings.get("test_ratio"), start)
     start, end = (0, bounds["test_start"]) if split == "calibration" else (bounds["test_start"], len(targets))
-    replay = split == "test" and config["model"]["initialization"] == "calibration_replay"
-    stream_start = 0 if replay else start
+    stream_start = start
+    if split == "test":
+        initialization = config["model"]["initialization"]
+        if initialization == "calibration_replay":
+            stream_start = 0
+        elif initialization == "calibration_tail":
+            warmup = config["model"]["window_size"] + 1
+            if start < warmup:
+                raise ValueError(
+                    f"Sequence {key!r} has {start} calibration observations, but "
+                    f"calibration_tail requires at least {warmup} (window_size + 1). "
+                    "Reduce the window size or choose another initialization mode."
+                )
+            # The update excludes its current score from the CDF window. One
+            # extra observation produces a refined threshold before testing.
+            stream_start = start - warmup
     # Calibration selection does not inspect any test values, including finiteness.
     y = finite_sequence(targets[stream_start:end], "available heldout_y")
     point = finite_sequence(predictions[stream_start:end], "available heldout_predictions")

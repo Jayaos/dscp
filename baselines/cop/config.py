@@ -13,7 +13,7 @@ from baselines.aci.model import finite_number, positive_integer
 from baselines.aci.run_aci import target_quantiles, _alpha
 from baselines.cop.model import MODEL_DEFAULTS, validate_model
 
-RUNNER_DEFAULTS = {"score_type": "signed", "initialization": "calibration_replay",
+RUNNER_DEFAULTS = {"score_type": "signed", "initialization": "calibration_tail",
                    "prediction_step": 1, "target_quantiles": [[.05, .95]]}
 
 
@@ -49,8 +49,8 @@ def validate_config(config):
     config["model"] = model
     if model["score_type"] not in {"signed", "absolute"}:
         raise ValueError("model.score_type must be 'signed' or 'absolute'.")
-    if model["initialization"] not in {"calibration_replay", "cold_start"}:
-        raise ValueError("model.initialization must be 'calibration_replay' or 'cold_start'.")
+    if model["initialization"] not in {"calibration_tail", "calibration_replay", "cold_start"}:
+        raise ValueError("model.initialization must be 'calibration_tail', 'calibration_replay', or 'cold_start'.")
     if positive_integer(model["prediction_step"], "model.prediction_step") != 1:
         raise ValueError("Only sequential prediction_step=1 is supported.")
     try:

@@ -1,0 +1,10 @@
+# Benchmark grid, not an original-paper tuning prescription.
+grid:
+  model.gamma: [0.001, 0.005, 0.01, 0.05]
+  model.window_size: [100, 250, 500, 1250]
+
+tuning:
+  num_sequences: 10 # Same sequence count as the corresponding QR tuning grid; or all.
+  delta_threshold: -0.01
+  # First 50% initializes history; evaluate until the NexCP test boundary (~66%).
+  initialization_ratio: 0.5

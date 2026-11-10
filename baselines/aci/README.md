@@ -34,13 +34,6 @@ model:
   score_type: absolute
   prediction_step: 1
 
-tuning:
-  enabled: false
-  validation_ratio: 0.2
-  gamma_grid: [0.001, 0.005, 0.01, 0.05]
-  window_size_grid: [1250]
-  coverage_tolerance: 0.01
-
 plotting:
   plotting: true
   plotting_seq_len: 200
@@ -70,6 +63,11 @@ saving_dir: ./results/aci/example/
 - `num_cores` parallelizes independent sequences. Predictions within each
   sequence always remain chronological. The implementation is CPU-only.
 
+Normal runs use the fixed values in `model`. Hyperparameter selection is a
+separate step using the dedicated tuning runner below. Normal configs have no
+`tuning` section; stale tuning sections are rejected with guidance to the
+dedicated runner. Remove that section when migrating an older run config.
+
 See [UPSTREAM.md](UPSTREAM.md) for the exact source and fidelity decisions.
 
 ## Splits and causal initialization
@@ -93,30 +91,83 @@ Evaluation uses one-step sequential feedback. Existing Chronos forecasts may
 have been generated in blocks: their intervals are recalibrated as outcomes
 arrive. The same saved forecasts should be used by all compared methods.
 
-## Optional calibration-only hyperparameter selection
+## DSCP-QR-style hyperparameter selection
 
-Set `tuning.enabled: true` to search the configured gamma/window grid.
-Hyperparameters are shared across the artifact's sequences and coverage levels;
-online states remain independent. The final test suffix never participates.
+The dedicated tuning runner uses the same selection procedure as DSCP-QR:
 
-The early `1 - validation_ratio` fraction of calibration initializes each
-candidate. The remaining calibration tail evaluates it sequentially with fresh
-states. For 10,000 saved forecasts, defaults give 5,280 initialization points,
-1,320 tuning-validation points, and 3,400 final-test points.
+1. Evaluate each gamma/window candidate on the same selected sequences and
+   configured coverage levels, using fresh independent ACI states.
+2. Require `observed_coverage - target_coverage > tuning.delta_threshold`
+   for **every** sequence/coverage pair. The default threshold is -0.01.
+3. Rank passing candidates by mean Winkler score, weighting sequences and
+   coverage levels equally. Ties follow grid order. Save the best `top_k` trials.
 
-A candidate passes coverage if every series/coverage pair reaches its nominal
-coverage minus `coverage_tolerance` and has a defined finite-interval mean score.
-Candidates are ranked lexicographically by:
+ACI's previously agreed reporting convention still applies: coverage includes
+full/empty sets, while Winkler and width exclude them. Their counts/rates are
+reported separately and do not receive a ranking penalty. A candidate with
+undefined finite-interval Winkler at any sequence/level cannot be selected.
+If no candidate qualifies, the result has no top trials and no fallback choice.
 
-1. Passing the coverage/defined-score condition.
-2. Maximum coverage shortfall.
-3. Mean full/empty-set frequency.
-4. Mean Winkler score among finite, nonempty intervals.
+This selects **one shared gamma/window pair across the selected sequences and
+coverage levels**, not separately for each sequence. Independent online states
+are created for every sequence/level. This search protocol and its grid are
+repository benchmarking choices, not the original ACI paper's tuning procedure.
+The ordinary ACI presets use fixed gamma 0.005 and window 1250, with no
+`tuning` section.
 
-Series/coverage pairs have equal weight. Ties follow grid order. This selection
-rule is our benchmark protocol, not a claim about the original authors' tuning.
-After selection, each final state is recreated using the entire calibration
-prefix to seed its score pool, and alpha is reset to its specified initial value.
+### Dedicated tuning and separate final evaluation
+
+```bash
+python -m sbatch.sbatch_run_tuning.run_aci_tuning \
+  --base-config configs/aci_configs/aci_lr_air_config.yaml \
+  --grid-config configs/aci_configs/aci_air_tuning_config.yaml \
+  --save-dir results/tuning/aci_lr_air --top-k 3
+
+python -m report.inspect_tuning_results \
+  results/tuning/aci_lr_air/tuning_results.pkl --top-k 3
+```
+
+The three `configs/aci_configs/aci_{air,solar,sapflux}_tuning_config.yaml` grids
+search gamma `[0.001, 0.005, 0.01, 0.05]` and window size `[100, 250, 500, 1250]`.
+They select 3 Air, 10 Solar, or 5 Sapflux sequences, matching QR's grids. Keys
+are sorted; `--sequence-index` chooses the start of the contiguous subset.
+`tuning.num_sequences: all` selects every sequence, and `--sequence-key KEY`
+overrides the subset with one sequence. All settings are configurable in YAML.
+
+The grids set `tuning.initialization_ratio: 0.5`, a fraction of the **whole saved
+sequence**, to match QR's outer validation region approximately: first 50%
+initialize the score history, next 16% evaluate candidates, final 34% remain
+untouched. The test boundary uses NexCP's exact floor rule, so rounding can
+change a boundary by one observation relative to QR. ACI has no neural training
+or checkpoint-selection stage. For 10,000 observations the ranges are
+`[0,5000)` history, `[5000,6600)` tuning evaluation, `[6600,10000)` final test.
+
+The runner writes `tuning_results.pkl` plus each trial's `result.pkl` and
+`resolved_config.yaml`. It never evaluates the final test set. The resolved
+config contains fixed model settings and no `tuning` section, and can be
+passed directly to the ordinary ACI runner. Use the best trial path printed by
+the tuner or inspector, for example if trial 7 wins:
+
+```bash
+python -m sbatch.sbatch_run_aci.run_aci \
+  results/tuning/aci_lr_air/trial_0007/resolved_config.yaml
+```
+
+Final evaluation applies the shared selected settings to **all** sequences in
+the artifact. It recreates each state from the full 66% calibration prefix and
+resets alpha to its specified initial value. No validation state carries over.
+Slurm tuning arrays for all nine dataset/predictor combinations are documented
+in [the job guide](../../sbatch/sbatch_run_aci/README.md#tuning-jobs).
+`--dry-run` validates the dedicated runner's config without loading data or
+writing files. `--seed` is recorded for consistency with QR; ACI is deterministic.
+
+The dedicated grid also accepts `tuning.validation_ratio` when
+`initialization_ratio` is omitted or null. It controls the fraction of
+calibration reserved for candidate evaluation: the default 0.2 gives 5,280
+initialization, 1,320 validation, and 3,400 final-test points in a sequence of
+10,000 observations. The supplied grids' `initialization_ratio: 0.5` takes
+precedence and gives the 50%/16%/34% split above. These selection settings
+belong only to the dedicated tuning workflow.
 
 ## Full/empty sets and output metrics
 
@@ -139,10 +190,11 @@ updates. They are never converted to finite intervals or dropped from coverage.
   and empty predictions separately.
 
 Outputs: `log.pkl`, `summary_results.pkl`, `requested_config.yaml`,
-`resolved_config.yaml`, and optionally `plots/`. Tuning also writes
-`tuning_results.pkl`. The resolved configuration contains the selected settings
-and disables tuning, so it can be replayed directly. Per-point logs retain
-alpha before/after update, thresholds, scores, endpoints, coverage, and indices.
+`resolved_config.yaml`, and optionally `plots/`. The resolved configuration
+contains the fixed model settings and no `tuning` section, so it can be replayed
+directly. The separate tuning runner writes `tuning_results.pkl` and trial
+artifacts as described above. Per-point logs retain alpha before/after update,
+thresholds, scores, endpoints, coverage, and indices.
 
 The shared inspector recognizes the declared conditional-efficiency scope:
 

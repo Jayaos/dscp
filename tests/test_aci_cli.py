@@ -42,13 +42,13 @@ class ACICLITests(unittest.TestCase):
                     self.assertEqual(config.model.gamma, 0.005)
                     self.assertEqual(config.model.window_size, 1250)
                     self.assertEqual(config.model.target_quantiles, [[0.05, 0.95]])
-                    self.assertFalse(config.tuning.enabled)
+                    self.assertNotIn("tuning", config)
                     parent = Path(config.saving_dir).parent
                     self.assertEqual(parent, REPO_ROOT / "results" / "aci" / dataset / predictor)
                     output_parents.add(parent)
         self.assertEqual(len(output_parents), 9)
 
-    def test_custom_hyperparameters_and_tuning_survive_path_and_worker_overrides(self):
+    def test_fixed_hyperparameters_survive_path_and_worker_overrides(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "custom.yaml"
             output = Path(directory) / "results"
@@ -59,9 +59,6 @@ class ACICLITests(unittest.TestCase):
             source.model.gamma = 0.02
             source.model.window_size = 87
             source.model.initial_alpha = 0.2
-            source.tuning.enabled = True
-            source.tuning.gamma_grid = [0.01, 0.02]
-            source.tuning.window_size_grid = [40, 87]
             source.num_cores = 3
             OmegaConf.save(source, path)
 
@@ -73,9 +70,6 @@ class ACICLITests(unittest.TestCase):
             self.assertEqual(config.model.gamma, 0.02)
             self.assertEqual(config.model.window_size, 87)
             self.assertEqual(config.model.initial_alpha, 0.2)
-            self.assertTrue(config.tuning.enabled)
-            self.assertEqual(config.tuning.gamma_grid, [0.01, 0.02])
-            self.assertEqual(config.tuning.window_size_grid, [40, 87])
             self.assertEqual(config.num_cores, 3)
             self.assertEqual(Path(config.data.data_path), artifact)
             self.assertEqual(Path(config.saving_dir), output)
@@ -136,6 +130,21 @@ class ACICLITests(unittest.TestCase):
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 cli.main([str(path), "--dry-run"])
             self.assertFalse(output.exists())
+
+    def test_stale_tuning_config_is_rejected_before_normal_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "old.yaml"
+            source = OmegaConf.load(REPO_ROOT / "configs/aci_configs/aci_lr_air_config.yaml")
+            for tuning in ({"enabled": True}, {"enabled": False}, {}):
+                source.tuning = tuning
+                OmegaConf.save(source, path)
+                error = io.StringIO()
+                with self.subTest(tuning=tuning), patch("baselines.aci.run_aci.run_aci") as run, \
+                        contextlib.redirect_stderr(error), self.assertRaises(SystemExit):
+                    cli.main([str(path), "--dry-run"])
+                run.assert_not_called()
+                self.assertIn("do not accept a tuning section", error.getvalue())
+                self.assertIn("sbatch.sbatch_run_tuning.run_aci_tuning", error.getvalue())
 
     def test_missing_artifact_fails_before_dispatch(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -121,16 +121,29 @@ satisfies the coverage floor, select the lowest loss across the grid.
 **This calibration selection rule is a benchmark protocol, not an algorithm
 prescribed by Hu et al.**
 
-After selection, the default `calibration_replay` protocol restarts the chosen
-configuration, replays calibration, and continues into the complete test suffix.
-This preserves the authors' uninterrupted update sequence while adding a clean
-hyperparameter-selection boundary. Hyperparameters stay fixed in test; online
-state continues to update after each observed target.
+After selection, the default `calibration_tail` protocol restarts the chosen
+configuration, replays only the last `selected_window_size + 1` calibration
+observations, and continues into the complete test suffix. Replay length is
+determined separately for each sequence and requested coverage using its
+selected window. This warms up both thresholds and the residual history while
+keeping every test observation in evaluation. A calibration prefix shorter
+than the required replay length raises an error.
 
-The optional `cold_start` protocol starts over at test. It is explicitly
-recorded in the configuration. Every test timestamp is evaluated under either
-protocol; the original plotting cutoff is not applied again to discard test
-predictions.
+The extra observation preserves the original update indexing: when processing
+the first `window_size` observations from fresh state, the refinement is
+inactive. Processing observation `window_size + 1` performs the first ECDF
+refinement and supplies a refined threshold for the next prediction. With
+window 100, replaying the last 101 calibration observations therefore supplies
+that threshold before testing begins. **Restricting initialization to the end
+of calibration is a benchmark protocol, not the authors' original experiment
+setup.** Hyperparameters remain fixed during test; online state updates after
+each observed outcome.
+
+The optional `calibration_replay` protocol replays the full calibration prefix.
+The optional `cold_start` protocol starts over at test without replay. Every
+test timestamp is evaluated under all three protocols; the original plotting
+cutoff is not applied again to discard test predictions. The initialization
+mode is recorded in the configuration.
 
 The base forecasts are supplied by existing repository artifacts. Upstream
 forecast-model fitting, log transformations for particular datasets, and model

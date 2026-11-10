@@ -16,3 +16,10 @@ sbatch/sbatch_run_tuning/run_spci_*_tuning.sbatch text eol=lf
 
 # Keep ResCP tuning launchers compatible with Slurm after Windows checkouts.
 sbatch/sbatch_run_tuning/run_rescp_*_tuning.sbatch text eol=lf
+
+# Keep ACI final-run and tuning launchers compatible with Slurm.
+sbatch/sbatch_run_aci/*.sbatch text eol=lf
+sbatch/sbatch_run_tuning/run_aci_*_tuning.sbatch text eol=lf
+
+# Keep LQT launchers compatible with Slurm after Windows checkouts.
+sbatch/sbatch_run_lqt/*.sbatch text eol=lf

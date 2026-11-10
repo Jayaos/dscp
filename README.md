@@ -18,28 +18,30 @@ See the [COP guide](baselines/cop/README.md), [source details](baselines/cop/UPS
 and [configuration presets](configs/cop_configs/). The guide distinguishes the
 authors' update from this benchmark's calibration selector and empty-set reporting.
 
-## Areces et al. LQT and SQT+AR baselines
+## Areces et al. LQT baseline
 
-LQT and SQT+AR use the authors' experimental algorithms and calibration-only
+LQT uses the authors' experimental algorithm and calibration-only
 hyperparameter grids with NexCP's calibration/test boundary. Each series and
 coverage level has its own parameters and fresh online state at testing.
-Both run in `envs/env-dscp.yml`, which now includes CVXPY and Clarabel.
+It runs in the existing `envs/env-dscp.yml` environment.
 
 ```bash
-python sbatch/sbatch_run_conformalopt/run_conformalopt.py --method lqt --dataset air --base-predictor lr --dry-run
+python sbatch/sbatch_run_lqt/run_lqt.py --dataset air --base-predictor lr --dry-run
+sbatch sbatch/sbatch_run_lqt/run_lqt_air.sbatch
 ```
 
-Use `--method sqt_ar` for SQT+AR. See the [baseline guide](baselines/conformalopt/README.md),
-[publication provenance](baselines/conformalopt/UPSTREAM.md), and
-[Slurm launchers](sbatch/sbatch_run_conformalopt/).
+See the [baseline guide](baselines/lqt/README.md),
+[publication provenance](baselines/lqt/UPSTREAM.md), and
+[Slurm launchers](sbatch/sbatch_run_lqt/).
 
 ## ACI baseline
 
 ACI applies Gibbs and Candes' original online adaptive-level update to saved
 point forecasts. Defaults use gamma 0.005, a rolling 1250-score window, linear
 quantiles matching the author R code, and 90% nominal coverage. Its calibration/
-test boundary matches NexCP; optional YAML-controlled tuning uses calibration
-data only. Full and empty sets remain in coverage and are separately reported;
+test boundary matches NexCP. Normal runs use fixed model hyperparameters;
+the dedicated tuning workflow uses calibration data only. Full and empty sets
+remain in coverage and are separately reported;
 width and Winkler summaries are explicitly conditional on finite, nonempty sets.
 
 ```bash
@@ -50,6 +52,11 @@ See the [ACI guide](baselines/aci/README.md),
 [provenance](baselines/aci/UPSTREAM.md), and
 [Slurm jobs](sbatch/sbatch_run_aci/README.md).
 
+
+ACI also supports [DSCP-QR-style tuning](baselines/aci/README.md#dscp-qr-style-hyperparameter-selection)
+with configurable gamma/window grids, shared selection across sequences, and
+exported fixed configurations for separate final evaluation. [Dedicated tuning arrays](sbatch/sbatch_run_aci/README.md#tuning-jobs)
+cover all nine dataset/predictor combinations in the existing `dscp` environment.
 
 ## SplitCP baseline
 

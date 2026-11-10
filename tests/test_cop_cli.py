@@ -44,7 +44,7 @@ class COPCLITests(unittest.TestCase):
                     self.assertTrue(config.model.proportional_lr)
                     self.assertEqual(config.model.score_type, "signed")
                     self.assertEqual(config.model.cdf, "ecdf")
-                    self.assertEqual(config.model.initialization, "calibration_replay")
+                    self.assertEqual(config.model.initialization, "calibration_tail")
                     self.assertEqual(config.tuning.learning_rate_grid, [1.0, .5, .1, .05])
                     self.assertIsNone(config.tuning.warmup_steps)
                     self.assertEqual(config.model.window_size, 100)

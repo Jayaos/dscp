@@ -91,7 +91,14 @@ def prepare_sequence(item, config, key=None, split="test"):
         ratio = finite_number(config.get("tuning", {}).get("validation_ratio", .2), "tuning.validation_ratio")
         if not 0 < ratio < 1:
             raise ValueError("tuning.validation_ratio must be strictly between zero and one.")
-        calibration_end = math.floor(np.nextafter(outer_end * (1 - ratio), np.inf))
+        initial_ratio = config.get("tuning", {}).get("initialization_ratio")
+        if initial_ratio is None:
+            calibration_end = math.floor(np.nextafter(outer_end * (1 - ratio), np.inf))
+        else:
+            initial_ratio = finite_number(initial_ratio, "tuning.initialization_ratio")
+            if not 0 < initial_ratio < 1:
+                raise ValueError("tuning.initialization_ratio must be strictly between zero and one.")
+            calibration_end = math.floor(len(y_array) * initial_ratio)
         evaluation_end = outer_end
         if not 0 < calibration_end < evaluation_end:
             raise ValueError("Calibration prefix is too short for initialization and tuning validation.")

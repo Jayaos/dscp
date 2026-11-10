@@ -45,7 +45,7 @@ model:
   initial_quantile: 0.0
   cdf: ecdf
   score_type: signed
-  initialization: calibration_replay
+  initialization: calibration_tail
   prediction_step: 1
 
 tuning:
@@ -118,7 +118,7 @@ from the authors' default real-data configuration.
 Scores and endpoints remain in the saved forecasts' original response units.
 There is no residual normalization or new base-predictor training. In particular,
 COP's default signed scores differ from the absolute-score defaults of the ACI
-and LQT/SQT+AR baselines; that distinction is saved in the configuration.
+and LQT baselines; that distinction is saved in the configuration.
 
 ## Split, tuning, and online state
 
@@ -156,17 +156,34 @@ The coverage condition is applied to the complete two-sided interval, not to
 either tail separately. Selected parameters remain fixed throughout testing;
 test outcomes only update online state.
 
-With the default `initialization: calibration_replay`, the selected method is
-restarted and replayed through calibration, then continues into test without a
-state reset. This preserves the uninterrupted stream used by the authors while
-introducing the requested calibration/test boundary. Each sequence, coverage
-level, and signed tail retains separate state.
+With the default `initialization: calibration_tail`, tuning still uses the
+entire calibration prefix. After selection, the chosen method starts from
+fresh thresholds and empty history, replays only the last
+`selected_window_size + 1` calibration observations, and continues into the
+complete test suffix. Each sequence and coverage level uses its own selected
+window; signed tails have separate state and share the selected settings.
 
-The optional `initialization: cold_start` starts a fresh COP stream at the test
-boundary. It is an explicit alternative protocol, not the default. All test
-timestamps remain in evaluation, including any startup predictions; no test
-warmup is silently discarded. COP's default calibration replay differs from
-the fresh-test-state protocol of the LQT/SQT+AR experiment implementation.
+For the default window of 100, this means 101 calibration observations. The
+extra observation follows the released update order: the correction uses
+scores strictly before the current outcome, so its first application produces
+the threshold issued after observation 101. Replaying 101 observations makes
+that threshold available for the first test prediction. The stored history
+still contains only the most recent 100 scores. A calibration prefix shorter
+than the selected window plus one raises an error rather than shortening the
+warm-up silently.
+
+For example, with calibration observations 1--660 and test observations
+661--1,000, hyperparameters are selected using calibration, the final state is
+initialized by replaying observations 560--660, and all 340 test observations
+are evaluated. This initialization is a benchmark choice; it does not reproduce
+the authors' full-stream evaluation protocol. The preset Slurm jobs use this
+mode through their dataset/predictor YAML configurations.
+
+The optional `initialization: calibration_replay` replays the entire calibration
+prefix before testing. The optional `initialization: cold_start` starts fresh
+at the test boundary without replay. All three modes evaluate every test
+timestamp; no test warm-up predictions are discarded. Calibration replay in
+either form differs from the fresh-test-state protocol of LQT.
 
 ## Reporting and outputs
 

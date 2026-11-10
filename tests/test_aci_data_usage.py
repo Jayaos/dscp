@@ -9,9 +9,10 @@ import unittest
 import numpy as np
 from omegaconf import OmegaConf
 
+from baselines.aci.tuning import tune_hyperparameters
 from baselines.aci.data import prepare_sequence, split_boundaries
 from baselines.aci.run_aci import (
-    evaluate_sequence, evaluate_sequences, run_aci, tune_hyperparameters, validate_config,
+    evaluate_sequence, evaluate_sequences, run_aci, validate_config,
 )
 
 
@@ -61,7 +62,7 @@ class ACIDataTests(unittest.TestCase):
 
     def test_validation_and_selection_never_consume_final_test_values(self):
         settings = config()
-        settings["tuning"] = {"enabled": True, "gamma_grid": [.001, .005, .05],
+        settings["tuning"] = {"gamma_grid": [.001, .005, .05],
                               "window_size_grid": [5, 10], "validation_ratio": .2}
         item = artifact()
         reference = tune_hyperparameters({"a": item}, settings)
@@ -69,7 +70,8 @@ class ACIDataTests(unittest.TestCase):
         changed["heldout_y"][66:] = np.nan
         changed["heldout_predictions"][66:] = np.nan
         self.assertEqual(reference, tune_hyperparameters({"a": changed}, settings))
-        with self.assertRaises(ValueError):
+        del settings["tuning"]
+        with self.assertRaisesRegex(ValueError, "finite"):
             evaluate_sequence("a", changed, settings)
         self.assertTrue(all(index < 66 for index in reference["validation_target_indices"]["a"]))
 
@@ -127,7 +129,7 @@ class ACIDataTests(unittest.TestCase):
         for key in data:
             self.assertEqual(serial[key]["evaluation_results"], parallel[key]["evaluation_results"])
 
-    def test_run_persists_replayable_selected_configuration(self):
+    def test_normal_run_persists_fixed_configuration_without_tuning_outputs(self):
         with tempfile.TemporaryDirectory() as directory:
             directory = Path(directory)
             path = directory / "forecasts.pkl"
@@ -136,12 +138,14 @@ class ACIDataTests(unittest.TestCase):
             settings = config()
             settings["data"]["data_path"] = str(path)
             settings["saving_dir"] = str(directory / "output")
-            settings["tuning"] = {"enabled": True, "gamma_grid": [.001, .005], "window_size_grid": [5, 10]}
             output = run_aci(settings)
             folder = directory / "output"
-            self.assertTrue((folder / "tuning_results.pkl").is_file())
+            self.assertFalse((folder / "tuning_results.pkl").exists())
             chosen = OmegaConf.load(folder / "resolved_config.yaml")
-            self.assertFalse(chosen.tuning.enabled)
+            self.assertNotIn("tuning", chosen)
+            self.assertNotIn("tuning", OmegaConf.load(folder / "requested_config.yaml"))
+            self.assertEqual(chosen.model.gamma, settings["model"]["gamma"])
+            self.assertEqual(chosen.model.window_size, settings["model"]["window_size"])
             self.assertEqual(output["a"]["metadata"]["model"]["gamma"], chosen.model.gamma)
             with (folder / "log.pkl").open("rb") as stream:
                 self.assertEqual(pickle.load(stream), output)
@@ -153,8 +157,7 @@ class ACIDataTests(unittest.TestCase):
     def test_invalid_settings_fail_before_evaluation(self):
         for section, key, value in (("data", "calibration_ratio", 1), ("data", "normalize", True),
                                     ("model", "prediction_step", 10), ("model", "clip_alpha", True),
-                                    ("model", "target_quantiles", [[.1, .8]]),
-                                    ("tuning", "validation_ratio", 0), ("tuning", "gamma_grid", [])):
+                                    ("model", "target_quantiles", [[.1, .8]])):
             settings = config()
             settings.setdefault(section, {})[key] = value
             with self.subTest(section=section, key=key), self.assertRaises(ValueError):

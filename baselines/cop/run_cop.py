@@ -145,14 +145,17 @@ def _checked_selection(selection, pairs):
 
 def evaluate_sequence(key, item, config, selected_hyperparameters=None):
     config = validate_config(config)
-    prepared = prepare_sequence(item, config, key, "test")
     pairs = target_quantiles(config)
     _checked_selection(selected_hyperparameters, pairs)
     started = time.perf_counter()
     results, models = {}, {}
+    boundaries_by_coverage, replayed_sizes = {}, {}
     for pair in pairs:
         selected = {} if selected_hyperparameters is None else selected_hyperparameters[pair]
         model = validate_model({**config["model"], **selected})
+        # Selection may choose a different window for each coverage level.
+        # Build its warm-up prefix only after resolving that selected window.
+        prepared = prepare_sequence(item, {**config, "model": model}, key, "test")
         path = _predict_streams(prepared, model, pair)
         result = evaluate_intervals(prepared["y"], prepared["predictions"], path["lower"], path["upper"],
                                     _alpha(pair), prepared["target_indices"])
@@ -163,10 +166,21 @@ def evaluate_sequence(key, item, config, selected_hyperparameters=None):
                        "avg_quantile_loss": _loss(path, model, pair),
                        "online_diagnostics": _serializable(path["outputs"])})
         results[pair], models[pair] = result, model
+        boundaries_by_coverage[pair] = prepared["boundaries"]
+        replayed_sizes[pair] = prepared["prefix_length"]
+    # Test boundaries are shared; the replay start can differ across coverages.
+    # Preserve the scalar metadata when uniform and expose every exact prefix.
+    boundaries = prepared["boundaries"].copy()
+    if len({bounds["stream_start"] for bounds in boundaries_by_coverage.values()}) > 1:
+        boundaries["stream_start"] = None
+    unique_replayed_sizes = set(replayed_sizes.values())
     return {"evaluation_results": results, "metadata": {
-        "method": "COP", "boundaries": prepared["boundaries"], "models_by_coverage": models,
+        "method": "COP", "boundaries": boundaries, "models_by_coverage": models,
+        "boundaries_by_coverage": boundaries_by_coverage,
         "target_indices": prepared["target_indices"].tolist(),
-        "initialization": config["model"]["initialization"], "replayed_calibration_size": prepared["prefix_length"],
+        "initialization": config["model"]["initialization"],
+        "replayed_calibration_size": next(iter(unique_replayed_sizes)) if len(unique_replayed_sizes) == 1 else None,
+        "replayed_calibration_size_by_coverage": replayed_sizes,
         "hyperparameter_scope": "per_sequence_and_coverage_level; shared_settings_between_tails",
         "state_scope": "independent_sequence_coverage_and_tail",
         "feedback_protocol": "one_step_sequential", "score_type": config["model"]["score_type"],

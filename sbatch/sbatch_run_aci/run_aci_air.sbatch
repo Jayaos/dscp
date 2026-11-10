@@ -27,7 +27,9 @@ case "$TASK_ID" in
 esac
 BASE_PREDICTORS=(lr lstm chronos)
 BASE_PREDICTOR="${BASE_PREDICTORS[$TASK_ID]}"
-CONFIG_PATH="configs/aci_configs/aci_${BASE_PREDICTOR}_air_config.yaml"
+# Optional first argument is an exported tuning config; use a single array task.
+CONFIG_PATH="${1:-configs/aci_configs/aci_${BASE_PREDICTOR}_air_config.yaml}"
+if (( $# > 0 )); then shift; fi
 
 if type module >/dev/null 2>&1; then
   module load "${ACI_CONDA_MODULE:-anaconda3}"
@@ -35,4 +37,4 @@ fi
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "${ACI_CONDA_ENV:-dscp}"
 
-python -u -m sbatch.sbatch_run_aci.run_aci "$CONFIG_PATH"
+python -u -m sbatch.sbatch_run_aci.run_aci "$CONFIG_PATH" "$@"

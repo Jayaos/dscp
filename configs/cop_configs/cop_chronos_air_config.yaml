@@ -18,7 +18,8 @@ model:
   proportional_lr: true
   initial_quantile: 0.0
   cdf: ecdf
-  initialization: calibration_replay
+  # Reset after tuning, then warm up on the last selected window_size + 1 calibration observations.
+  initialization: calibration_tail
 
 # Original candidate rates; calibration-only selection is this benchmark's protocol.
 # A null warmup excludes max(window_size_grid) + 1 steps for every candidate.

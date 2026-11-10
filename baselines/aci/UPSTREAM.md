@@ -44,7 +44,12 @@ never include the current score in the interval being evaluated. Boundary
 guards follow the author election routine; the GARCH routine lacks them.
 
 Calibration/test partitioning follows this repository's NexCP evaluation:
-`floor(T * calibration_ratio)`, default 0.66. Optional calibration-tail tuning
-and conditional finite-interval reporting are repository experiment policies.
-They do not change ACI's simple update, and the settings/rules are recorded in
-the saved output. Full/empty sets remain in coverage and adaptive updates.
+`floor(T * calibration_ratio)`, default 0.66. Normal runs use fixed model
+hyperparameters. Calibration-tail tuning through the dedicated runner and
+conditional finite-interval reporting are repository experiment policies.
+The optional search follows DSCP-QR's shared coverage filter and mean-Winkler
+ranking; its gamma/window grid is not prescribed by the ACI publication. ACI
+has no neural checkpoint stage. The tuner exports fixed model configurations
+without a tuning section for separate final evaluation. These policies do not
+change ACI's simple update, and the settings/rules are recorded in the saved
+output. Full/empty sets remain in coverage and adaptive updates.

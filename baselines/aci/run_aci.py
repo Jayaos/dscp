@@ -1,10 +1,9 @@
-"""Configurable ACI baseline with chronological, calibration-only tuning."""
+"""Fixed-configuration ACI evaluation with chronological calibration/test splits."""
 
 from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor
 from copy import deepcopy
 from decimal import Decimal
-from itertools import product
 import math
 from pathlib import Path
 import pickle
@@ -65,10 +64,13 @@ def validate_config(config):
     config = _plain_config(config)
     data = config.setdefault("data", {})
     model = config.setdefault("model", {})
-    tuning = config.setdefault("tuning", {})
+    if "tuning" in config:
+        raise ValueError("Normal ACI runs use fixed model settings and do not accept a tuning section. "
+                         "Use sbatch.sbatch_run_tuning.run_aci_tuning with a separate grid config; "
+                         "then pass its resolved_config.yaml to the normal runner.")
     plotting = config.setdefault("plotting", {})
-    if any(not isinstance(node, dict) for node in (data, model, tuning, plotting)):
-        raise ValueError("data, model, tuning and plotting must be mappings.")
+    if any(not isinstance(node, dict) for node in (data, model, plotting)):
+        raise ValueError("data, model and plotting must be mappings.")
     forbidden = {"train_ratio", "valid_ratio", "validation_ratio", "normalize"} & data.keys()
     if forbidden:
         raise ValueError("ACI uses calibration/test only and explicit score_type; unsupported data settings: "
@@ -94,24 +96,6 @@ def validate_config(config):
     if not isinstance(plotting.setdefault("plotting", False), bool):
         raise ValueError("plotting.plotting must be a boolean.")
     plotting["plotting_seq_len"] = positive_integer(plotting.get("plotting_seq_len", 200), "plotting.plotting_seq_len")
-    if not isinstance(tuning.setdefault("enabled", False), bool):
-        raise ValueError("tuning.enabled must be a boolean.")
-    allowed_tuning = {"enabled", "validation_ratio", "gamma_grid", "window_size_grid", "coverage_tolerance"}
-    if set(tuning) - allowed_tuning:
-        raise ValueError("Unknown ACI tuning settings: " + ", ".join(sorted(set(tuning) - allowed_tuning)))
-    tuning.setdefault("validation_ratio", .2)
-    if not 0 < finite_number(tuning["validation_ratio"], "tuning.validation_ratio") < 1:
-        raise ValueError("tuning.validation_ratio must be strictly between zero and one.")
-    tuning.setdefault("coverage_tolerance", .01)
-    if not 0 <= finite_number(tuning["coverage_tolerance"], "tuning.coverage_tolerance") < 1:
-        raise ValueError("tuning.coverage_tolerance must be in [0, 1).")
-    tuning.setdefault("gamma_grid", [model["gamma"]])
-    tuning.setdefault("window_size_grid", [model["window_size"]])
-    for key in ("gamma_grid", "window_size_grid"):
-        if not isinstance(tuning[key], list) or not tuning[key]:
-            raise ValueError(f"tuning.{key} must be a nonempty list.")
-    for gamma, window in product(tuning["gamma_grid"], tuning["window_size_grid"]):
-        _estimator({**model, "gamma": gamma, "window_size": window}, pairs[0])
     return config
 
 
@@ -190,56 +174,13 @@ def evaluate_sequences(data, config, num_cores=None, split="test"):
         return dict(executor.map(_sequence_task, tasks))
 
 
-def tune_hyperparameters(data, config):
-    """Select shared settings across series using only the calibration tail.
-
-    Every candidate has fresh independent states. Prioritize coverage, then
-    fewer full/empty sets, then finite-interval Winkler score. All means used
-    for selection give each series/coverage pair equal weight.
-    """
-    config = validate_config(config)
-    data = canonicalize_forecast_data(data)
-    if not data:
-        raise ValueError("The forecast artifact must contain at least one sequence.")
-    pairs = target_quantiles(config)
-    prepared = {key: prepare_sequence(item, config, key, split="validation")
-                for key, item in data.items()}
-    trials = []
-    tuning = config["tuning"]
-    for trial_id, (gamma, window) in enumerate(product(tuning["gamma_grid"], tuning["window_size_grid"])):
-        model = {**config["model"], "gamma": gamma, "window_size": window}
-        deficits, exceptions, scores, details = [], [], [], {}
-        for key, sequence in prepared.items():
-            sequence_results = _evaluate_prepared(sequence, model, pairs)
-            details[key] = {}
-            for pair, metrics in sequence_results.items():
-                deficit = max(0.0, 1 - _alpha(pair) - tuning["coverage_tolerance"] - metrics["avg_coverage"])
-                deficits.append(deficit)
-                exceptions.append(metrics["full_set_rate"] + metrics["empty_set_rate"])
-                scores.append(metrics["avg_winkler_score"] if metrics["avg_winkler_score"] is not None else math.inf)
-                details[key][pair] = {name: metrics[name] for name in (
-                    "avg_coverage", "avg_winkler_score", "num_full_sets", "num_empty_sets", "num_finite_intervals",
-                )}
-        eligible = max(deficits) == 0 and all(math.isfinite(value) for value in scores)
-        rank = (0 if eligible else 1, max(deficits), float(np.mean(exceptions)), float(np.mean(scores)))
-        trials.append({"trial_id": trial_id, "gamma": float(gamma), "window_size": window,
-                       "eligible": eligible, "rank": rank, "validation_results": details})
-    selected = min(trials, key=lambda trial: trial["rank"])
-    return {"selected_hyperparameters": {"gamma": selected["gamma"], "window_size": selected["window_size"]},
-            "selected_trial_id": selected["trial_id"], "all_trials": trials,
-            "scope": "shared_across_sequences_and_coverage_levels",
-            "selection_rule": "coverage eligibility, maximum shortfall, exceptional-set rate, finite-interval Winkler",
-            "validation_boundaries": {key: value["boundaries"] for key, value in prepared.items()},
-            "validation_target_indices": {key: value["target_indices"].tolist() for key, value in prepared.items()}}
-
-
 def _save_pickle(path, value):
     with Path(path).open("wb") as stream:
         pickle.dump(value, stream, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def run_aci(config, num_cores=None):
-    """Run optional calibration-only selection, then evaluate the test suffix."""
+    """Evaluate the test suffix using the fixed model settings in the config."""
     if isinstance(config, (str, Path)):
         config = load_experiment_config(config)
     requested = validate_config(config)
@@ -249,30 +190,19 @@ def run_aci(config, num_cores=None):
         raise ValueError("data.data_path and saving_dir are required to run an experiment.")
     with Path(requested["data"]["data_path"]).open("rb") as stream:
         data = pickle.load(stream)
-    effective = deepcopy(requested)
-    selection = None
-    if requested["tuning"]["enabled"]:
-        print("ACI: selecting hyperparameters on calibration data only.", flush=True)
-        selection = tune_hyperparameters(data, requested)
-        effective["model"].update(selection["selected_hyperparameters"])
-        print(f"Selected: {selection['selected_hyperparameters']}", flush=True)
-    # Persist a replayable fixed configuration; never re-tune final-test output.
-    effective["tuning"]["enabled"] = False
     print(f"ACI: evaluating {len(data)} independent sequences.", flush=True)
-    log = evaluate_sequences(data, effective)
-    pairs = target_quantiles(effective)
+    log = evaluate_sequences(data, requested)
+    pairs = target_quantiles(requested)
     summary = summarize_results(log, pairs)
-    output = Path(effective["saving_dir"])
+    output = Path(requested["saving_dir"])
     output.mkdir(parents=True, exist_ok=True)
     OmegaConf.save(OmegaConf.create(requested), output / "requested_config.yaml", resolve=True)
-    OmegaConf.save(OmegaConf.create(effective), output / "resolved_config.yaml", resolve=True)
+    OmegaConf.save(OmegaConf.create(requested), output / "resolved_config.yaml", resolve=True)
     _save_pickle(output / "log.pkl", log)
     _save_pickle(output / "summary_results.pkl", summary)
-    if selection is not None:
-        _save_pickle(output / "tuning_results.pkl", selection)
     for pair, result in summary.items():
         print(f"Coverage pair {pair}: {result}", flush=True)
-    if effective["plotting"]["plotting"]:
+    if requested["plotting"]["plotting"]:
         from baselines.aci.reporting import plot_aci_results
-        plot_aci_results(log, pairs, effective["plotting"]["plotting_seq_len"], output / "plots")
+        plot_aci_results(log, pairs, requested["plotting"]["plotting_seq_len"], output / "plots")
     return log

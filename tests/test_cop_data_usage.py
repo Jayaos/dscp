@@ -51,7 +51,7 @@ def test_tuning_never_reads_test_targets_or_predictions(score_type):
 
 
 @pytest.mark.parametrize("score_type", ["signed", "absolute"])
-@pytest.mark.parametrize("initialization", ["calibration_replay", "cold_start"])
+@pytest.mark.parametrize("initialization", ["calibration_tail", "calibration_replay", "cold_start"])
 def test_state_protocol_matches_direct_uninterrupted_stream(score_type, initialization):
     settings = config(score_type)
     settings["model"]["initialization"] = initialization
@@ -60,19 +60,90 @@ def test_state_protocol_matches_direct_uninterrupted_stream(score_type, initiali
     result = evaluate_sequence("a", item, settings)
     prepared = prepare_sequence(item, settings, "a")
     offset = prepared["prefix_length"]
-    assert offset == (27 if initialization == "calibration_replay" else 0)
+    expected_offset = {"calibration_tail": 5, "calibration_replay": 27, "cold_start": 0}[initialization]
+    assert offset == expected_offset
+    assert prepared["boundaries"]["stream_start"] == 27 - expected_offset
+    residual = item["heldout_y"] - item["heldout_predictions"].ravel()
+    raw_scores = {"lower": -residual, "upper": residual} if score_type == "signed" else {
+        "absolute": np.abs(residual)}
     for pair, metrics in result["evaluation_results"].items():
         for stream, alpha in stream_alphas(pair, score_type).items():
-            reference = predict_thresholds(prepared["scores"][stream], alpha, settings["model"])
+            reference = predict_thresholds(raw_scores[stream][27-expected_offset:], alpha, settings["model"])
             np.testing.assert_array_equal(metrics["score_thresholds"][stream],
                                           reference["thresholds"][offset:])
             diagnostics = metrics["online_diagnostics"][stream]
-            assert diagnostics["final_state"]["seen"] == (41 if offset else 14)
+            assert diagnostics["final_state"]["seen"] == expected_offset + 14
             if offset:
                 assert diagnostics["cdf_active"][0]
             else:
                 assert not diagnostics["cdf_active"][0]
         assert metrics["target_indices"] == list(range(27, 41))
+        assert metrics["num_test_points"] == 14
+
+
+def test_first_test_threshold_includes_calibration_tail_refinement():
+    settings = config("absolute")
+    settings["model"].update(window_size=2, learning_rate=1., proportional_lr=False,
+                             target_quantiles=[[.05, .95]])
+    item = {"heldout_y": np.full(10, 2.), "heldout_predictions": np.zeros(10)}
+    result = evaluate_sequence("a", item, settings)
+    metrics = result["evaluation_results"][(.05, .95)]
+    # Replaying three scores gives h: .9, 1.8, 2.7. The final ECDF is 1,
+    # so the first issued test threshold is 2.7 - .5 * (1 - .9) = 2.65.
+    assert metrics["score_thresholds"]["absolute"][0] == pytest.approx(2.65)
+    assert metrics["target_indices"] == [6, 7, 8, 9]
+    assert result["metadata"]["replayed_calibration_size"] == 3
+
+
+@pytest.mark.parametrize("score_type", ["signed", "absolute"])
+def test_tail_initialization_ignores_earlier_calibration_observations(score_type):
+    settings = config(score_type)
+    item = artifact()
+    expected = evaluate_sequence("a", item, settings)
+    poisoned = deepcopy(item)
+    poisoned["heldout_y"][:22] = np.nan
+    poisoned["heldout_predictions"][:22] = np.nan
+    actual = evaluate_sequence("a", poisoned, settings)
+    assert expected["evaluation_results"] == actual["evaluation_results"]
+
+
+def test_selected_window_controls_tail_length_separately_for_each_coverage():
+    settings = config()
+    settings["model"]["window_size"] = 100  # Must not override selected windows.
+    selected = {
+        (.05, .95): {"learning_rate": .1, "window_size": 3, "scale": .5},
+        (.1, .9): {"learning_rate": .1, "window_size": 4, "scale": .5},
+    }
+    item = artifact()
+    result = evaluate_sequence("a", item, settings, selected)
+    residual = item["heldout_y"] - item["heldout_predictions"].ravel()
+    for pair, params in selected.items():
+        replay_size = params["window_size"] + 1
+        metrics = result["evaluation_results"][pair]
+        model = validate_config(settings)["model"] | params
+        for stream, alpha in stream_alphas(pair, "signed").items():
+            scores = -residual if stream == "lower" else residual
+            reference = predict_thresholds(scores[27-replay_size:], alpha, model)
+            np.testing.assert_array_equal(metrics["score_thresholds"][stream],
+                                          reference["thresholds"][replay_size:])
+        assert metrics["target_indices"] == list(range(27, 41))
+        assert result["metadata"]["replayed_calibration_size_by_coverage"][pair] == replay_size
+        assert result["metadata"]["boundaries_by_coverage"][pair]["stream_start"] == 27 - replay_size
+    assert result["metadata"]["replayed_calibration_size"] is None
+    assert result["metadata"]["boundaries"]["stream_start"] is None
+
+
+def test_tail_initialization_requires_full_warmup_without_truncating_test():
+    settings = config()
+    settings["tuning"]["enabled"] = False
+    with pytest.raises(ValueError, match="calibration") as error:
+        evaluate_sequence("a", artifact(7), settings)
+    assert "5" in str(error.value)
+    settings["data"]["test_start"] = 5
+    result = evaluate_sequence("a", artifact(7), settings)
+    for metrics in result["evaluation_results"].values():
+        assert metrics["target_indices"] == [5, 6]
+        assert metrics["num_test_points"] == 2
 
 
 @pytest.mark.parametrize("score_type", ["signed", "absolute"])
@@ -122,7 +193,7 @@ def test_empty_sets_are_reported_without_sorting_or_skipping_time():
     assert metrics["avg_winkler_score"] is None
     assert all(lo > hi for lo, hi in zip(metrics["raw_lower_interval"], metrics["raw_upper_interval"]))
     for stream in metrics["online_diagnostics"].values():
-        assert stream["final_state"]["seen"] == 41
+        assert stream["final_state"]["seen"] == 19
 
 
 def test_nexcp_floor_and_explicit_boundaries():
@@ -132,7 +203,10 @@ def test_nexcp_floor_and_explicit_boundaries():
         prepared = prepare_sequence(artifact(length), settings, "a", "calibration")
         assert len(prepared["y"]) == int(np.floor(length * ratio))
     settings["data"]["test_start"] = {"a": 30}
-    assert prepare_sequence(artifact(), settings, "a")["target_indices"][0] == 30
+    prepared = prepare_sequence(artifact(), settings, "a")
+    assert prepared["target_indices"][0] == 30
+    assert prepared["prefix_length"] == 5
+    assert prepared["boundaries"]["stream_start"] == 25
     with pytest.raises(ValueError):
         prepare_sequence(artifact(), settings, "b")
 
@@ -192,6 +266,7 @@ def test_saved_selection_replays_exactly_and_plots(score_type):
         original = run_cop(settings)
         resolved = OmegaConf.load(root / "run" / "resolved_config.yaml")
         assert not resolved.tuning.enabled
+        assert resolved.model.initialization == "calibration_tail"
         assert Path(resolved.selected_hyperparameters_path).is_file()
         assert (root / "run" / "tuning_results.pkl").is_file()
         assert len(list((root / "run" / "plots").glob("*.png"))) == 2
