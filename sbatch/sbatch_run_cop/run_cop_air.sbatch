@@ -35,4 +35,5 @@ fi
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "${COP_CONDA_ENV:-dscp}"
 
-python -u -m sbatch.sbatch_run_cop.run_cop "$CONFIG_PATH"
+# One sequence worker per allocated CPU, capped by the number of sequences.
+python -u -m sbatch.sbatch_run_cop.run_cop "$CONFIG_PATH" --num-cores "${SLURM_CPUS_PER_TASK:-1}"

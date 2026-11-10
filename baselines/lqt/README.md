@@ -22,6 +22,13 @@ are `LQT_CONDA_MODULE` (default `anaconda3`) and `LQT_CONDA_ENV` (default `dscp`
 Use `--num-cores 4` to parallelize independent sequences. Within each sequence,
 predictions and updates remain chronological.
 
+Slurm launchers pass `SLURM_CPUS_PER_TASK` to `--num-cores`, overriding the YAML
+worker count. For example, `sbatch --cpus-per-task=8
+sbatch/sbatch_run_lqt/run_lqt_air.sbatch` runs up to eight independent sequences
+concurrently per array task during both tuning and testing. Each worker uses
+one numerical-library thread. The worker count is capped by the number of
+sequences; memory is configured separately through Slurm's `--mem` setting.
+
 Use the shared `dscp` environment from
 [envs/env-dscp.yml](../../envs/env-dscp.yml). LQT uses NumPy and the existing
 configuration and reporting dependencies; no separate environment is needed.

@@ -20,6 +20,13 @@ with LR, LSTM, and Chronos forecasts. The corresponding Slurm arrays are under
 parallelize independent sequences. Within each sequence, prediction and feedback
 remain chronological.
 
+Slurm launchers pass `SLURM_CPUS_PER_TASK` to `--num-cores`, overriding the YAML
+worker count. For example, `sbatch --cpus-per-task=8
+sbatch/sbatch_run_cop/run_cop_air.sbatch` runs up to eight independent sequences
+concurrently per array task during both tuning and testing. Each worker uses
+one numerical-library thread. The worker count is capped by the number of
+sequences; memory is configured separately through Slurm's `--mem` setting.
+
 COP runs in the existing [dscp environment](../../envs/env-dscp.yml). Its active
 ECDF implementation needs NumPy; the runner uses dependencies already present
 in that environment. No additional package or separate environment is needed.
