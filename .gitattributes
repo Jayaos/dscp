@@ -26,3 +26,6 @@ sbatch/sbatch_run_lqt/*.sbatch text eol=lf
 
 # Keep COP launchers compatible with Slurm after Windows checkouts.
 sbatch/sbatch_run_cop/*.sbatch text eol=lf
+
+# Keep Epanechnikov Local-CP tuning launchers compatible with Slurm.
+sbatch/sbatch_run_tuning/run_lcp_*_epanechnikov_*_tuning.sbatch text eol=lf
