@@ -4,9 +4,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --array=0-2
-#SBATCH --cpus-per-task=1
-#SBATCH --mem=4G
-#SBATCH --time=24:00:00
+#SBATCH --cpus-per-task=24
+#SBATCH --mem=96G
+#SBATCH --time=12:00:00
 #SBATCH --qos=inferno
 #SBATCH -o Report-lqt-sapflux-%A_%a.out
 

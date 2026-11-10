@@ -4,8 +4,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --array=0-2
-#SBATCH --cpus-per-task=10
-#SBATCH --mem=40G
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=48G
 #SBATCH --time=12:00:00
 #SBATCH --qos=inferno
 #SBATCH -o Report-lqt-air-%A_%a.out
