@@ -7,7 +7,7 @@
 #SBATCH --account=gts-yxie77-paid
 #SBATCH --gres=gpu:1 -C V100
 #SBATCH --mem=32G
-#SBATCH -t240
+#SBATCH -t120
 #SBATCH -qinferno
 #SBATCH -o Report-%x-%A_%a.out
 #SBATCH --mail-type=ALL
