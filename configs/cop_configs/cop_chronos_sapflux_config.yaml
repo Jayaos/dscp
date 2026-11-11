@@ -8,7 +8,7 @@ data:
 
 model:
   target_quantiles:
-    - [0.025, 0.975]
+    - [0.1, 0.9]
   score_type: signed
   prediction_step: 1
   # This fixed base rate is used only when tuning is disabled.
