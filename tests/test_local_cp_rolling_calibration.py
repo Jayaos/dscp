@@ -142,6 +142,11 @@ class LocalCPRollingCalibrationTests(unittest.TestCase):
                         rolling = mode is not False
                         self.assertIs(log["rolling_calibration"], rolling)
                         self._assert_pool_sequence(calls, tuning, rolling)
+                        if not tuning:
+                            for result in log["evaluation_results"].values():
+                                self.assertEqual(result["target_indices"], list(range(32, 40)))
+                                self.assertEqual(result["target_indices"], result["target_y"])
+                                self.assertEqual(len(result["coverage"]), len(result["target_indices"]))
                         recorded[mode] = calls
 
                 # Omitting the option preserves precisely the enabled behavior.

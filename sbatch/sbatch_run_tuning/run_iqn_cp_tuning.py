@@ -196,6 +196,11 @@ def _run_single_trial(config, sequence_item, normalization_params):
         config.training, config.model.target_quantiles
     )
     config.training.tau_mode = tau_mode
+    # Fixed-level training does not require a random-quantile sample count.
+    training_num_taus = (
+        len(training_quantiles) if training_quantiles is not None
+        else config.model.num_taus
+    )
     training_kwargs = (
         {"taus": torch.tensor(training_quantiles, dtype=torch.float32, device=device)}
         if training_quantiles is not None else {}
@@ -267,12 +272,12 @@ def _run_single_trial(config, sequence_item, normalization_params):
             target_x = target_x.to(device)
             if use_current_feature:
                 loss = loss_fn(
-                    model, strided_feature, target_residual, config.model.num_taus,
+                    model, strided_feature, target_residual, training_num_taus,
                     target_x, **training_kwargs,
                 )
             else:
                 loss = loss_fn(
-                    model, strided_feature, target_residual, config.model.num_taus,
+                    model, strided_feature, target_residual, training_num_taus,
                     **training_kwargs,
                 )
             loss.backward()

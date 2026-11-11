@@ -149,6 +149,34 @@ class IQNTauRunnerTests(unittest.TestCase):
                 for key, value in results[0][2].items():
                     torch.testing.assert_close(value, results[1][2][key], rtol=0, atol=0)
 
+    def test_fixed_training_and_validation_do_not_require_num_taus(self):
+        cases = (
+            ("rnn", "cosine_embedding", False),
+            ("rnn", "partially_monotonic", True),
+            ("transformer", "cosine_embedding", True),
+            ("transformer", "partially_monotonic", False),
+        )
+        for architecture, head, use_current in cases:
+            with self.subTest(architecture=architecture, head=head, use_current=use_current):
+                results = []
+                for include_num_taus in (True, False):
+                    config = runner_fixtures.IQNPredictionHeadRunnerTests._config(
+                        architecture, head, use_current,
+                    )
+                    config.model.interval_mode = "direct"
+                    config.training.tau_mode = "target_quantiles"
+                    config.training.validation_loss = "target_quantiles"
+                    if not include_num_taus:
+                        del config.model.num_taus
+                    results.append(self._run(architecture, config))
+                    self.assertEqual("num_taus" in config.model, include_num_taus)
+                    self.assertTrue(all(not record["sample_counts"] for record in results[-1][1]))
+
+                for key in ("train_loss", "valid_loss", "best_epoch", "training_quantiles"):
+                    self.assertEqual(results[0][0][key], results[1][0][key])
+                for key, value in results[0][2].items():
+                    torch.testing.assert_close(value, results[1][2][key], rtol=0, atol=0)
+
     def test_target_training_with_sampling_intervals_warns_without_overriding(self):
         config = runner_fixtures.IQNPredictionHeadRunnerTests._config(
             "rnn", "cosine_embedding", False,

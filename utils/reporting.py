@@ -2,6 +2,26 @@ import torch
 import numpy as np
 
 
+def attach_test_target_indices(evaluation_results, heldout_size, test_size):
+    """Index an unfiltered, one-step test suffix in original heldout_y.
+
+    Each saved index identifies the target, not the start of its context window
+    or its offset within the test split. Filtered results must retain their own
+    per-observation indices instead of using this helper.
+    """
+    if not 0 <= test_size <= heldout_size:
+        raise ValueError("Test size must be between zero and the held-out size.")
+    target_indices = list(range(heldout_size - test_size, heldout_size))
+    for pair, result in evaluation_results.items():
+        for field in ("coverage", "target_y"):
+            if len(result[field]) != test_size:
+                raise ValueError(
+                    f"Cannot attach test target indices for {pair}: "
+                    f"{field} has {len(result[field])} entries, expected {test_size}."
+                )
+        result["target_indices"] = target_indices.copy()
+
+
 def compute_coverage(upper_interval, lower_interval, target):
 
     if type(upper_interval) == np.ndarray:

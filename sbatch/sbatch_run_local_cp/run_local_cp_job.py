@@ -43,13 +43,15 @@ def build_parser():
         "--kernel",
         choices=("softmax", "epanechnikov"),
         default=None,
-        help="Override model.kernel; the default without a YAML setting is softmax.",
+        help="Select the matching kernel templates and override model.kernel; "
+        "the default without a YAML setting is softmax.",
     )
     parser.add_argument(
         "--bandwidth",
         type=positive_bandwidth,
         default=None,
-        help="Positive chord-distance bandwidth required for the Epanechnikov kernel.",
+        help="Override model.bandwidth from the Epanechnikov template with a "
+        "positive chord-distance bandwidth.",
     )
     parser.add_argument(
         "--output-root", type=Path, default=None,
@@ -80,8 +82,13 @@ def main(argv=None):
         / predictor
         / f"{predictor}_{artifact_name}_data.pkl"
     )
-    template_name = f"lcp_{encoder}_{predictor}_{args.dataset}_config.yaml"
-    template_path = REPO_ROOT / "configs" / "lcp_configs" / template_name
+    if args.kernel == "epanechnikov":
+        template_dir = "lcp_epanechnikov_kernel_configs"
+        template_name = f"lcp_{encoder}_epanechnikov_{predictor}_{args.dataset}_config.yaml"
+    else:
+        template_dir = "lcp_configs"
+        template_name = f"lcp_{encoder}_{predictor}_{args.dataset}_config.yaml"
+    template_path = REPO_ROOT / "configs" / template_dir / template_name
     config = load_experiment_config(template_path)
     config.base_predictor = predictor
     kernel = args.kernel if args.kernel is not None else config.model.get("kernel", "softmax")

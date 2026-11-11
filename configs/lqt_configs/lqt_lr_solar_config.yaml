@@ -9,7 +9,7 @@ data:
 model:
   method: lqt
   target_quantiles:
-    - [0.05, 0.95]
+    - [0.025, 0.975]
   # Fixed fallback values; the enabled tuning grid selects these for each series.
   learning_rate: 0.1
   p_order: 1

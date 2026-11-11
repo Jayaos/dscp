@@ -64,16 +64,18 @@ class LocalCPQuantileRunnerTests(unittest.TestCase):
         return config
 
     @staticmethod
-    def _artifact():
-        values = np.linspace(-2.0, 2.0, 40, dtype=np.float32)
+    def _artifact(size=40):
+        values = np.linspace(-2.0, 2.0, size, dtype=np.float32)
         return {"series": {
             "heldout_x": np.column_stack([values, values**2]),
             "heldout_y": np.sin(values),
             "heldout_predictions": values * 0.2,
         }}
 
-    def _run(self, architecture, config):
+    def _run(self, architecture, config, artifact=None):
         runner = getattr(run_local_cp, f"run_{architecture}_local_cp")
+        if artifact is None:
+            artifact = self._artifact()
         quantile_calls = []
         approximate = run_local_cp.LocalConformalPrediction.approximate_quantile
 
@@ -89,7 +91,7 @@ class LocalCPQuantileRunnerTests(unittest.TestCase):
         with (
             torch.random.fork_rng(devices=[]),
             patch.object(run_local_cp.OmegaConf, "load", return_value=config),
-            patch.object(run_local_cp, "load_data", return_value=self._artifact()),
+            patch.object(run_local_cp, "load_data", return_value=artifact),
             patch.object(run_local_cp, "save_data") as save_data,
             patch.object(run_local_cp.os, "makedirs"),
             patch.object(run_local_cp.torch, "save") as save_model,
@@ -161,6 +163,27 @@ class LocalCPQuantileRunnerTests(unittest.TestCase):
                     self.assertTrue(np.isfinite(lower).all())
                     self.assertTrue(np.isfinite(upper).all())
                     self.assertTrue((lower <= upper).all())
+
+    def test_saved_indices_identify_original_targets_with_rounded_split(self):
+        artifact = self._artifact(size=41)
+        # The cumulative 80% boundary is floor(32.8), independent of window size.
+        expected_indices = list(range(32, 41))
+        for architecture in ("transformer", "rnn"):
+            with self.subTest(architecture=architecture):
+                config = self._config(architecture, use_current_feature=True)
+                config.training.epochs = 1
+                config.model.target_quantiles = [[0.05, 0.95], [0.1, 0.9]]
+                _, log, _ = self._run(architecture, config, artifact)
+                for result in log["evaluation_results"].values():
+                    self.assertEqual(result["target_indices"], expected_indices)
+                    self.assertEqual(len(result["coverage"]), len(expected_indices))
+                    np.testing.assert_array_equal(
+                        result["target_y"], artifact["series"]["heldout_y"][expected_indices],
+                    )
+                    np.testing.assert_array_equal(
+                        result["target_predictions"],
+                        artifact["series"]["heldout_predictions"][expected_indices],
+                    )
 
     def test_tuning_uses_training_levels_and_keeps_inference_independent(self):
         for architecture in ("transformer", "rnn"):

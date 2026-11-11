@@ -1,0 +1,41 @@
+# Evaluate existing QR-CP, IQN-CP, and Local-CP logs without rerunning models.
+# Replace EVERY REPLACE_WITH_RUN_DIRECTORY path, or remove unneeded run entries.
+# All selected runs must use this grouping artifact's original source timeline.
+path_base: ../..
+groups_dir: results/conditional_coverage/air/lstm/groups
+output_dir: results/conditional_coverage/air/lstm/evaluation
+nominal_coverage: 0.9
+
+# Older complete logs may omit target_indices. Treat their saved row order as
+# chronological and check target_y against the original heldout observations.
+# Explicit indices and saved exclusion masks always take precedence.
+allow_chronological_fallback: true
+
+# Optional: relocate the exact source artifact recorded in the group manifest.
+# data_path: data/air-10_prediction/lstm/lstm_air-10_data.pkl
+# Optional: require this exact sequence subset instead of the shared sequences.
+# sequences: [station_1, station_2]
+
+runs:
+  - name: qr_rnn
+    method: qr_cp
+    run_dir: results/qr_cp/air/lstm/rnn/nondecreasing/REPLACE_WITH_RUN_DIRECTORY
+    # For logs without resolved_config.yaml, supply the ORIGINAL run config:
+    # config_path: configs/qr_cp_configs/qr_rnn_lstm_air_config.yaml
+    # Select a pair only if multiple saved pairs share the nominal coverage:
+    # quantile_pair: [0.05, 0.95]
+  - name: qr_transformer
+    method: qr_cp
+    run_dir: results/qr_cp/air/lstm/transformer/nondecreasing/REPLACE_WITH_RUN_DIRECTORY
+  - name: iqn_rnn
+    method: iqn_cp
+    run_dir: results/iqn_cp/air/lstm/rnn/cosine_embedding/REPLACE_WITH_RUN_DIRECTORY
+  - name: iqn_transformer
+    method: iqn_cp
+    run_dir: results/iqn_cp/air/lstm/transformer/cosine_embedding/REPLACE_WITH_RUN_DIRECTORY
+  - name: local_cp_rnn
+    method: local_cp
+    run_dir: results/local_cp/air/lstm/rnn/REPLACE_WITH_RUN_DIRECTORY
+  - name: local_cp_transformer
+    method: local_cp
+    run_dir: results/local_cp/air/lstm/transformer/REPLACE_WITH_RUN_DIRECTORY

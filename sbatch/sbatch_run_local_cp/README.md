@@ -98,36 +98,42 @@ preserves these settings:
 ## Epanechnikov experiment
 
 The existing arrays retain softmax weighting. Separate arrays opt into the
-Epanechnikov kernel on cosine-derived chord distance. Set `LOCAL_CP_BANDWIDTH`
-explicitly; `1.0` below is an example, not a selected or recommended bandwidth:
+Epanechnikov kernel on cosine-derived chord distance, using the matching
+non-tuning configuration from `configs/lcp_epanechnikov_kernel_configs/`:
 
 ```bash
-sbatch --export=ALL,LOCAL_CP_BANDWIDTH=1.0 sbatch/sbatch_run_local_cp/run_local_cp_epanechnikov_air.sbatch
-sbatch --export=ALL,LOCAL_CP_BANDWIDTH=1.0 sbatch/sbatch_run_local_cp/run_local_cp_epanechnikov_solar.sbatch
-sbatch --export=ALL,LOCAL_CP_BANDWIDTH=1.0 sbatch/sbatch_run_local_cp/run_local_cp_epanechnikov_sapflux.sbatch
+sbatch sbatch/sbatch_run_local_cp/run_local_cp_epanechnikov_air.sbatch
+sbatch sbatch/sbatch_run_local_cp/run_local_cp_epanechnikov_solar.sbatch
+sbatch sbatch/sbatch_run_local_cp/run_local_cp_epanechnikov_sapflux.sbatch
 ```
 
-These arrays use the same task mapping, resources, templates, training, and
-rolling calibration as their corresponding softmax arrays. The dispatcher sets
-`model.kernel: epanechnikov`, `model.bandwidth`, and
+These arrays use the same task mapping and resources as their corresponding
+softmax arrays. Each task loads
+`lcp_{encoder}_epanechnikov_{predictor}_{dataset}_config.yaml`, including its
+training settings, rolling calibration, and selected `model.bandwidth`.
+The dispatcher sets `model.kernel: epanechnikov` and
 `model.similarity_fn: cos_similarity`. Temperature is unused for this kernel.
+`LOCAL_CP_BANDWIDTH` is optional; when set, it overrides the YAML bandwidth
+for every task in that submission.
 The existing `model.sampling_num` and sampled residual quantiles are retained.
 An empty kernel neighborhood returns zero residual quantiles, matching the
 manuscript's point-mass-at-zero fallback. This kernel satisfies the kernel
 conditions in A.22; it does not establish the local-mass or other asymptotic
 assumptions.
 
-Preview the configuration using the explicit CLI options:
+Preview a task using its saved bandwidth:
 
 ```bash
 PYTHONPATH="$PWD:$PWD/sbatch:${PYTHONPATH:-}" \
   python -m sbatch_run_local_cp.run_local_cp_job air \
-  --task-id 1 --kernel epanechnikov --bandwidth 1.0 --dry-run
+  --task-id 1 --kernel epanechnikov --dry-run
 ```
 
-`--kernel` overrides `model.kernel` in the template; absent both, the default is
-`softmax`. Epanechnikov requires a finite positive `--bandwidth` or
-`model.bandwidth` value. The default Epanechnikov output root is
+`--kernel epanechnikov` selects the Epanechnikov templates; otherwise the
+dispatcher uses `configs/lcp_configs/`. `--kernel` also overrides `model.kernel`
+in the selected template; absent both, the default is `softmax`.
+`--bandwidth` can override the template's `model.bandwidth`; the resolved value
+must be finite and positive. The default Epanechnikov output root is
 `results/local_cp_epanechnikov/bandwidth_<value>/seed_<seed>/`, with the
 template's dataset/predictor/encoder/run suffix preserved. `LOCAL_CP_OUTPUT_ROOT`
 or `--output-root` can override this root. Each job trains its own encoder;

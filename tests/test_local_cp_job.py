@@ -39,10 +39,11 @@ def fixture_config(dataset="air", encoder="rnn"):
 
 
 class LocalCPKernelRoutingTests(unittest.TestCase):
-    def preview(self, args, config):
+    def preview(self, args, config=None, expected_template=None):
         stream = io.StringIO()
         with (
-            patch.object(OmegaConf, "load", return_value=config),
+            patch.object(OmegaConf, "load", return_value=config)
+            if config is not None else contextlib.nullcontext(),
             patch.object(Path, "mkdir") as mkdir,
             patch.object(OmegaConf, "save") as save,
             contextlib.redirect_stdout(stream),
@@ -51,6 +52,8 @@ class LocalCPKernelRoutingTests(unittest.TestCase):
         mkdir.assert_not_called()
         save.assert_not_called()
         lines = stream.getvalue().splitlines()
+        if expected_template is not None:
+            self.assertEqual(lines[1], f"Configuration template: {expected_template}")
         return lines[0], OmegaConf.create("\n".join(lines[2:]))
 
     def test_default_softmax_preserves_weighting_and_output(self):
@@ -59,6 +62,8 @@ class LocalCPKernelRoutingTests(unittest.TestCase):
             with self.subTest(encoder=encoder):
                 header, config = self.preview(
                     ["air", "--task-id", str(task_id)], fixture_config(encoder=encoder),
+                    expected_template=REPO_ROOT / "configs" / "lcp_configs"
+                    / f"lcp_{encoder}_{predictor}_air_config.yaml",
                 )
                 self.assertIn("kernel=softmax", header)
                 self.assertEqual(config.model.kernel, "softmax")
@@ -77,7 +82,10 @@ class LocalCPKernelRoutingTests(unittest.TestCase):
                     header, config = self.preview([
                         dataset, "--task-id", str(task_id), "--kernel", "epanechnikov",
                         "--bandwidth", "0.7500001", "--seed", "47",
-                    ], fixture_config(dataset, encoder))
+                    ], fixture_config(dataset, encoder),
+                        expected_template=REPO_ROOT / "configs" / "lcp_epanechnikov_kernel_configs"
+                        / f"lcp_{encoder}_epanechnikov_{predictor}_{dataset}_config.yaml",
+                    )
                     self.assertIn("kernel=epanechnikov", header)
                     self.assertEqual(config.model.kernel, "epanechnikov")
                     self.assertEqual(config.model.bandwidth, 0.7500001)
@@ -95,6 +103,32 @@ class LocalCPKernelRoutingTests(unittest.TestCase):
                         Path(config.saving_dir), REPO_ROOT / "results" / "local_cp_epanechnikov"
                         / "bandwidth_0.7500001" / "seed_47" / dataset / predictor
                         / encoder / "fixture-run",
+                    )
+
+    def test_epanechnikov_uses_selected_bandwidths_from_real_templates(self):
+        # Each row follows TASKS: RNN LR/LSTM/Chronos, then Transformer LR/LSTM/Chronos.
+        bandwidths = {
+            "air": (0.75, 1.0, 0.75, 0.75, 1.0, 0.75),
+            "solar": (1.0, 0.75, 0.75, 0.75, 0.75, 0.75),
+            "sapflux": (0.75, 0.75, 0.5, 0.5, 0.5, 0.25),
+        }
+        for dataset, expected_bandwidths in bandwidths.items():
+            for task_id, (encoder, predictor) in enumerate(local_job.TASKS):
+                with self.subTest(dataset=dataset, task_id=task_id):
+                    _, config = self.preview(
+                        [dataset, "--task-id", str(task_id), "--kernel", "epanechnikov"],
+                        expected_template=REPO_ROOT / "configs" / "lcp_epanechnikov_kernel_configs"
+                        / f"lcp_{encoder}_epanechnikov_{predictor}_{dataset}_config.yaml",
+                    )
+                    bandwidth = expected_bandwidths[task_id]
+                    self.assertEqual(config.model.kernel, "epanechnikov")
+                    self.assertEqual(config.model.bandwidth, bandwidth)
+                    self.assertEqual(config.model.similarity_fn, "cos_similarity")
+                    self.assertEqual(config.base_predictor, predictor)
+                    self.assertEqual(
+                        Path(config.saving_dir).parent,
+                        REPO_ROOT / "results" / "local_cp_epanechnikov"
+                        / f"bandwidth_{bandwidth}" / "seed_2026" / dataset / predictor / encoder,
                     )
 
     def test_template_kernel_bandwidth_and_explicit_overrides(self):
@@ -181,7 +215,7 @@ class LocalCPKernelRoutingTests(unittest.TestCase):
                         self.assertEqual(arguments[arguments.index("--output-root") + 1], output_root)
 
     @unittest.skipUnless(BASH and Path(BASH).is_file(), "Bash is required")
-    def test_epanechnikov_arrays_require_explicit_bandwidth(self):
+    def test_epanechnikov_arrays_default_to_template_bandwidth(self):
         for dataset in local_job.DATASET_ARTIFACTS:
             for bandwidth in (None, ""):
                 with self.subTest(dataset=dataset, bandwidth=bandwidth):
@@ -189,9 +223,16 @@ class LocalCPKernelRoutingTests(unittest.TestCase):
                     if bandwidth is not None:
                         env["LOCAL_CP_BANDWIDTH"] = bandwidth
                     result = self.run_array(dataset, env)
-                    self.assertNotEqual(result.returncode, 0)
-                    self.assertIn("Set LOCAL_CP_BANDWIDTH", result.stderr)
-                    self.assertEqual(result.stdout, "")
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    arguments = result.stdout.rstrip("\0").split("\0")
+                    self.assertEqual(arguments[:4], [
+                        "-u", "-m", "sbatch_run_local_cp.run_local_cp_job", dataset,
+                    ])
+                    self.assertNotIn("--bandwidth", arguments)
+                    for flag, value in (("--task-id", "3"), ("--kernel", "epanechnikov"),
+                                        ("--seed", "2026")):
+                        self.assertEqual(arguments.count(flag), 1)
+                        self.assertEqual(arguments[arguments.index(flag) + 1], value)
 
     @staticmethod
     def array_environment():

@@ -1,0 +1,47 @@
+device: 0
+base_predictor: chronos # choices: lr, lstm, chronos
+
+
+data:
+  data_path: "./data/sapflux-solo3-large/${base_predictor}/${base_predictor}_sapflux-solo3-large_data.pkl"
+  train_ratio: 0.4
+  valid_ratio: 0.1
+  calibration_ratio: 0.16
+  test_ratio: 0.34
+  normalize: True
+  strided_features: "xry"
+
+
+model:
+  dim_model: 32
+  num_heads: 4
+  num_layers: 4
+  dropout: 0.
+  use_current_feature: False
+  training_quantiles: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+  target_quantiles:
+    - [0.05, 0.95]
+  prediction_step: 1
+  window_size: 200
+  calibration_size: 500
+  rolling_calibration: True
+  # Options: dot_product, cos_similarity, euclidean (negative squared distance / temperature).
+  similarity_fn: "cos_similarity"
+  temperature: 10.0
+  kernel: "epanechnikov"
+  bandwidth: 0.25
+  sampling_num: 1000
+
+
+training:
+  batch_size: 32
+  learning_rate: 0.0001
+  epochs: 50
+  early_stop: 3
+
+plotting:
+  plotting: True
+  plotting_seq_len: 200
+
+
+saving_dir: "./results/local_cp/sapflux/${base_predictor}/transformer/${now:%Y-%m-%d_%H-%M-%S_%f}/"

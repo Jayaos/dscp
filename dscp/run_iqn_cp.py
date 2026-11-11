@@ -25,6 +25,7 @@ from dscp.loss import (
 )
 from utils.utils import load_data, save_data, read_setup, generate_strided_feature, get_interval_quantile_indices
 from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, construct_interval_endpoints, summarize_evaluation_results
+from utils.reporting import attach_test_target_indices
 from utils.plotting import plot_cp_prediction_intervals
 from torch.utils.data import DataLoader
 
@@ -118,6 +119,11 @@ def run_transformer_iqn_cp(config_path):
         config.training, config.model.target_quantiles
     )
     config.training.tau_mode = tau_mode
+    # Fixed-level training does not require a random-quantile sample count.
+    training_num_taus = (
+        len(training_quantiles) if training_quantiles is not None
+        else config.model.num_taus
+    )
     warn_iqn_training_interval_mismatch(tau_mode, config.model)
     validation_mode, validation_quantiles = resolve_iqn_validation_quantiles(
         config.training, config.model.target_quantiles
@@ -228,7 +234,7 @@ def run_transformer_iqn_cp(config_path):
                         iqn_transformer,
                         strided_feature,
                         target_residual,
-                        config.model.num_taus,
+                        training_num_taus,
                         target_x,
                         **training_kwargs,
                     )
@@ -237,7 +243,7 @@ def run_transformer_iqn_cp(config_path):
                         iqn_transformer,
                         strided_feature,
                         target_residual,
-                        config.model.num_taus,
+                        training_num_taus,
                         **training_kwargs,
                     )
                 loss.backward()
@@ -449,6 +455,10 @@ def run_transformer_iqn_cp(config_path):
 
         if crossing_tracker is not None:
             log[key]["metadata"] = crossing_tracker.finalize(evaluation_results)
+        else:
+            attach_test_target_indices(
+                evaluation_results, len(cpd.data[key]["heldout_y"]), len(test_dataset),
+            )
 
         torch.save(best_model, os.path.join(config.saving_dir, key + '_model.pt'))
         save_data(os.path.join(config.saving_dir, "log.pkl"), log)
@@ -503,6 +513,11 @@ def run_rnn_iqn_cp(config_path):
         config.training, config.model.target_quantiles
     )
     config.training.tau_mode = tau_mode
+    # Fixed-level training does not require a random-quantile sample count.
+    training_num_taus = (
+        len(training_quantiles) if training_quantiles is not None
+        else config.model.num_taus
+    )
     warn_iqn_training_interval_mismatch(tau_mode, config.model)
     validation_mode, validation_quantiles = resolve_iqn_validation_quantiles(
         config.training, config.model.target_quantiles
@@ -612,7 +627,7 @@ def run_rnn_iqn_cp(config_path):
                         iqn_rnn,
                         strided_feature,
                         target_residual,
-                        config.model.num_taus,
+                        training_num_taus,
                         target_x,
                         **training_kwargs,
                     )
@@ -621,7 +636,7 @@ def run_rnn_iqn_cp(config_path):
                         iqn_rnn,
                         strided_feature,
                         target_residual,
-                        config.model.num_taus,
+                        training_num_taus,
                         **training_kwargs,
                     )
                 loss.backward()
@@ -833,6 +848,10 @@ def run_rnn_iqn_cp(config_path):
 
         if crossing_tracker is not None:
             log[key]["metadata"] = crossing_tracker.finalize(evaluation_results)
+        else:
+            attach_test_target_indices(
+                evaluation_results, len(cpd.data[key]["heldout_y"]), len(test_dataset),
+            )
 
         torch.save(best_model, os.path.join(config.saving_dir, key + '_model.pt'))
         save_data(os.path.join(config.saving_dir, "log.pkl"), log)

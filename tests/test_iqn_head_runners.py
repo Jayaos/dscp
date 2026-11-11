@@ -195,6 +195,20 @@ class IQNPredictionHeadRunnerTests(unittest.TestCase):
                                 if selected == "cosine_embedding" and expected_mode == "direct"
                                 else 6
                             )
+                            expected_indices = list(range(18, 24))
+                            if selected == "cosine_embedding" and expected_mode == "direct":
+                                expected_indices = [
+                                    index for index, valid in zip(
+                                        expected_indices,
+                                        sequence_log["metadata"]["valid_prediction_mask"],
+                                    ) if valid
+                                ]
+                            self.assertEqual(result["target_indices"], expected_indices)
+                            self.assertEqual(len(result["coverage"]), len(expected_indices))
+                            np.testing.assert_allclose(
+                                result["target_y"],
+                                self._artifact()["series"]["heldout_y"][expected_indices],
+                            )
                             self.assertEqual(lower.shape, (expected_points,))
                             self.assertEqual(upper.shape, (expected_points,))
                             self.assertTrue(np.isfinite(lower).all())

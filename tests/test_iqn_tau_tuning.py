@@ -187,6 +187,10 @@ class IQNTauTuningTests(unittest.TestCase):
                                     self.assertEqual(len(validation_calls), 1)
                                     self.assertIsNone(validation_calls[0][1])
                                     self.assertEqual(validation_calls[0][2] is not None, current)
+                                self.assertEqual(
+                                    [count for training, count in samples if not training],
+                                    [] if validation_mode == "target_quantiles" else [7],
+                                )
                                 self.assertTrue(np.isfinite(result["selection_score"]))
                                 self.assertTrue(np.isfinite(result["train_loss"]).all())
                                 self.assertTrue(np.isfinite(result["valid_loss"]).all())
@@ -195,6 +199,28 @@ class IQNTauTuningTests(unittest.TestCase):
                                     not torch.equal(initial[name], parameter.detach())
                                     for name, parameter in model.named_parameters()
                                 ))
+
+    def test_fixed_training_and_validation_do_not_require_num_taus(self):
+        cases = (
+            ("rnn", "cosine_embedding", False),
+            ("rnn", "partially_monotonic", True),
+            ("transformer", "cosine_embedding", True),
+            ("transformer", "partially_monotonic", False),
+        )
+        for architecture, head, current in cases:
+            with self.subTest(architecture=architecture, head=head, current=current):
+                results = []
+                for include_num_taus in (True, False):
+                    config = self._config(architecture, head, current)
+                    config.training.tau_mode = "target_quantiles"
+                    if not include_num_taus:
+                        del config.model.num_taus
+                    with torch.random.fork_rng(devices=[]):
+                        torch.manual_seed(31)
+                        results.append(self.tuning._run_single_trial(config, self._sequence(), None))
+                    self.assertEqual("num_taus" in config.model, include_num_taus)
+
+                self.assertEqual(results[0], results[1])
 
     def test_grid_records_materialize_training_mode_and_levels(self):
         for mode in (None, "target_quantiles"):

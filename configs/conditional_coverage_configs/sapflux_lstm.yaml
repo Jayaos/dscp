@@ -1,0 +1,79 @@
+# Shared observed-target groups for sapflux, using the lstm forecast timeline.
+# Comparisons identify original partitions; their interval coverage levels are unused.
+path_base: ../..
+dataset: sapflux
+base_predictor: lstm
+data_path: data/sapflux-solo3-large/lstm/lstm_sapflux-solo3-large_data.pkl
+output_dir: results/conditional_coverage/sapflux/lstm/groups
+seed: 2026
+device: cpu
+num_threads: 1
+cache_embeddings: true
+
+model:
+  rnn_type: lstm
+  dim_model: 64
+  num_layers: 1
+  window_size: 100
+  dropout: 0.0
+
+training:
+  batch_size: 64
+  learning_rate: 0.001
+  epochs: 50
+  early_stop: 5
+  validation_ratio: 0.2
+
+clustering:
+  k: 5
+  n_init: 10
+
+comparisons:
+  - name: qr_rnn
+    method: qr_cp
+    config_path: configs/qr_cp_configs/qr_rnn_lstm_sapflux_config.yaml
+  - name: qr_transformer
+    method: qr_cp
+    config_path: configs/qr_cp_configs/qr_transformer_lstm_sapflux_config.yaml
+  - name: iqn_rnn
+    method: iqn_cp
+    config_path: configs/iqn_cp_configs/iqn_rnn_lstm_sapflux_config.yaml
+  - name: iqn_transformer
+    method: iqn_cp
+    config_path: configs/iqn_cp_configs/iqn_transformer_lstm_sapflux_config.yaml
+  - name: local_cp_rnn
+    method: local_cp
+    config_path: configs/lcp_configs/lcp_rnn_lstm_sapflux_config.yaml
+  - name: local_cp_transformer
+    method: local_cp
+    config_path: configs/lcp_configs/lcp_transformer_lstm_sapflux_config.yaml
+  - name: hopcpt
+    method: hopcpt
+    config_path: configs/hopcpt_configs/hopcpt_lstm_sapflux_config.yaml
+  - name: spci
+    method: spci
+    config_path: configs/spci_configs/spci_lstm_sapflux_config.yaml
+  - name: kowcpi
+    method: kowcpi
+    config_path: configs/kowcpi_configs/kowcpi_lstm_sapflux_config.yaml
+  - name: nexcp
+    method: nexcp
+    config_path: configs/nexcp_configs/nexcp_lstm_sapflux_config.yaml
+  - name: split_cp
+    method: split_cp
+    config_path: configs/split_cp_configs/split_cp_lstm_sapflux_config.yaml
+  - name: rescp
+    method: rescp
+    config_path: configs/rescp_configs/rescp_lstm_sapflux_config.yaml
+  - name: aci
+    method: aci
+    config_path: configs/aci_configs/aci_lstm_sapflux_config.yaml
+  - name: cop
+    method: cop
+    config_path: configs/cop_configs/cop_lstm_sapflux_config.yaml
+  - name: lqt
+    method: lqt
+    config_path: configs/lqt_configs/lqt_lstm_sapflux_config.yaml
+  - name: distmatch
+    method: distmatch
+    config_path: configs/distmatch_configs/distmatch_lstm_sapflux_config.yaml

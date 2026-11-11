@@ -12,7 +12,7 @@ from dscp.loss import compute_loss_quantile_regression_transformer, compute_loss
 from dscp.qr_reporting import QuantileCrossingTracker, summarize_qr_results, write_excluded_points
 from dscp.data import ConformalPredictionData
 from utils.utils import load_data, save_data, read_setup, generate_strided_feature, get_interval_quantile_indices
-from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, construct_interval_endpoints, summarize_evaluation_results
+from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, construct_interval_endpoints, summarize_evaluation_results, attach_test_target_indices
 from utils.plotting import plot_cp_prediction_intervals
 from torch.utils.data import DataLoader
 
@@ -304,6 +304,10 @@ def run_transformer_quantile_regression_cp(config_path):
                     "evaluation_results" : evaluation_results}
         if crossing_tracker is not None:
             log[key]["metadata"] = crossing_tracker.finalize(evaluation_results)
+        else:
+            attach_test_target_indices(
+                evaluation_results, len(cpd.data[key]["heldout_y"]), len(test_dataset),
+            )
 
         torch.save(best_model, os.path.join(config.saving_dir, key + '_model.pt'))
         save_data(os.path.join(config.saving_dir, "log.pkl"), log)
@@ -630,6 +634,10 @@ def run_rnn_quantile_regression_cp(config_path):
                     "evaluation_results" : evaluation_results}
         if crossing_tracker is not None:
             log[key]["metadata"] = crossing_tracker.finalize(evaluation_results)
+        else:
+            attach_test_target_indices(
+                evaluation_results, len(cpd.data[key]["heldout_y"]), len(test_dataset),
+            )
 
         torch.save(best_model, os.path.join(config.saving_dir, key + '_model.pt'))
         save_data(os.path.join(config.saving_dir, "log.pkl"), log)

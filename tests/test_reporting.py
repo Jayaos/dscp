@@ -3,7 +3,9 @@ import unittest
 import numpy as np
 import torch
 
-from utils.reporting import compute_winkler_score, construct_interval_endpoints
+from utils.reporting import (
+    attach_test_target_indices, compute_winkler_score, construct_interval_endpoints,
+)
 
 
 class WinklerScoreTests(unittest.TestCase):
@@ -145,6 +147,17 @@ class IntervalEndpointTests(unittest.TestCase):
 
         np.testing.assert_allclose(upper, [114.0, 216.0])
         np.testing.assert_allclose(lower, [108.0, 206.0])
+
+
+class TestTargetIndexTests(unittest.TestCase):
+    def test_rejects_truncated_or_misaligned_test_results(self):
+        for field in ("coverage", "target_y"):
+            with self.subTest(field=field):
+                result = {"coverage": [True, False, True], "target_y": [10, 11, 12]}
+                result[field] = result[field][:-1]
+                with self.assertRaisesRegex(ValueError, f"{field} has 2 entries, expected 3"):
+                    attach_test_target_indices({(0.05, 0.95): result}, 13, 3)
+                self.assertNotIn("target_indices", result)
 
 
 if __name__ == "__main__":

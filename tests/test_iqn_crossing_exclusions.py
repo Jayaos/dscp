@@ -327,6 +327,9 @@ def test_exclusions_only_apply_to_effective_direct_cosine_head(
     entry = log["series"]
     for result in entry["evaluation_results"].values():
         assert len(result["target_y"]) == len(result["coverage"]) == (3 if filtered else 6)
+        expected_indices = [18, 20, 22] if filtered else list(range(18, 24))
+        assert result["target_indices"] == expected_indices
+        np.testing.assert_allclose(result["target_y"], artifact()["heldout_y"][expected_indices])
     assert (tmp_path / "excluded_points.csv").exists() == filtered
     if filtered:
         assert entry["metadata"]["evaluated_points"] == 3

@@ -112,12 +112,24 @@ class QuantileHeadRunnerTests(unittest.TestCase):
                             self.assertEqual(len(sequence_log[key]), 1)
                             self.assertTrue(np.isfinite(sequence_log[key]).all())
                         retained = 6
+                        expected_indices = list(range(18, 24))
                         if head_type == "independent":
                             metadata = sequence_log["metadata"]
                             self.assertEqual(len(metadata["valid_prediction_mask"]), 6)
                             retained = sum(metadata["valid_prediction_mask"])
                             self.assertEqual(metadata["evaluated_points"], retained)
+                            expected_indices = [
+                                index for index, valid in zip(
+                                    expected_indices, metadata["valid_prediction_mask"]
+                                ) if valid
+                            ]
                         for result in sequence_log["evaluation_results"].values():
+                            self.assertEqual(result["target_indices"], expected_indices)
+                            self.assertEqual(len(result["coverage"]), len(expected_indices))
+                            np.testing.assert_allclose(
+                                result["target_y"],
+                                self._artifact()["series"]["heldout_y"][expected_indices],
+                            )
                             for key in (
                                 "lower_interval",
                                 "upper_interval",

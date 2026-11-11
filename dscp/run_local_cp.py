@@ -16,7 +16,7 @@ from utils.utils import (
     get_interval_quantile_indices, validate_training_quantiles,
     validate_rolling_calibration,
 )
-from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, construct_interval_endpoints, summarize_evaluation_results
+from utils.reporting import compute_coverage, compute_interval_width, compute_winkler_score, construct_interval_endpoints, summarize_evaluation_results, attach_test_target_indices
 from utils.plotting import plot_cp_prediction_intervals
 from torch.utils.data import DataLoader
 
@@ -345,6 +345,9 @@ def run_transformer_local_cp(config_path):
             evaluation_results[tuple_confidence_pair]["avg_interval_width"] = avg_interval_width
             evaluation_results[tuple_confidence_pair]["avg_winkler_score"] = avg_winkler_score
 
+        attach_test_target_indices(
+            evaluation_results, len(cpd.data[key]["heldout_y"]), len(test_dataset),
+        )
         log[key] = {"train_loss" : train_loss,
                     "valid_loss" : valid_loss,
                     "training_quantiles" : training_quantiles,
@@ -662,6 +665,9 @@ def run_rnn_local_cp(config_path):
             evaluation_results[tuple_confidence_pair]["avg_interval_width"] = avg_interval_width
             evaluation_results[tuple_confidence_pair]["avg_winkler_score"] = avg_winkler_score
 
+        attach_test_target_indices(
+            evaluation_results, len(cpd.data[key]["heldout_y"]), len(test_dataset),
+        )
         log[key] = {"train_loss" : train_loss,
                     "valid_loss" : valid_loss,
                     "training_quantiles" : training_quantiles,

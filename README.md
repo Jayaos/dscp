@@ -1,5 +1,32 @@
 # DSCP
 
+## Shared groups for conditional coverage
+
+The independent evaluation encoder predicts the next observed target with a
+single median head. It fits on the intersection of methods' complete pre-test
+prefixes and builds shared K-means groups for the intersection of their original
+test timelines. Group preparation does not run conformal methods or calculate
+coverage metrics.
+
+```bash
+python -m conditional_coverage.prepare_groups --config configs/conditional_coverage_configs/air_lstm.yaml --dry-run
+```
+
+Remove `--dry-run` to train and save the groups. See the
+[conditional coverage guide](conditional_coverage/README.md) for dataset presets,
+completed-run inputs, checkpoints, and the saved artifact format.
+
+Evaluate saved QR-CP, IQN-CP, and Local-CP results against those groups without
+retraining. First replace the run-directory placeholders in the example YAML:
+
+```bash
+python -m conditional_coverage.evaluate --config configs/conditional_coverage_configs/evaluate_example.yaml --dry-run
+```
+
+Remove `--dry-run` to save group coverage, sequence metrics, and dataset
+summaries. The example enables `allow_chronological_fallback` for older logs
+without indices; inferred positions are checked against the original targets.
+
 ## COP baseline
 
 COP implements Hu et al.'s Conformal Optimistic Prediction using the authors'

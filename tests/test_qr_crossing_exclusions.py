@@ -278,6 +278,10 @@ def test_noncrossing_predictions_keep_every_point(monkeypatch, tmp_path, archite
     for pair, result in entry["evaluation_results"].items():
         assert len(result["target_y"]) == 6
         assert len(result["coverage"]) == 6
+        assert result["target_indices"] == list(range(18, 24))
+        np.testing.assert_allclose(
+            result["target_y"], artifact()["heldout_y"][result["target_indices"]],
+        )
         assert result["avg_interval_width"] == pytest.approx(2 if pair == PAIRS[0] else 1)
         assert summary[pair]["avg_interval_width_mean"] == result["avg_interval_width"]
     if head_type == "independent":
@@ -301,3 +305,4 @@ def test_default_reporting_does_not_enable_independent_head_exclusions(
     )
     for result in log["series"]["evaluation_results"].values():
         assert len(result["target_y"]) == len(result["coverage"]) == 6
+        assert result["target_indices"] == list(range(18, 24))
