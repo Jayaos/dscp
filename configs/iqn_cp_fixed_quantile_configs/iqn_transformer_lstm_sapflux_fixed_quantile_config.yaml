@@ -14,7 +14,7 @@ model:
   num_layers: 2
   dropout: 0.
   use_current_feature: False
-  prediction_head: "cosine_embedding"
+  prediction_head: "partially_monotonic"
   interval_mode: "direct"
   iqn_hidden_dim: 64
   iqn_num_layers: 1 # cosine prediction MLP hidden-layer count; embedding stays one layer

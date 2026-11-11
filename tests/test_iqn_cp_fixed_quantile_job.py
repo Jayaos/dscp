@@ -109,9 +109,10 @@ class IQNCPFixedQuantileJobTests(unittest.TestCase):
                             / ("iqn_cp_fixed_quantile" if fixed else "iqn_cp")
                         ).resolve()
                         relative_output = Path(config.saving_dir).relative_to(expected_root)
+                        expected_head = "partially_monotonic" if fixed else "cosine_embedding"
                         self.assertEqual(
                             relative_output.parts[:4],
-                            ("air", "lr", "rnn", "cosine_embedding"),
+                            ("air", "lr", "rnn", expected_head),
                         )
                         self.assertEqual(
                             config.training.tau_mode,
@@ -129,7 +130,7 @@ class IQNCPFixedQuantileJobTests(unittest.TestCase):
 
         cases = (
             ("air", 0, None, False),
-            ("solar", 4, "partially_monotonic", True),
+            ("solar", 4, "cosine_embedding", True),
             ("sapflux", 5, None, True),
         )
         for dataset, task_id, head_override, explicit_root in cases:
