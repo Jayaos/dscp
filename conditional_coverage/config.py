@@ -60,6 +60,13 @@ def validate_config(config, base_dir=None):
     config.setdefault("device", "cpu")
     config.setdefault("num_threads", 1)
     positive_integer(config["num_threads"], "num_threads")
+    config.setdefault("cpu_workers", 1)
+    positive_integer(config["cpu_workers"], "cpu_workers")
+    if config["cpu_workers"] > 1:
+        if config["device"] != "cpu":
+            raise ValueError("cpu_workers > 1 requires device: cpu.")
+        if config["num_threads"] != 1:
+            raise ValueError("cpu_workers > 1 requires num_threads: 1 (one CPU per sequence).")
     config.setdefault("cache_embeddings", True)
     if not isinstance(config["cache_embeddings"], bool):
         raise ValueError("cache_embeddings must be a boolean.")

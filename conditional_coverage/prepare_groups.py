@@ -2,8 +2,12 @@
 
 import argparse
 from collections.abc import Mapping
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from contextlib import contextmanager
 import hashlib
 import json
+import multiprocessing
+import os
 from pathlib import Path
 import pickle
 import platform
@@ -116,6 +120,152 @@ def inspect_inputs(config):
     }
 
 
+def _execution_settings(config, sequence_count):
+    """Cap sequence concurrency by the selected data and the Slurm allocation."""
+    requested = config.get("cpu_workers", 1)
+    allocated = os.environ.get("SLURM_CPUS_PER_TASK")
+    if allocated is not None:
+        try:
+            allocated = int(allocated)
+        except ValueError as exc:
+            raise ValueError("SLURM_CPUS_PER_TASK must be a positive integer.") from exc
+        if allocated < 1:
+            raise ValueError("SLURM_CPUS_PER_TASK must be a positive integer.")
+    workers = min(requested, sequence_count)
+    if allocated is not None:
+        workers = min(workers, allocated)
+    return {
+        "requested_cpu_workers": requested, "cpu_workers": workers,
+        "threads_per_worker": config["num_threads"],
+        "slurm_cpus_per_task": allocated,
+        "backend": "spawn_processes" if workers > 1 else "serial",
+        "device": str(config["device"]),
+    }
+
+
+_THREAD_ENVIRONMENT = (
+    "OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "BLIS_NUM_THREADS",
+)
+
+
+@contextmanager
+def _single_thread_worker_environment():
+    # Spawned Python imports may initialize BLAS before the pool initializer.
+    original = {name: os.environ.get(name) for name in _THREAD_ENVIRONMENT}
+    try:
+        for name in _THREAD_ENVIRONMENT:
+            os.environ[name] = "1"
+        yield
+    finally:
+        for name, value in original.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def _initialize_cpu_worker():
+    """Limit each fresh spawned process to one compute thread per library."""
+    for name in _THREAD_ENVIRONMENT:
+        os.environ[name] = "1"
+    import sklearn  # Load its OpenMP library before applying threadpoolctl.
+    import torch
+    from threadpoolctl import threadpool_limits
+
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
+    global _CPU_THREAD_LIMITS
+    _CPU_THREAD_LIMITS = threadpool_limits(limits=1)
+
+
+def _prepare_sequence(task):
+    """Fit one sequence independently; tasks contain no other sequence's data."""
+    from .encoder import extract_embeddings, train_encoder
+    from .grouping import fit_groups
+
+    key, x, y, shared, config = task
+    prepared = prepare_contexts(
+        x, y, shared["calibration_indices"], shared["test_indices"],
+        config["model"]["window_size"], config["training"]["validation_ratio"],
+    )
+    encoder_seed = sequence_seed(config["seed"], key, "encoder")
+    clustering_seed = sequence_seed(config["seed"], key, "clustering")
+    training_settings = {k: v for k, v in config["training"].items() if k != "validation_ratio"}
+    model, training = train_encoder(
+        prepared, config["model"], training_settings, encoder_seed, device=config["device"],
+    )
+    calibration_embeddings = extract_embeddings(
+        model, prepared, prepared["calibration_target_indices"], device=config["device"],
+    )
+    test_embeddings = extract_embeddings(
+        model, prepared, prepared["test_indices"], device=config["device"],
+    )
+    groups = fit_groups(
+        calibration_embeddings, test_embeddings, k=config["clustering"]["k"],
+        seed=clustering_seed, n_init=config["clustering"]["n_init"],
+    )
+    record = {
+        **shared, "calibration_target_indices": prepared["calibration_target_indices"],
+        "fit_indices": prepared["fit_indices"], "validation_indices": prepared["validation_indices"],
+        "scaler": prepared["scaler"], "training": training, "groups": groups,
+    }
+    if config["cache_embeddings"]:
+        record.update(calibration_embeddings=calibration_embeddings, test_embeddings=test_embeddings)
+    checkpoint = {
+        "model_state_dict": {k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
+        "model_config": config["model"], "dim_feature": prepared["features"].shape[1],
+        "training_quantiles": [0.5], "target": "observed_y",
+        "scaler": {name: value.tolist() if isinstance(value, np.ndarray) else value
+                   for name, value in prepared["scaler"].items()},
+        "seed": encoder_seed, "best_epoch": training["best_epoch"],
+    }
+    return record, checkpoint
+
+
+def _cpu_group_task(task):
+    key = task[0]
+    try:
+        record, checkpoint = _prepare_sequence(task)
+    except Exception as exc:
+        raise ValueError(f"Sequence {key!r} failed while preparing shared groups: {exc}") from exc
+    # Ordinary pickle embeds tensor storage in bytes instead of passing Torch
+    # shared-memory handles whose lifetime depends on the worker process.
+    return record, pickle.dumps(checkpoint, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def _parallel_sequences(tasks, workers, completed):
+    """Keep only one submitted sequence per worker and collect in the parent."""
+    tasks = iter(tasks)
+    with _single_thread_worker_environment(), ProcessPoolExecutor(
+        max_workers=workers, mp_context=multiprocessing.get_context("spawn"),
+        initializer=_initialize_cpu_worker,
+    ) as executor:
+        pending = {}
+
+        def submit_next():
+            try:
+                task = next(tasks)
+            except StopIteration:
+                return
+            pending[executor.submit(_cpu_group_task, task)] = task[0]
+
+        for _ in range(workers):
+            submit_next()
+        try:
+            while pending:
+                done, _ = wait(pending, return_when=FIRST_COMPLETED)
+                for future in done:
+                    key = pending.pop(future)
+                    record, checkpoint_bytes = future.result()
+                    completed(key, record, pickle.loads(checkpoint_bytes))
+                    submit_next()
+        except BaseException:
+            for future in pending:
+                future.cancel()
+            raise
+
+
 def build_shared_groups(config, *, dry_run=False, progress=print):
     """Prepare one immutable grouping artifact for the selected comparisons.
 
@@ -128,71 +278,55 @@ def build_shared_groups(config, *, dry_run=False, progress=print):
     if not dry_run and output.exists():
         raise FileExistsError(f"Grouping artifact already exists: {output}. Choose a new output_dir.")
     data, comparisons, keys, audit = inspect_inputs(config)
+    execution = _execution_settings(config, len(keys))
     if dry_run:
-        return {"dry_run": True, "output_dir": str(output), "config": config, **audit}
+        return {"dry_run": True, "output_dir": str(output), "config": config,
+                "execution": execution, **audit}
 
     import sklearn
     import torch
     from threadpoolctl import threadpool_limits
     from .artifacts import save_group_artifact
-    from .encoder import extract_embeddings, resolve_device, train_encoder
-    from .grouping import fit_groups
+    from .encoder import resolve_device
 
     device = resolve_device(config["device"])
+    execution["device"] = str(device)
     threads_before = torch.get_num_threads()
     sequences, checkpoints = {}, {}
     thread_limits = threadpool_limits(limits=config["num_threads"])
-    try:
-        torch.set_num_threads(config["num_threads"])
-        for ordinal, key in enumerate(keys, 1):
-            progress(f"[{ordinal}/{len(keys)}] Preparing shared groups for {key!r}")
+    settings = {name: config[name] for name in
+                ("seed", "model", "training", "clustering", "cache_embeddings")}
+    settings["device"] = str(device)
+
+    def tasks():
+        for key in keys:
             x, y = observed_sequence(data[key])
             shared = shared_indices(len(y), comparisons, key)
-            prepared = prepare_contexts(
-                x, y, shared["calibration_indices"], shared["test_indices"],
-                config["model"]["window_size"], config["training"]["validation_ratio"],
-            )
-            encoder_seed = sequence_seed(config["seed"], key, "encoder")
-            clustering_seed = sequence_seed(config["seed"], key, "clustering")
-            training_settings = {k: v for k, v in config["training"].items()
-                                 if k != "validation_ratio"}
-            model, training = train_encoder(
-                prepared, config["model"], training_settings, encoder_seed, device=device,
-            )
-            calibration_embeddings = extract_embeddings(
-                model, prepared, prepared["calibration_target_indices"], device=device,
-            )
-            test_embeddings = extract_embeddings(
-                model, prepared, prepared["test_indices"], device=device,
-            )
-            groups = fit_groups(
-                calibration_embeddings, test_embeddings,
-                k=config["clustering"]["k"], seed=clustering_seed,
-                n_init=config["clustering"]["n_init"],
-            )
-            sequences[key] = {
-                **shared, "calibration_target_indices": prepared["calibration_target_indices"],
-                "fit_indices": prepared["fit_indices"],
-                "validation_indices": prepared["validation_indices"],
-                "scaler": prepared["scaler"], "training": training, "groups": groups,
-            }
-            if config["cache_embeddings"]:
-                sequences[key].update(calibration_embeddings=calibration_embeddings,
-                                      test_embeddings=test_embeddings)
-            checkpoints[key] = {
-                "model_state_dict": {k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
-                "model_config": config["model"], "dim_feature": prepared["features"].shape[1],
-                "training_quantiles": [0.5], "target": "observed_y",
-                "scaler": {name: value.tolist() if isinstance(value, np.ndarray) else value
-                           for name, value in prepared["scaler"].items()},
-                "seed": encoder_seed,
-                "best_epoch": training["best_epoch"],
-            }
-            counts = {str(k): group["test_counts"].tolist() for k, group in groups.items()}
-            progress(f"  Selected epoch {training['best_epoch']}; test group sizes: {counts}")
+            yield key, x, y, shared, settings
+
+    def completed(key, record, checkpoint):
+        sequences[key], checkpoints[key] = record, checkpoint
+        counts = {str(k): group["test_counts"].tolist() for k, group in record["groups"].items()}
+        progress(f"[{len(sequences)}/{len(keys)}] Finished {key!r}; "
+                 f"selected epoch {record['training']['best_epoch']}; test group sizes: {counts}")
+
+    progress(f"Preparing {len(keys)} sequences with {execution['cpu_workers']} worker(s), "
+             f"{execution['threads_per_worker']} thread(s) per worker on {device}.")
+    try:
+        torch.set_num_threads(config["num_threads"])
+        if execution["cpu_workers"] > 1:
+            _parallel_sequences(tasks(), execution["cpu_workers"], completed)
+        else:
+            for task in tasks():
+                record, checkpoint = _prepare_sequence(task)
+                completed(task[0], record, checkpoint)
     finally:
         torch.set_num_threads(threads_before)
         thread_limits.restore_original_limits()
+
+    # Completion order does not change stored sequence ordering or identities.
+    sequences = {key: sequences[key] for key in keys}
+    checkpoints = {key: checkpoints[key] for key in keys}
 
     # Exact per-sequence boundaries are in the audit. Keep configuration
     # fingerprints here rather than serializing method-specific mappings whose
@@ -213,6 +347,7 @@ def build_shared_groups(config, *, dry_run=False, progress=print):
         "clustering": "euclidean_kmeans_on_calibration_embeddings_only",
         "k": config["clustering"]["k"],
         "comparisons": comparison_metadata, "audit": audit,
+        "execution": execution,
         "versions": {"python": platform.python_version(), "numpy": np.__version__,
                      "torch": torch.__version__, "scikit_learn": sklearn.__version__},
     }
@@ -249,6 +384,8 @@ def main(argv=None):
     parser.add_argument("--config", type=Path, required=True, help="Evaluator grouping YAML.")
     parser.add_argument("--output-dir", type=Path, help="New output directory; never overwritten.")
     parser.add_argument("--device", help="cpu, cuda, or cuda:N.")
+    parser.add_argument("--cpu-workers", type=int,
+                        help="Train independent sequences concurrently on CPUs, one thread per worker.")
     parser.add_argument("--dry-run", action="store_true", help="Audit sources and shared splits without training or writing.")
     args = parser.parse_args(argv)
     try:
@@ -257,6 +394,10 @@ def main(argv=None):
             config["output_dir"] = str(args.output_dir.expanduser().resolve())
         if args.device is not None:
             config["device"] = args.device
+        if args.cpu_workers is not None:
+            if args.device is not None and args.device != "cpu":
+                raise ValueError("--cpu-workers requires --device cpu when a device is specified.")
+            config.update(cpu_workers=args.cpu_workers, device="cpu", num_threads=1)
         result = build_shared_groups(config, dry_run=args.dry_run)
         if args.dry_run:
             print(json.dumps(result, indent=2, default=_serializable))

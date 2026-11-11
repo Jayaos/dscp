@@ -18,8 +18,8 @@ python -m conditional_coverage.prepare_groups --config configs/conditional_cover
 
 The dry run loads the saved forecast artifact and validates all selected
 sequences. It prints calibration, fitting, validation, and test context counts,
-each method's boundary, and any gap between the shared partitions. It does not
-train a model or write output files.
+each method's boundary, any gap between the shared partitions, and the planned
+worker count. It does not train a model or write output files.
 
 Build and save the groups with:
 
@@ -27,7 +27,30 @@ Build and save the groups with:
 python -m conditional_coverage.prepare_groups --config configs/conditional_coverage_configs/air_lstm.yaml
 ```
 
-The default device is CPU. To select a GPU and a new output directory:
+The default device is CPU, with one worker. To process up to four sequences
+concurrently, using one CPU thread per worker:
+
+```bash
+python -m conditional_coverage.prepare_groups --config configs/conditional_coverage_configs/air_lstm.yaml --cpu-workers 4
+```
+
+`--cpu-workers` selects CPU execution and sets `num_threads` to 1. Each worker
+trains one sequence's encoder, extracts its embeddings, and fits its K-means
+partition before taking another sequence. The worker count is capped by the
+number of selected sequences and, under Slurm, the allocated CPUs. All workers
+contribute to one final artifact, saved after every sequence succeeds.
+
+These settings can also be supplied in the grouping YAML:
+
+```yaml
+device: cpu
+cpu_workers: 4
+num_threads: 1
+```
+
+`cpu_workers` defaults to 1. Configuring more than one worker requires
+`device: cpu` and `num_threads: 1`. Direct GPU execution remains available with
+one worker. To select a GPU and a new output directory:
 
 ```bash
 python -m conditional_coverage.prepare_groups --config configs/conditional_coverage_configs/air_lstm.yaml --device cuda:0 --output-dir results/conditional_coverage/air/lstm/experiment_02
@@ -54,10 +77,14 @@ partitions and is recorded in the artifact.
 ## Run through Slurm
 
 Use `sbatch/sbatch_conditional_coverage_experiment/step1_prepare_groups.sbatch`
-to generate groups on a GPU, followed by
+to generate groups on CPUs, followed by
 `sbatch/sbatch_conditional_coverage_experiment/step2_evaluate.sbatch` to evaluate
-saved method results on CPUs. Both accept `--config` and forward the existing
-command-line options. The [Slurm workflow guide](../sbatch/sbatch_conditional_coverage_experiment/README.md)
+saved method results. Step 1 uses one worker per allocated CPU, capped by the
+number of sequences, and one CPU thread per worker. For example, submit it with
+`sbatch --cpus-per-task=12 ...` to process up to 12 sequences concurrently.
+Both accept `--config` and forward the existing command-line options; step 1
+enforces CPU execution and takes its worker budget from the Slurm allocation.
+The [Slurm workflow guide](../sbatch/sbatch_conditional_coverage_experiment/README.md)
 includes submission commands and an `afterok` dependency that starts evaluation
 only after group generation succeeds.
 
