@@ -12,16 +12,16 @@ cache_embeddings: true
 
 model:
   rnn_type: lstm
-  dim_model: 64
+  dim_model: 32
   num_layers: 1
   window_size: 100
   dropout: 0.0
 
 training:
-  batch_size: 64
+  batch_size: 32
   learning_rate: 0.001
   epochs: 50
-  early_stop: 5
+  early_stop: 3
   validation_ratio: 0.2
 
 clustering:
@@ -47,33 +47,3 @@ comparisons:
   - name: local_cp_transformer
     method: local_cp
     config_path: configs/lcp_configs/lcp_transformer_lstm_air_config.yaml
-  - name: hopcpt
-    method: hopcpt
-    config_path: configs/hopcpt_configs/hopcpt_lstm_air_config.yaml
-  - name: spci
-    method: spci
-    config_path: configs/spci_configs/spci_lstm_air_config.yaml
-  - name: kowcpi
-    method: kowcpi
-    config_path: configs/kowcpi_configs/kowcpi_lstm_air_config.yaml
-  - name: nexcp
-    method: nexcp
-    config_path: configs/nexcp_configs/nexcp_lstm_air_config.yaml
-  - name: split_cp
-    method: split_cp
-    config_path: configs/split_cp_configs/split_cp_lstm_air_config.yaml
-  - name: rescp
-    method: rescp
-    config_path: configs/rescp_configs/rescp_lstm_air_config.yaml
-  - name: aci
-    method: aci
-    config_path: configs/aci_configs/aci_lstm_air_config.yaml
-  - name: cop
-    method: cop
-    config_path: configs/cop_configs/cop_lstm_air_config.yaml
-  - name: lqt
-    method: lqt
-    config_path: configs/lqt_configs/lqt_lstm_air_config.yaml
-  - name: distmatch
-    method: distmatch
-    config_path: configs/distmatch_configs/distmatch_lstm_air_config.yaml

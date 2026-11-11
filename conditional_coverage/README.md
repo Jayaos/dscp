@@ -45,11 +45,21 @@ Nine presets are provided under `configs/conditional_coverage_configs/`:
 | Solar | `solar_lr.yaml` | `solar_lstm.yaml` | `solar_chronos.yaml` |
 | Sapflux | `sapflux_lr.yaml` | `sapflux_lstm.yaml` | `sapflux_chronos.yaml` |
 
-Each preset includes both encoders for QR-CP, IQN-CP, and Local-CP, plus HopCPT,
-SPCI, KOWCPI, NexCP, SplitCP, ResCP, ACI, COP, LQT, and DistMatch. Additional
+Each preset includes six comparisons: RNN and Transformer encoders for each
+of QR-CP, IQN-CP, and Local-CP. Additional
 variants, including fixed-quantile IQN, can be added to `comparisons` using their
 own configuration or saved run. The comparison list determines the shared
 partitions and is recorded in the artifact.
+
+## Run through Slurm
+
+Use `sbatch/sbatch_conditional_coverage_experiment/step1_prepare_groups.sbatch`
+to generate groups on a GPU, followed by
+`sbatch/sbatch_conditional_coverage_experiment/step2_evaluate.sbatch` to evaluate
+saved method results on CPUs. Both accept `--config` and forward the existing
+command-line options. The [Slurm workflow guide](../sbatch/sbatch_conditional_coverage_experiment/README.md)
+includes submission commands and an `afterok` dependency that starts evaluation
+only after group generation succeeds.
 
 ## Observations and chronological partitions
 
@@ -237,9 +247,9 @@ target index. Existing result files are not changed by this update.
 
 The evaluation stage supports only `qr_cp`, `iqn_cp`, and `local_cp`. Multiple
 runs of any supported method can be compared, including different encoders,
-heads, or hyperparameters. The group-building presets can still include other
-methods when defining shared partitions; the evaluator uses the saved groups
-as they are and does not require results from those other methods.
+heads, or hyperparameters. The grouping presets and evaluation example both
+contain the six RNN/Transformer combinations of these three methods. The
+evaluator uses the saved shared partition for every selected run.
 
 Edit `configs/conditional_coverage_configs/evaluate_example.yaml`: replace each
 `REPLACE_WITH_RUN_DIRECTORY` path with a completed run directory containing

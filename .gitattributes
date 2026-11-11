@@ -35,3 +35,6 @@ sbatch/sbatch_run_local_cp/run_local_cp_epanechnikov_*_cpu.sbatch text eol=lf
 
 # Keep IQN-CP launchers compatible with Slurm after Windows checkouts.
 sbatch/sbatch_run_iqn_cp/*.sbatch text eol=lf
+
+# Keep both conditional-coverage experiment stages compatible with Slurm.
+sbatch/sbatch_conditional_coverage_experiment/*.sbatch text eol=lf
