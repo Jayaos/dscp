@@ -139,6 +139,58 @@ template's dataset/predictor/encoder/run suffix preserved. `LOCAL_CP_OUTPUT_ROOT
 or `--output-root` can override this root. Each job trains its own encoder;
 these launchers do not reuse a frozen checkpoint across submitted jobs.
 
+## Epanechnikov on CPU
+
+The CPU arrays run independent sequences concurrently, with one CPU thread
+per worker:
+
+```bash
+sbatch sbatch/sbatch_run_local_cp/run_local_cp_epanechnikov_air_cpu.sbatch
+sbatch sbatch/sbatch_run_local_cp/run_local_cp_epanechnikov_solar_cpu.sbatch
+sbatch sbatch/sbatch_run_local_cp/run_local_cp_epanechnikov_sapflux_cpu.sbatch
+```
+
+| Dataset | CPUs / sequence workers | Memory | Time limit |
+| --- | --- | --- | --- |
+| Air | 12 | 48 GB | 30 minutes |
+| Solar | 10 | 40 GB | 60 minutes |
+| Sapflux | 12 | 48 GB | 30 minutes |
+
+These allocations apply to **each array task**. Each dataset still has six
+encoder/predictor tasks (`0-5`). A worker processes one sequence at a time and
+takes another when it finishes; if there are fewer sequences than allocated
+CPUs, only the needed workers run. Timesteps within a sequence remain ordered
+for rolling calibration. Memory is four GB per allocated CPU.
+
+The scripts request no GPU and pass `--cpu-workers "$SLURM_CPUS_PER_TASK"` to
+the dispatcher. This forces `device: cpu` in the resolved run configuration
+and uses a separate process per sequence worker. The shared YAML templates
+retain their GPU settings. PyTorch and numerical-library threads are limited
+to one per worker to avoid oversubscribing the allocation.
+
+Each sequence uses the run seed plus its position in the prediction artifact
+(modulo `2**32`), recorded as `sequence_seed` in its log. This makes CPU results
+reproducible across worker counts. Workers write separate model checkpoints;
+the parent merges sequence logs in artifact order and writes the combined
+summary and plots once all sequences finish.
+The GPU runner uses one advancing random-number stream, so matching base seeds
+do not imply identical fitted models between CPU and GPU runs.
+
+The CPU arrays use the same Epanechnikov templates and optional
+`LOCAL_CP_BANDWIDTH`, `LOCAL_CP_SEED`, `LOCAL_CP_OUTPUT_ROOT`, and `RUNPATH`
+overrides. Their default result root is
+`results/local_cp_epanechnikov_cpu/bandwidth_<value>/seed_<seed>/`, followed by
+the template's dataset/predictor/encoder/run suffix. The existing GPU scripts
+retain their behavior.
+
+Preview the resolved CPU configuration without starting workers:
+
+```bash
+PYTHONPATH="$PWD:$PWD/sbatch:${PYTHONPATH:-}" \
+  python -m sbatch_run_local_cp.run_local_cp_job air \
+  --task-id 1 --kernel epanechnikov --cpu-workers 12 --dry-run
+```
+
 ## Outputs and reproducibility
 
 Each run writes its resolved settings and outputs under:

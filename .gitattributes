@@ -29,3 +29,6 @@ sbatch/sbatch_run_cop/*.sbatch text eol=lf
 
 # Keep Epanechnikov Local-CP tuning launchers compatible with Slurm.
 sbatch/sbatch_run_tuning/run_lcp_*_epanechnikov_*_tuning.sbatch text eol=lf
+
+# Keep Epanechnikov Local-CP CPU launchers compatible with Slurm.
+sbatch/sbatch_run_local_cp/run_local_cp_epanechnikov_*_cpu.sbatch text eol=lf

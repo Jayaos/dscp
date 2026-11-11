@@ -28,6 +28,16 @@ def positive_bandwidth(value):
     return bandwidth
 
 
+def positive_workers(value):
+    try:
+        workers = int(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("cpu-workers must be a positive integer") from exc
+    if workers < 1:
+        raise argparse.ArgumentTypeError("cpu-workers must be a positive integer")
+    return workers
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset", choices=tuple(DATASET_ARTIFACTS))
@@ -58,6 +68,10 @@ def build_parser():
         help="Override the results root; Epanechnikov defaults separate bandwidths and seeds.",
     )
     parser.add_argument("--seed", type=int, default=2026)
+    parser.add_argument(
+        "--cpu-workers", type=positive_workers, default=None,
+        help="Run independent sequences on CPU with this many single-threaded workers.",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -110,13 +124,18 @@ def main(argv=None):
     config.model.prediction_step = 1
     config.data.data_path = str(artifact_path)
     config.device = config.get("device", 0)
+    if args.cpu_workers is not None:
+        config.device = "cpu"
+        config.cpu_workers = args.cpu_workers
     config.seed = args.seed
     output_root = args.output_root
     if output_root is None:
-        output_root = REPO_ROOT / "results" / "local_cp"
+        method = "local_cp_cpu" if args.cpu_workers is not None else "local_cp"
+        output_root = REPO_ROOT / "results" / method
         if kernel == "epanechnikov":
+            method = "local_cp_epanechnikov_cpu" if args.cpu_workers is not None else "local_cp_epanechnikov"
             output_root = (
-                REPO_ROOT / "results" / "local_cp_epanechnikov"
+                REPO_ROOT / "results" / method
                 / f"bandwidth_{bandwidth}" / f"seed_{args.seed}"
             )
     output_dir = resolve_job_saving_dir(config, output_root)
@@ -137,6 +156,17 @@ def main(argv=None):
             "Run the corresponding base predictor before this Local-CP job."
         )
 
+    output_dir.mkdir(parents=True, exist_ok=True)
+    config_path = output_dir / "resolved_config.yaml"
+    OmegaConf.save(config=config, f=config_path, resolve=True)
+    print(f"Saved resolved configuration: {config_path}", flush=True)
+
+    if args.cpu_workers is not None:
+        from dscp.local_cp_parallel import run_cpu_local_cp
+
+        run_cpu_local_cp(str(config_path), encoder=encoder, workers=args.cpu_workers)
+        return
+
     import random
 
     import numpy as np
@@ -149,11 +179,6 @@ def main(argv=None):
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    config_path = output_dir / "resolved_config.yaml"
-    OmegaConf.save(config=config, f=config_path, resolve=True)
-    print(f"Saved resolved configuration: {config_path}", flush=True)
 
     runner = run_rnn_local_cp if encoder == "rnn" else run_transformer_local_cp
     runner(str(config_path))

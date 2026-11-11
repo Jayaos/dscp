@@ -66,7 +66,39 @@ def _append_to_calibration_pool(calibration_repr, calibration_residual,
     return calibration_repr, calibration_residual
 
 
-def run_transformer_local_cp(config_path):
+def _save_local_cp_summary(config, log):
+    """Write shared summary and plots after all sequence results are available."""
+    summary_results = summarize_evaluation_results(log, config.model.target_quantiles)
+
+    for tuple_confidence_pair, summary in summary_results.items():
+        print("Summary for confidence pair {}".format(tuple_confidence_pair))
+        print("avg_coverage mean: {}, std: {}".format(
+            summary["avg_coverage_mean"],
+            summary["avg_coverage_std"])
+        )
+        print("avg_delta_coverage mean: {}, std: {}".format(
+            summary["avg_delta_coverage_mean"],
+            summary["avg_delta_coverage_std"])
+        )
+        print("avg_interval_width mean: {}, std: {}".format(
+            summary["avg_interval_width_mean"],
+            summary["avg_interval_width_std"])
+        )
+        print("avg_winkler_score mean: {}, std: {}".format(
+            summary["avg_winkler_score_mean"],
+            summary["avg_winkler_score_std"])
+        )
+
+    save_data(os.path.join(config.saving_dir, "summary_results.pkl"), summary_results)
+
+    if config.plotting.plotting:
+        plot_cp_prediction_intervals(log,
+                                     config.model.target_quantiles,
+                                     config.plotting.plotting_seq_len,
+                                     os.path.join(config.saving_dir, "plots"))
+
+
+def run_transformer_local_cp(config_path, *, sequence_data=None, save_aggregate=True):
 
     config = load_experiment_config(config_path)
     rolling_calibration = validate_rolling_calibration(
@@ -78,7 +110,8 @@ def run_transformer_local_cp(config_path):
     os.makedirs(config.saving_dir, exist_ok=True)
 
     # load data
-    data = load_data(config.data.data_path) # load predictor results here
+    # Workers supply one raw sequence so dataset preparation stays local.
+    data = load_data(config.data.data_path) if sequence_data is None else sequence_data
     base_predictor, data_type = read_setup(config.data.data_path)
     cpd = ConformalPredictionData(data)
     cpd.prepare_quantile_regression_datasets(
@@ -355,39 +388,15 @@ def run_transformer_local_cp(config_path):
                     "evaluation_results" : evaluation_results}
         
         torch.save(best_model, os.path.join(config.saving_dir, key + '_model.pt'))
-        save_data(os.path.join(config.saving_dir, "log.pkl"), log)
+        if save_aggregate:
+            save_data(os.path.join(config.saving_dir, "log.pkl"), log)
 
-    summary_results = summarize_evaluation_results(log, config.model.target_quantiles)
-
-    for tuple_confidence_pair, summary in summary_results.items():
-        print("Summary for confidence pair {}".format(tuple_confidence_pair))
-        print("avg_coverage mean: {}, std: {}".format(
-            summary["avg_coverage_mean"],
-            summary["avg_coverage_std"])
-        )
-        print("avg_delta_coverage mean: {}, std: {}".format(
-            summary["avg_delta_coverage_mean"],
-            summary["avg_delta_coverage_std"])
-        )
-        print("avg_interval_width mean: {}, std: {}".format(
-            summary["avg_interval_width_mean"],
-            summary["avg_interval_width_std"])
-        )
-        print("avg_winkler_score mean: {}, std: {}".format(
-            summary["avg_winkler_score_mean"],
-            summary["avg_winkler_score_std"])
-        )
-
-    save_data(os.path.join(config.saving_dir, "summary_results.pkl"), summary_results)
-
-    if config.plotting.plotting:
-        plot_cp_prediction_intervals(log,
-                                     config.model.target_quantiles,
-                                     config.plotting.plotting_seq_len,
-                                     os.path.join(config.saving_dir, "plots"))
+    if save_aggregate:
+        _save_local_cp_summary(config, log)
+    return log
 
 
-def run_rnn_local_cp(config_path):
+def run_rnn_local_cp(config_path, *, sequence_data=None, save_aggregate=True):
 
     config = load_experiment_config(config_path)
     rolling_calibration = validate_rolling_calibration(
@@ -399,7 +408,8 @@ def run_rnn_local_cp(config_path):
     os.makedirs(config.saving_dir, exist_ok=True)
 
     # load data
-    data = load_data(config.data.data_path) # load predictor results here
+    # Workers supply one raw sequence so dataset preparation stays local.
+    data = load_data(config.data.data_path) if sequence_data is None else sequence_data
     base_predictor, data_type = read_setup(config.data.data_path)
     cpd = ConformalPredictionData(data)
     cpd.prepare_quantile_regression_datasets(
@@ -675,33 +685,9 @@ def run_rnn_local_cp(config_path):
                     "evaluation_results" : evaluation_results}
 
         torch.save(best_model, os.path.join(config.saving_dir, key + '_model.pt'))
-        save_data(os.path.join(config.saving_dir, "log.pkl"), log)
+        if save_aggregate:
+            save_data(os.path.join(config.saving_dir, "log.pkl"), log)
 
-    summary_results = summarize_evaluation_results(log, config.model.target_quantiles)
-
-    for tuple_confidence_pair, summary in summary_results.items():
-        print("Summary for confidence pair {}".format(tuple_confidence_pair))
-        print("avg_coverage mean: {}, std: {}".format(
-            summary["avg_coverage_mean"],
-            summary["avg_coverage_std"])
-        )
-        print("avg_delta_coverage mean: {}, std: {}".format(
-            summary["avg_delta_coverage_mean"],
-            summary["avg_delta_coverage_std"])
-        )
-        print("avg_interval_width mean: {}, std: {}".format(
-            summary["avg_interval_width_mean"],
-            summary["avg_interval_width_std"])
-        )
-        print("avg_winkler_score mean: {}, std: {}".format(
-            summary["avg_winkler_score_mean"],
-            summary["avg_winkler_score_std"])
-        )
-
-    save_data(os.path.join(config.saving_dir, "summary_results.pkl"), summary_results)
-
-    if config.plotting.plotting:
-        plot_cp_prediction_intervals(log,
-                                        config.model.target_quantiles,
-                                        config.plotting.plotting_seq_len,
-                                        os.path.join(config.saving_dir, "plots"))
+    if save_aggregate:
+        _save_local_cp_summary(config, log)
+    return log
