@@ -6,7 +6,7 @@
 #SBATCH --array=0-5
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=48G
-#SBATCH -t30
+#SBATCH -t120
 #SBATCH -qinferno
 #SBATCH -o Report-local-cp-epanechnikov-air-cpu-%A_%a.out
 #SBATCH --mail-type=ALL
