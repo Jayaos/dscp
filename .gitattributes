@@ -32,3 +32,6 @@ sbatch/sbatch_run_tuning/run_lcp_*_epanechnikov_*_tuning.sbatch text eol=lf
 
 # Keep Epanechnikov Local-CP CPU launchers compatible with Slurm.
 sbatch/sbatch_run_local_cp/run_local_cp_epanechnikov_*_cpu.sbatch text eol=lf
+
+# Keep IQN-CP launchers compatible with Slurm after Windows checkouts.
+sbatch/sbatch_run_iqn_cp/*.sbatch text eol=lf

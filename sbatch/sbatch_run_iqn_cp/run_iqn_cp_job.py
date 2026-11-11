@@ -30,13 +30,22 @@ def build_parser():
         "3: Transformer/LR, 4: Transformer/LSTM, 5: Transformer/Chronos",
     )
     parser.add_argument(
+        "--fixed-quantiles",
+        action="store_true",
+        help="Use the configs in configs/iqn_cp_fixed_quantile_configs/.",
+    )
+    parser.add_argument(
         "--prediction-head",
         choices=PREDICTION_HEADS,
         default=None,
         help="Override model.prediction_head from the selected YAML config.",
     )
     parser.add_argument(
-        "--output-root", type=Path, default=REPO_ROOT / "results" / "iqn_cp"
+        "--output-root",
+        type=Path,
+        default=None,
+        help="Results root (default: results/iqn_cp, or "
+        "results/iqn_cp_fixed_quantile with --fixed-quantiles).",
     )
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument(
@@ -63,8 +72,10 @@ def main(argv=None):
         / predictor
         / f"{predictor}_{artifact_name}_data.pkl"
     )
-    template_name = f"iqn_{encoder}_{predictor}_{args.dataset}_config.yaml"
-    template_path = REPO_ROOT / "configs" / "iqn_cp_configs" / template_name
+    config_dir = "iqn_cp_fixed_quantile_configs" if args.fixed_quantiles else "iqn_cp_configs"
+    config_suffix = "_fixed_quantile_config.yaml" if args.fixed_quantiles else "_config.yaml"
+    template_name = f"iqn_{encoder}_{predictor}_{args.dataset}{config_suffix}"
+    template_path = REPO_ROOT / "configs" / config_dir / template_name
     config = load_experiment_config(template_path)
     config.base_predictor = predictor
     prediction_head = (
@@ -81,7 +92,11 @@ def main(argv=None):
     config.data.data_path = str(artifact_path)
     config.device = config.get("device", 0)
     config.seed = args.seed
-    output_dir = resolve_job_saving_dir(config, args.output_root)
+    output_root = args.output_root
+    if output_root is None:
+        method_dir = "iqn_cp_fixed_quantile" if args.fixed_quantiles else "iqn_cp"
+        output_root = REPO_ROOT / "results" / method_dir
+    output_dir = resolve_job_saving_dir(config, output_root)
 
     print(
         f"IQN-CP task {args.task_id}: dataset={args.dataset}, "

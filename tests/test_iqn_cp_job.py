@@ -141,7 +141,10 @@ class IQNCPJobTests(unittest.TestCase):
                             "training": {
                                 "learning_rate": sentinel["learning_rate"],
                             },
-                            "saving_dir": "template-output",
+                            "saving_dir": (
+                                f"./results/iqn_cp/{dataset}/{predictor}/{encoder}/"
+                                "${model.prediction_head}/fixture-run/"
+                            ),
                         }
                     )
                     OmegaConf.save(
@@ -260,6 +263,7 @@ class IQNCPJobTests(unittest.TestCase):
                                     / predictor
                                     / encoder
                                     / prediction_head
+                                    / "fixture-run"
                                 ).resolve(),
                             )
 
@@ -276,7 +280,7 @@ class IQNCPJobTests(unittest.TestCase):
                             selected_runner.assert_called_once()
                             other_runner.assert_not_called()
 
-    def test_real_solar_configs_match_air_hyperparameters_and_paths(self):
+    def test_real_solar_configs_preserve_hyperparameters_and_dataset_paths(self):
         config_dir = REPO_ROOT / "configs" / "iqn_cp_configs"
 
         for encoder, predictor in self.job.TASKS:
@@ -296,6 +300,21 @@ class IQNCPJobTests(unittest.TestCase):
                 solar_values["data"].pop("data_path")
                 air_values.pop("saving_dir")
                 solar_values.pop("saving_dir")
+                # Solar Transformer/LSTM intentionally requests 95% coverage;
+                # the other templates share Air's 90% interval levels.
+                expected_quantiles = (
+                    [[0.975, 0.025]]
+                    if (encoder, predictor) == ("transformer", "lstm")
+                    else [[0.95, 0.05]]
+                )
+                self.assertEqual(
+                    solar_values["model"].pop("target_quantiles"),
+                    expected_quantiles,
+                )
+                self.assertEqual(
+                    air_values["model"].pop("target_quantiles"),
+                    [[0.95, 0.05]],
+                )
                 self.assertEqual(solar_values, air_values)
 
                 self.assertEqual(
@@ -305,17 +324,16 @@ class IQNCPJobTests(unittest.TestCase):
                         f"{predictor}_nsdb-60m_data.pkl"
                     ),
                 )
-                output_prefix = (
-                    "iqn_rnn"
-                    if encoder == "rnn"
-                    else "run_iqn_transformer"
-                )
+                self.assertEqual(solar.model.prediction_head, "cosine_embedding")
+                output_path = Path(solar.saving_dir)
                 self.assertEqual(
-                    solar.saving_dir,
-                    (
-                        f"./results/{output_prefix}_{predictor}_solar_"
-                        "partially_monotonic/"
-                    ),
+                    output_path.parent,
+                    Path("results") / "iqn_cp" / "solar" / predictor
+                    / encoder / "cosine_embedding",
+                )
+                self.assertRegex(
+                    output_path.name,
+                    r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_\d{6}$",
                 )
 
     def test_predictor_specific_sapflux_configs_match_lstm_hyperparameters(self):
@@ -347,12 +365,16 @@ class IQNCPJobTests(unittest.TestCase):
                             f"{predictor}_sapflux-solo3-large_data.pkl"
                         ),
                     )
+                    self.assertEqual(config.model.prediction_head, "cosine_embedding")
+                    output_path = Path(config.saving_dir)
                     self.assertEqual(
-                        config.saving_dir,
-                        (
-                            f"./results/iqn_{encoder}_{predictor}_"
-                            "sapflux_solo3_large_partially_monotonic/"
-                        ),
+                        output_path.parent,
+                        Path("results") / "iqn_cp" / "sapflux" / predictor
+                        / encoder / "cosine_embedding",
+                    )
+                    self.assertRegex(
+                        output_path.name,
+                        r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_\d{6}$",
                     )
 
     def test_non_dry_run_saves_config_seeds_and_dispatches_encoder(self):
@@ -438,7 +460,9 @@ class IQNCPJobTests(unittest.TestCase):
                     encoding="utf-8"
                 )
                 self.assertIn("#SBATCH --array=0-5", content)
-                self.assertIn("#SBATCH --time=04:00:00", content)
+                expected_minutes = 120 if dataset == "solar" else 60
+                self.assertIn(f"#SBATCH -t{expected_minutes}\n", content)
+                self.assertIn("#SBATCH --gres=gpu:1 -C V100", content)
                 self.assertIn(
                     f"sbatch_run_iqn_cp.run_iqn_cp_job {dataset}",
                     content,

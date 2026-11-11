@@ -4,8 +4,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --array=0-2
-#SBATCH --cpus-per-task=24
-#SBATCH --mem=96G
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=48G
 #SBATCH --time=04:00:00
 #SBATCH --qos=inferno
 #SBATCH -o Report-cop-sapflux-%A_%a.out
