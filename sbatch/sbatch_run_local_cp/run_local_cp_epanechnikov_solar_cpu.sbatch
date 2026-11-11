@@ -6,7 +6,7 @@
 #SBATCH --array=0-5
 #SBATCH --cpus-per-task=10
 #SBATCH --mem=40G
-#SBATCH -t60
+#SBATCH -t720
 #SBATCH -qinferno
 #SBATCH -o Report-local-cp-epanechnikov-solar-cpu-%A_%a.out
 #SBATCH --mail-type=ALL
