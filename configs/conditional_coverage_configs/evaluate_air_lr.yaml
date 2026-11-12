@@ -1,0 +1,34 @@
+# Evaluate existing QR-CP, IQN-CP, and Local-CP logs without rerunning models.
+# Replace EVERY REPLACE_WITH_RUN_DIRECTORY path, or remove unneeded run entries.
+# All selected runs must use this grouping artifact's original source timeline.
+path_base: ../..
+groups_dir: /storage/project/r-yxie77-0/jlee3541/projects/dscp/results/conditional_coverage/air/lr/groups
+output_dir: results/conditional_coverage/air/lr/evaluation
+nominal_coverage: 0.9
+
+# Older complete logs may omit target_indices. Treat their saved row order as
+# chronological and check target_y against the original heldout observations.
+# Explicit indices and saved exclusion masks always take precedence.
+allow_chronological_fallback: true
+
+# Optional: relocate the exact source artifact recorded in the group manifest.
+# data_path: data/air-10_prediction/lr/lr_air-10_data.pkl
+# Optional: require this exact sequence subset instead of the shared sequences.
+# sequences: [station_1, station_2]
+
+runs:
+  - name: qr_rnn
+    method: qr_cp
+    run_dir: /storage/home/hcoda1/0/jlee3541/r-yxie77-0/projects/dscp/results/qr_cp/air/lr/rnn/nondecreasing
+
+  - name: qr_transformer
+    method: qr_cp
+    run_dir: /storage/home/hcoda1/0/jlee3541/r-yxie77-0/projects/dscp/results/qr_cp/air/lr/transformer/nondecreasing
+
+  - name: local_cp_rnn
+    method: local_cp
+    run_dir: /storage/home/hcoda1/0/jlee3541/r-yxie77-0/projects/dscp/results/local_cp/air/lr/rnn
+
+  - name: local_cp_transformer
+    method: local_cp
+    run_dir: /storage/home/hcoda1/0/jlee3541/r-yxie77-0/projects/dscp/results/local_cp/air/lr/transformer
