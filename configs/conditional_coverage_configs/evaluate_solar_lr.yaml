@@ -2,8 +2,8 @@
 # Replace EVERY REPLACE_WITH_RUN_DIRECTORY path, or remove unneeded run entries.
 # All selected runs must use this grouping artifact's original source timeline.
 path_base: ../..
-groups_dir: /storage/project/r-yxie77-0/jlee3541/projects/dscp/results/conditional_coverage/solar/lr/groups/k5
-output_dir: results/conditional_coverage/solar/lr/evaluation
+groups_dir: /storage/project/r-yxie77-0/jlee3541/projects/dscp/results/conditional_coverage/solar/lr/groups/k3
+output_dir: results/conditional_coverage/solar/lr/evaluation/k3
 nominal_coverage: 0.9
 
 # Older complete logs may omit target_indices. Treat their saved row order as
