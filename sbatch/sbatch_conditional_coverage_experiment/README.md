@@ -56,6 +56,21 @@ The memory allocation is shared by all worker processes. Adjust `--mem` when
 the combined memory needed by the selected number of workers exceeds the
 script's default allocation.
 
+To choose ten groups for one submission without editing the YAML:
+
+```bash
+sbatch --cpus-per-task=12 --mem=48G \
+  sbatch/sbatch_conditional_coverage_experiment/step1_prepare_groups.sbatch \
+  --config configs/conditional_coverage_configs/air_lstm.yaml \
+  --k 10
+```
+
+The script forwards `--k 10` to group preparation. It overrides `clustering.k`,
+saves to `<output_dir>/k10`, and records the selected K in the saved
+`resolved_config.yaml`; the input YAML remains unchanged. Without `--k`, the
+YAML value is used. Set the evaluation YAML's `groups_dir` to this same `k10`
+directory before running step 2.
+
 ## Step 2: evaluate saved results
 
 After step 1 completes successfully:

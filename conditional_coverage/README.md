@@ -153,6 +153,17 @@ clustering:
   n_init: 10
 ```
 
+To override K for one run without editing the input YAML, pass `--k`:
+
+```bash
+python -m conditional_coverage.prepare_groups --config configs/conditional_coverage_configs/air_lstm.yaml --k 10
+```
+
+`--k 10` overrides `clustering.k`, saves to `<output_dir>/k10`, and records
+`clustering.k: 10` in the artifact's `resolved_config.yaml`. The input YAML
+remains unchanged. Omitting `--k` uses the YAML value. Point the evaluation
+configuration's `groups_dir` to the matching K subdirectory.
+
 The default is five groups. Change `k` to the desired number; the builder fits
 only that partition. `n_init` controls the number of K-means initializations for
 the selected K and defaults to 10. The former `clustering.ks` list is no longer

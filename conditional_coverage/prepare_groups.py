@@ -386,6 +386,8 @@ def main(argv=None):
     parser.add_argument("--output-dir", type=Path,
                         help="Base output directory; saves to its k<K> subdirectory without overwriting.")
     parser.add_argument("--device", help="cpu, cuda, or cuda:N.")
+    parser.add_argument("--k", type=int,
+                        help="Number of groups; overrides clustering.k and saves under k<K>.")
     parser.add_argument("--cpu-workers", type=int,
                         help="Train independent sequences concurrently on CPUs, one thread per worker.")
     parser.add_argument("--dry-run", action="store_true", help="Audit sources and shared splits without training or writing.")
@@ -396,6 +398,8 @@ def main(argv=None):
             config["output_dir"] = str(args.output_dir.expanduser().resolve())
         if args.device is not None:
             config["device"] = args.device
+        if args.k is not None:
+            config["clustering"]["k"] = args.k
         if args.cpu_workers is not None:
             if args.device is not None and args.device != "cpu":
                 raise ValueError("--cpu-workers requires --device cpu when a device is specified.")

@@ -1,6 +1,6 @@
 """End-to-end checks for building reusable shared-group artifacts."""
 
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 import copy
 import io
 import json
@@ -176,12 +176,25 @@ class ConditionalCoveragePipelineTests(unittest.TestCase):
         destination = self.directory / "cli_output"
         output = io.StringIO()
         with redirect_stdout(output):
-            result = main(["--config", str(config_path), "--output-dir", str(destination), "--dry-run"])
-        self.assertEqual(result["output_dir"], str(destination / "k5"))
-        self.assertEqual(json.loads(output.getvalue())["output_dir"], str(destination / "k5"))
+            result = main(["--config", str(config_path), "--output-dir", str(destination),
+                           "--k", "3", "--dry-run"])
+        self.assertEqual(result["output_dir"], str(destination / "k3"))
+        self.assertEqual(json.loads(output.getvalue())["output_dir"], str(destination / "k3"))
         self.assertEqual(result["config"]["output_dir"], str(destination))
+        self.assertEqual(result["config"]["clustering"]["k"], 3)
         self.assertFalse(destination.exists())
         self.assertFalse((self.directory / "groups").exists())
+
+    def test_cli_rejects_invalid_k_without_writing_output(self):
+        config_path = self.directory / "grouping.yaml"
+        self.write_yaml(config_path, self.config)
+        before = set(self.directory.rglob("*"))
+        for value in ("0", "-1", "2.5"):
+            with self.subTest(value=value), redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as raised:
+                    main(["--config", str(config_path), "--k", value])
+                self.assertEqual(raised.exception.code, 2)
+        self.assertEqual(set(self.directory.rglob("*")), before)
 
     def test_different_source_timeline_is_rejected_before_output(self):
         alternate = self.directory / "other_source.pkl"
@@ -216,9 +229,12 @@ class ConditionalCoveragePipelineTests(unittest.TestCase):
                 validate_config(config)
 
     def test_custom_k_saves_only_the_selected_partition(self):
-        config = copy.deepcopy(self.config)
-        config["clustering"]["k"] = 7
-        path = self.build(config)
+        config_path = self.directory / "grouping.yaml"
+        self.write_yaml(config_path, self.config)
+        original = file_sha256(config_path)
+        with redirect_stdout(io.StringIO()):
+            path = main(["--config", str(config_path), "--k", "7"])
+        self.assertEqual(file_sha256(config_path), original)
         self.assertEqual(path, self.directory / "groups" / "k7")
         manifest, sequences = load_group_artifact(path)
         self.assertEqual(manifest["k"], 7)
