@@ -26,7 +26,7 @@ conda activate dscp
 
 python -u -m sbatch_run_base_predictor.run_lstm sapflux-solo3-large \
   --data-dir "$RUNPATH/data/sapflux/0.1.5/prepared" \
-  --save-dir "$RUNPATH/data/sapflux-solo3-large/lstm" \
+  --save-dir "$RUNPATH/data/sapflux-solo3-large/lstm_model_saved" \
   --predictor-train-ratio 0.33 \
   --window-length 100 \
   --embedding-dim 32 \
