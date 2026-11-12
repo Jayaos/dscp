@@ -5,6 +5,9 @@ from numbers import Integral, Real
 import numpy as np
 
 
+CACE_DEFINITION = "mean_group_undercoverage"
+
+
 def _indices(values, name):
     values = np.asarray(values)
     if values.ndim != 1 or (values.size and values.dtype.kind not in "iu"):
@@ -21,6 +24,8 @@ def evaluate_sequence(group_record, aligned, k, nominal_coverage):
     remain visible in the original group size and missing count. Groups with no
     evaluated predictions have undefined coverage and are omitted from CACE and
     WUC; ``evaluated_group_count`` records their effective denominator.
+    CACE averages positive coverage shortfalls over every evaluated group;
+    groups at or above nominal coverage contribute zero. WUC is their maximum.
     """
     if isinstance(k, (bool, np.bool_)) or not isinstance(k, Integral) or k < 1:
         raise ValueError("k must be a positive integer.")
@@ -83,7 +88,8 @@ def evaluate_sequence(group_record, aligned, k, nominal_coverage):
         "covered_count": covered,
         "outside_shared_count": len(target_indices) - evaluated,
         "coverage": covered / evaluated if evaluated else None,
-        "cace": float(np.mean([group["absolute_coverage_error"] for group in available])) if available else None,
+        "cace_definition": CACE_DEFINITION,
+        "cace": float(np.mean([group["undercoverage"] for group in available])) if available else None,
         "wuc": max(group["undercoverage"] for group in available) if available else None,
         "status": (
             "no_valid_predictions" if not evaluated else
@@ -96,6 +102,7 @@ def evaluate_sequence(group_record, aligned, k, nominal_coverage):
 def aggregate_sequences(sequence_rows):
     """Average each sequence's errors; cluster labels never cross sequences.
 
+    CACE is mean group undercoverage, equally weighted across sequences.
     Unavailable sequences are counted but omitted from averages. ``wuc`` is
     mean sequence WUC; ``worst_sequence_wuc`` is the maximum sequence WUC.
     Pooled coverage is supplied separately from equal-weight mean coverage.
@@ -106,6 +113,7 @@ def aggregate_sequences(sequence_rows):
         "sequence_count": len(rows),
         "evaluated_sequence_count": len(available),
         "unavailable_sequence_count": len(rows) - len(available),
+        "cace_definition": CACE_DEFINITION,
         "cace": float(np.mean([row["cace"] for row in available])) if available else None,
         "wuc": float(np.mean([row["wuc"] for row in available])) if available else None,
         "worst_sequence_wuc": max(row["wuc"] for row in available) if available else None,

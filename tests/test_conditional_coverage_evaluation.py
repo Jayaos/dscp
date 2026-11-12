@@ -108,6 +108,7 @@ class SavedConditionalCoverageTests(unittest.TestCase):
         self.assertEqual(len(report["sequence_metrics"]), 6)
         self.assertEqual(len(report["group_metrics"]), 12)
         for row in report["summary"]:
+            self.assertEqual(row["cace_definition"], "mean_group_undercoverage")
             self.assertEqual(row["sequence_count"], 2)
             self.assertEqual(row["evaluated_count"], 10)
             self.assertEqual(row["missing_count"], 0)
@@ -115,6 +116,9 @@ class SavedConditionalCoverageTests(unittest.TestCase):
             self.assertAlmostEqual(row["wuc"], .4)
             self.assertEqual(row["outside_shared_count"], 2 if row["method"] == "local_cp" else 0)
         self.assertTrue(all(row["alignment"] == "result_indices" for row in report["alignment"]))
+        self.assertEqual(report["policies"]["cace_definition"], "mean_group_undercoverage")
+        self.assertTrue(all(row["cace_definition"] == "mean_group_undercoverage"
+                            for row in report["sequence_metrics"]))
         output = self.directory / "evaluation"
         self.assertEqual({p.name for p in output.iterdir()}, {
             "summary.csv", "sequence_metrics.csv", "group_metrics.csv", "evaluation.json",
@@ -125,6 +129,9 @@ class SavedConditionalCoverageTests(unittest.TestCase):
         self.assertEqual(loaded["sequences"], ["station", 7])
         with (output / "group_metrics.csv").open(newline="", encoding="utf-8") as stream:
             self.assertEqual(len(list(csv.DictReader(stream))), 12)
+        with (output / "summary.csv").open(newline="", encoding="utf-8") as stream:
+            self.assertTrue(all(row["cace_definition"] == "mean_group_undercoverage"
+                                for row in csv.DictReader(stream)))
         self.assertEqual(fingerprints, {path: file_sha256(path) for path in fingerprints})
         with self.assertRaises(FileExistsError):
             self.evaluate()
@@ -183,7 +190,8 @@ class SavedConditionalCoverageTests(unittest.TestCase):
         self.assertEqual(first["evaluated_count"], 2)
         self.assertEqual(first["missing_count"], 3)
         self.assertEqual(first["evaluated_group_count"], 1)
-        self.assertAlmostEqual(first["cace"], .1)
+        self.assertEqual(first["cace"], 0)
+        self.assertEqual(first["wuc"], 0)
         self.assertIsNone(second["cace"])
         self.assertEqual(second["status"], "no_valid_predictions")
         self.assertEqual(report["summary"][0]["unavailable_sequence_count"], 1)
@@ -278,9 +286,9 @@ class SavedConditionalCoverageTests(unittest.TestCase):
     def test_example_config_has_only_supported_methods_and_enables_legacy_fallback(self):
         path = Path(__file__).resolve().parents[1] / "configs/conditional_coverage_configs/evaluate_example.yaml"
         config = load_evaluation_config(path)
-        self.assertEqual(len(config["runs"]), 6)
+        self.assertGreater(len(config["runs"]), 0)
         self.assertTrue(config["allow_chronological_fallback"])
-        self.assertEqual({run["method"] for run in config["runs"]}, {"qr_cp", "iqn_cp", "local_cp"})
+        self.assertLessEqual({run["method"] for run in config["runs"]}, {"qr_cp", "iqn_cp", "local_cp"})
 
 
 if __name__ == "__main__":

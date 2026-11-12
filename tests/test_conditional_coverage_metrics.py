@@ -31,12 +31,33 @@ class ConditionalCoverageMetricTests(unittest.TestCase):
         self.assertAlmostEqual(result["sequence"]["coverage"], 4 / 6)
         self.assertEqual(result["sequence"]["status"], "complete")
 
-    def test_overcoverage_contributes_to_cace_but_not_undercoverage(self):
+    def test_overcoverage_has_zero_cace_and_retains_absolute_error_diagnostic(self):
         result = evaluate_sequence(
             record([7, 8], [0, 1], 2), predictions([7, 8], [True, True]), 2, .9,
         )
-        self.assertAlmostEqual(result["sequence"]["cace"], .1)
+        self.assertEqual(result["sequence"]["cace"], 0)
         self.assertEqual(result["sequence"]["wuc"], 0)
+        for group in result["groups"]:
+            self.assertAlmostEqual(group["absolute_coverage_error"], .1)
+            self.assertEqual(group["undercoverage"], 0)
+
+    def test_mean_undercoverage_includes_zero_errors_from_at_or_above_nominal_groups(self):
+        covered_counts = [85, 88, 90, 92, 95]
+        coverage = [covered for count in covered_counts
+                    for covered in ([True] * count + [False] * (100 - count))]
+        result = evaluate_sequence(
+            record(range(500), np.repeat(np.arange(5), 100), 5),
+            predictions(range(500), coverage), 5, .9,
+        )
+        self.assertEqual(result["sequence"]["evaluated_group_count"], 5)
+        self.assertAlmostEqual(result["sequence"]["cace"], (.05 + .02 + 0 + 0 + 0) / 5)
+        self.assertAlmostEqual(result["sequence"]["wuc"], .05)
+        np.testing.assert_allclose(
+            [group["undercoverage"] for group in result["groups"]], [.05, .02, 0, 0, 0],
+        )
+        np.testing.assert_allclose(
+            [group["absolute_coverage_error"] for group in result["groups"]], [.05, .02, 0, .02, .05],
+        )
 
     def test_indices_join_noncontiguous_and_permuted_rows_without_compressing_holes(self):
         result = evaluate_sequence(
@@ -48,7 +69,7 @@ class ConditionalCoverageMetricTests(unittest.TestCase):
         self.assertEqual((first["missing_count"], second["missing_count"]), (1, 0))
         self.assertEqual(result["sequence"]["evaluated_count"], 3)
         self.assertEqual(result["sequence"]["outside_shared_count"], 1)
-        self.assertAlmostEqual(result["sequence"]["cace"], .25)
+        self.assertAlmostEqual(result["sequence"]["cace"], .2)
         self.assertEqual(result["sequence"]["status"], "partial")
 
     def test_rounding_boundary_row_is_cropped_by_original_id(self):
@@ -63,7 +84,7 @@ class ConditionalCoverageMetricTests(unittest.TestCase):
 
     def test_empty_and_fully_excluded_groups_remain_visible(self):
         result = evaluate_sequence(
-            record([10, 11, 12], [0, 0, 2], 3), predictions([10], [True]), 3, .9,
+            record([10, 11, 12], [0, 0, 2], 3), predictions([10], [False]), 3, .9,
         )
         self.assertEqual([group["group_size"] for group in result["groups"]], [2, 0, 1])
         self.assertEqual([group["missing_count"] for group in result["groups"]], [1, 0, 1])
@@ -73,7 +94,8 @@ class ConditionalCoverageMetricTests(unittest.TestCase):
             self.assertIsNone(group["undercoverage"])
         self.assertEqual(result["sequence"]["evaluated_group_count"], 1)
         self.assertEqual(result["sequence"]["empty_group_count"], 2)
-        self.assertAlmostEqual(result["sequence"]["cace"], .1)
+        self.assertAlmostEqual(result["sequence"]["cace"], .9)
+        self.assertAlmostEqual(result["sequence"]["wuc"], .9)
         self.assertEqual(result["sequence"]["status"], "partial")
 
     def test_all_excluded_predictions_produce_unavailable_metrics(self):
@@ -99,7 +121,7 @@ class ConditionalCoverageMetricTests(unittest.TestCase):
         second_predictions = predictions([20, 21], [False, True])
         second = evaluate_sequence(second_record, second_predictions, 2, .9)["sequence"]
         summary = aggregate_sequences([first, second])
-        self.assertAlmostEqual(summary["cace"], (.1 + .5) / 2)
+        self.assertAlmostEqual(summary["cace"], (0 + .45) / 2)
         self.assertAlmostEqual(summary["wuc"], .9 / 2)
         self.assertAlmostEqual(summary["worst_sequence_wuc"], .9)
         self.assertAlmostEqual(summary["mean_sequence_coverage"], .75)
@@ -115,7 +137,7 @@ class ConditionalCoverageMetricTests(unittest.TestCase):
         summary = aggregate_sequences([available, missing])
         self.assertEqual(summary["evaluated_sequence_count"], 1)
         self.assertEqual(summary["unavailable_sequence_count"], 1)
-        self.assertAlmostEqual(summary["cace"], .1)
+        self.assertEqual(summary["cace"], 0)
         self.assertEqual(summary["group_size"], 4)
         self.assertEqual(summary["missing_count"], 2)
         self.assertEqual(summary["pooled_coverage"], 1)

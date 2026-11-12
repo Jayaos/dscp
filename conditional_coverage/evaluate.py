@@ -18,7 +18,7 @@ from .artifacts import load_group_artifact
 from .config import REPO_ROOT, file_sha256, resolve_path
 from .data import _method_boundary, observed_sequence
 from .evaluation_config import load_evaluation_config, validate_evaluation_config
-from .metrics import aggregate_sequences, evaluate_sequence
+from .metrics import CACE_DEFINITION, aggregate_sequences, evaluate_sequence
 
 
 def _load_pickle(path):
@@ -157,6 +157,7 @@ def evaluate_saved_runs(config, *, dry_run=False, progress=print):
         "dataset": manifest.get("dataset"), "base_predictor": manifest.get("base_predictor"),
         "k": k, "nominal_coverage": config["nominal_coverage"],
         "policies": {
+            "cace_definition": CACE_DEFINITION,
             "coverage": "saved_per_observation_coverage_on_available_predictions",
             "group_membership": "unchanged_shared_groups_joined_by_original_target_index",
             "empty_groups": "null_coverage_excluded_from_cace_and_wuc_denominator",

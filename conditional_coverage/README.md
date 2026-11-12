@@ -376,8 +376,10 @@ missing counts when comparing methods with different exclusion rates.
 
 For nominal coverage `p`, each sequence reports:
 
-- `cace`: the equal-weight mean of `abs(group_coverage - p)` across groups
-  having evaluated predictions.
+- `cace`: mean group undercoverage, the equal-weight mean of
+  `max(p - group_coverage, 0)` across all groups having evaluated predictions.
+  Groups at or above nominal coverage contribute zero and remain in the
+  denominator.
 - `wuc`: the largest `max(p - group_coverage, 0)` across those groups.
 - `coverage`: pooled coverage over evaluated observations in that sequence.
 - `evaluated_group_count` and `empty_group_count`: the actual group denominator
@@ -387,6 +389,17 @@ When all K groups have predictions, CACE uses the experimental `1 / K`
 denominator. An empty group has null coverage and error values and is omitted
 from the sequence's CACE and WUC. A sequence with no evaluated predictions has
 null metrics and is counted as unavailable in the summary.
+
+For example, at nominal coverage 90%, group coverages of 85%, 88%, 90%, 92%,
+and 95% give CACE `(5 + 2 + 0 + 0 + 0) / 5 = 1.4` percentage points and
+WUC of 5 percentage points. The per-group `absolute_coverage_error` column
+remains available as a diagnostic, but CACE uses the `undercoverage` column.
+
+The `cace` output name is retained. New sequence and summary rows, and the
+JSON policy audit, record `cace_definition: mean_group_undercoverage` to
+distinguish this definition from older reports using absolute error. To
+update an existing report, rerun only evaluation with a new `output_dir`;
+reuse the saved groups and method logs.
 
 Dataset summaries average each sequence's CACE and WUC with equal sequence
 weight, using evaluable sequences. They also report `worst_sequence_wuc`,
