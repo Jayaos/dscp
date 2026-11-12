@@ -19,23 +19,16 @@ allow_chronological_fallback: true
 runs:
   - name: qr_rnn
     method: qr_cp
-    run_dir: results/qr_cp/air/lstm/rnn/nondecreasing/REPLACE_WITH_RUN_DIRECTORY
-    # For logs without resolved_config.yaml, supply the ORIGINAL run config:
-    # config_path: configs/qr_cp_configs/qr_rnn_lstm_air_config.yaml
-    # Select a pair only if multiple saved pairs share the nominal coverage:
-    # quantile_pair: [0.05, 0.95]
+    run_dir: /storage/home/hcoda1/0/jlee3541/r-yxie77-0/projects/dscp/results/qr_cp/air/lstm/rnn/nondecreasing
+
   - name: qr_transformer
     method: qr_cp
-    run_dir: results/qr_cp/air/lstm/transformer/nondecreasing/REPLACE_WITH_RUN_DIRECTORY
-  - name: iqn_rnn
-    method: iqn_cp
-    run_dir: results/iqn_cp/air/lstm/rnn/cosine_embedding/REPLACE_WITH_RUN_DIRECTORY
-  - name: iqn_transformer
-    method: iqn_cp
-    run_dir: results/iqn_cp/air/lstm/transformer/cosine_embedding/REPLACE_WITH_RUN_DIRECTORY
+    run_dir: /storage/home/hcoda1/0/jlee3541/r-yxie77-0/projects/dscp/results/qr_cp/air/lstm/transformer/nondecreasing
+
   - name: local_cp_rnn
     method: local_cp
-    run_dir: results/local_cp/air/lstm/rnn/REPLACE_WITH_RUN_DIRECTORY
+    run_dir: /storage/home/hcoda1/0/jlee3541/r-yxie77-0/projects/dscp/results/local_cp/air/lstm/rnn
+
   - name: local_cp_transformer
     method: local_cp
-    run_dir: results/local_cp/air/lstm/transformer/REPLACE_WITH_RUN_DIRECTORY
+    run_dir: /storage/home/hcoda1/0/jlee3541/r-yxie77-0/projects/dscp/results/local_cp/air/lstm/transformer
