@@ -8,6 +8,7 @@ from pathlib import Path
 import pickle
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import torch
@@ -96,7 +97,7 @@ class ConditionalCoveragePipelineTests(unittest.TestCase):
     def test_build_save_reload_has_shared_groups_and_independent_median_checkpoint(self):
         originals = {path: file_sha256(path) for path in (self.source_path, self.qr_path, self.split_path)}
         path = self.build()
-        self.assertEqual(path, self.directory / "groups")
+        self.assertEqual(path, self.directory / "groups" / "k5")
         manifest, sequences = load_group_artifact(path)
         record = sequences["station"]
         np.testing.assert_array_equal(record["calibration_indices"], np.arange(66))
@@ -122,8 +123,13 @@ class ConditionalCoveragePipelineTests(unittest.TestCase):
         self.assertEqual(manifest["test_policy"], "intersection_of_original_test_indices_before_prediction_exclusions")
         for original, digest in originals.items():
             self.assertEqual(file_sha256(original), digest)
-        with self.assertRaises(FileExistsError):
-            self.build()
+        saved_config = yaml.safe_load((path / "resolved_config.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(saved_config["output_dir"], str(self.directory / "groups"))
+        with patch("conditional_coverage.encoder.train_encoder") as train:
+            with self.assertRaises(FileExistsError):
+                self.build(saved_config)
+            train.assert_not_called()
+        self.assertFalse((path / "k5").exists())
         repeated_path = self.build(dict(self.config, output_dir="groups_repeated"))
         repeated_manifest, repeated_sequences = load_group_artifact(repeated_path)
         self.assertEqual(manifest["grouping_id"], repeated_manifest["grouping_id"])
@@ -155,6 +161,8 @@ class ConditionalCoveragePipelineTests(unittest.TestCase):
         before = set(self.directory.rglob("*"))
         result = self.build(dry_run=True)
         self.assertTrue(result["dry_run"])
+        self.assertEqual(result["output_dir"], str(self.directory / "groups" / "k5"))
+        self.assertEqual(result["config"]["output_dir"], str(self.directory / "groups"))
         self.assertEqual(result["sequences"][0]["calibration_end"], 66)
         self.assertEqual(result["sequences"][0]["test_start"], 67)
         self.assertEqual(result["sequences"][0]["boundary_gap_count"], 1)
@@ -169,8 +177,9 @@ class ConditionalCoveragePipelineTests(unittest.TestCase):
         output = io.StringIO()
         with redirect_stdout(output):
             result = main(["--config", str(config_path), "--output-dir", str(destination), "--dry-run"])
-        self.assertEqual(result["output_dir"], str(destination))
-        self.assertEqual(json.loads(output.getvalue())["output_dir"], str(destination))
+        self.assertEqual(result["output_dir"], str(destination / "k5"))
+        self.assertEqual(json.loads(output.getvalue())["output_dir"], str(destination / "k5"))
+        self.assertEqual(result["config"]["output_dir"], str(destination))
         self.assertFalse(destination.exists())
         self.assertFalse((self.directory / "groups").exists())
 
@@ -210,6 +219,7 @@ class ConditionalCoveragePipelineTests(unittest.TestCase):
         config = copy.deepcopy(self.config)
         config["clustering"]["k"] = 7
         path = self.build(config)
+        self.assertEqual(path, self.directory / "groups" / "k7")
         manifest, sequences = load_group_artifact(path)
         self.assertEqual(manifest["k"], 7)
         self.assertEqual(set(sequences["station"]["groups"]), {7})
@@ -219,6 +229,29 @@ class ConditionalCoveragePipelineTests(unittest.TestCase):
         self.assertEqual(int(group["test_counts"].sum()), 34)
         saved_config = yaml.safe_load((path / "resolved_config.yaml").read_text(encoding="utf-8"))
         self.assertEqual(saved_config["clustering"]["k"], 7)
+
+    def test_different_k_artifacts_coexist_without_overwriting_existing_base_files(self):
+        base = self.directory / "groups"
+        base.mkdir()
+        legacy_manifest = base / "manifest.json"
+        legacy_contents = b'{"legacy": "existing flat artifact"}\n'
+        legacy_manifest.write_bytes(legacy_contents)
+        first_path = self.build()
+        originals = {path: file_sha256(path) for path in first_path.rglob("*") if path.is_file()}
+
+        changed = copy.deepcopy(self.config)
+        changed["clustering"]["k"] = 3
+        second_path = self.build(changed)
+        self.assertEqual(first_path, base / "k5")
+        self.assertEqual(second_path, base / "k3")
+        self.assertEqual(load_group_artifact(first_path)[0]["k"], 5)
+        self.assertEqual(load_group_artifact(second_path)[0]["k"], 3)
+        self.assertEqual(legacy_manifest.read_bytes(), legacy_contents)
+        self.assertEqual(originals, {path: file_sha256(path) for path in originals})
+        with patch("conditional_coverage.encoder.train_encoder") as train:
+            with self.assertRaises(FileExistsError):
+                self.build(changed)
+            train.assert_not_called()
 
     def test_k_larger_than_available_calibration_contexts_fails_before_training(self):
         config = copy.deepcopy(self.config)

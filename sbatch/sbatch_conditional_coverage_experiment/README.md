@@ -12,11 +12,16 @@ repository's existing jobs; adjust them for your allocation when needed.
 Choose a grouping preset, such as
 `configs/conditional_coverage_configs/air_lstm.yaml`. Check its source
 `data_path`, `output_dir`, `clustering.k`, and comparison split settings.
+The grouping `output_dir` is a base directory. Step 1 saves the complete
+artifact in `<output_dir>/k<K>`, using the configured `clustering.k`.
 
-In `configs/conditional_coverage_configs/evaluate_example.yaml`, replace each
-run-directory placeholder with the real directory containing `log.pkl`.
-Set `groups_dir` to the grouping job's `output_dir`, and choose a new evaluation
-`output_dir`. The requested `nominal_coverage` must match the saved intervals.
+In `configs/conditional_coverage_configs/evaluate_air_lstm.yaml`, set each
+`run_dir` to the real directory containing `log.pkl`. Set `groups_dir` to the
+grouping job's `<output_dir>/k<K>`, and choose a new evaluation `output_dir`.
+For example, a grouping base of `data/conditional_coverage/air/chronos/groups`
+with `clustering.k: 5` requires
+`groups_dir: data/conditional_coverage/air/chronos/groups/k5` in the corresponding
+evaluation configuration. The requested `nominal_coverage` must match the saved intervals.
 Keep `allow_chronological_fallback: true` to support older complete logs without
 explicit indices.
 
@@ -57,7 +62,7 @@ After step 1 completes successfully:
 
 ```bash
 sbatch sbatch/sbatch_conditional_coverage_experiment/step2_evaluate.sbatch \
-  --config configs/conditional_coverage_configs/evaluate_example.yaml
+  --config configs/conditional_coverage_configs/evaluate_air_lstm.yaml
 ```
 
 This CPU job reads the shared groups and existing QR-CP, IQN-CP, and Local-CP
@@ -74,7 +79,7 @@ group_job=$(sbatch --parsable \
 
 sbatch --dependency="afterok:${group_job%%;*}" \
   sbatch/sbatch_conditional_coverage_experiment/step2_evaluate.sbatch \
-  --config configs/conditional_coverage_configs/evaluate_example.yaml
+  --config configs/conditional_coverage_configs/evaluate_air_lstm.yaml
 ```
 
 Prepare the evaluation YAML before submitting this pair. The dependency checks
@@ -84,16 +89,21 @@ job success; `groups_dir` must still identify the artifact produced by step 1.
 
 Both scripts forward additional arguments to their existing Python commands.
 For example, append `--dry-run` to audit inputs without creating files, or
-`--output-dir /path/to/new/output` to choose a new destination. If you override
-the grouping destination, update the evaluation YAML's `groups_dir` too.
-Existing output directories are refused.
+`--output-dir /path/to/new/output` to choose a new destination. For step 1, this
+overrides the base directory, and the artifact is saved to
+`/path/to/new/output/k<K>`; update the evaluation YAML's `groups_dir` accordingly.
+Different K subdirectories may coexist under one base. An existing artifact for
+the selected K is refused. For step 2, `--output-dir` remains the exact report
+directory, and an existing report directory is refused.
 
 A grouping dry run creates no artifact, so it cannot supply groups to a real
 evaluation job. It reports the planned worker count without starting training
-workers. An evaluation dry run requires groups that already exist.
+workers, and its top-level `output_dir` shows the final K subdirectory. An
+evaluation dry run requires groups that already exist. Older flat artifacts
+remain usable by setting `groups_dir` to their original exact directory.
 
 Without `--config`, step 1 defaults to `air_lstm.yaml` and step 2 defaults to
-`evaluate_example.yaml`. You can also set `CC_GROUP_CONFIG` and
+`evaluate_air_lstm.yaml`. You can also set `CC_GROUP_CONFIG` and
 `CC_EVALUATION_CONFIG` before submission. Explicit command-line configuration
 paths take precedence over these defaults.
 

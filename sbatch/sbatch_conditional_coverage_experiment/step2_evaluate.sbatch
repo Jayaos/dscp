@@ -27,5 +27,5 @@ conda activate dscp
 # Edit groups_dir and run_dir in this YAML before submitting. No model training.
 # CLI options (including --config and --dry-run) override the defaults below.
 exec python -u -m conditional_coverage.evaluate \
-  --config "${CC_EVALUATION_CONFIG:-configs/conditional_coverage_configs/evaluate_example.yaml}" \
+  --config "${CC_EVALUATION_CONFIG:-configs/conditional_coverage_configs/evaluate_air_lstm.yaml}" \
   "$@"

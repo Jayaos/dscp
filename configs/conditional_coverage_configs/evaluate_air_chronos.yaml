@@ -2,7 +2,7 @@
 # Replace EVERY REPLACE_WITH_RUN_DIRECTORY path, or remove unneeded run entries.
 # All selected runs must use this grouping artifact's original source timeline.
 path_base: ../..
-groups_dir: /storage/project/r-yxie77-0/jlee3541/projects/dscp/results/conditional_coverage/air/chronos/groups
+groups_dir: /storage/project/r-yxie77-0/jlee3541/projects/dscp/data/conditional_coverage/air/chronos/groups/k5
 output_dir: results/conditional_coverage/air/chronos/evaluation
 nominal_coverage: 0.9
 

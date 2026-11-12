@@ -270,11 +270,12 @@ def build_shared_groups(config, *, dry_run=False, progress=print):
     """Prepare one immutable grouping artifact for the selected comparisons.
 
     Accept a configuration path or a mapping (mapping paths are relative to
-    cwd unless path_base is explicit). Existing destinations are never replaced.
+    cwd unless path_base is explicit). Each artifact is saved in output_dir/kK,
+    where K is clustering.k. Existing artifacts for the same K are never replaced.
     """
     config = (load_config(config) if isinstance(config, (str, Path))
               else validate_config(config))
-    output = Path(config["output_dir"])
+    output = Path(config["output_dir"]) / f"k{config['clustering']['k']}"
     if not dry_run and output.exists():
         raise FileExistsError(f"Grouping artifact already exists: {output}. Choose a new output_dir.")
     data, comparisons, keys, audit = inspect_inputs(config)
@@ -382,7 +383,8 @@ def build_shared_groups(config, *, dry_run=False, progress=print):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True, help="Evaluator grouping YAML.")
-    parser.add_argument("--output-dir", type=Path, help="New output directory; never overwritten.")
+    parser.add_argument("--output-dir", type=Path,
+                        help="Base output directory; saves to its k<K> subdirectory without overwriting.")
     parser.add_argument("--device", help="cpu, cuda, or cuda:N.")
     parser.add_argument("--cpu-workers", type=int,
                         help="Train independent sequences concurrently on CPUs, one thread per worker.")

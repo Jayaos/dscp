@@ -284,7 +284,7 @@ class SavedConditionalCoverageTests(unittest.TestCase):
             validate_evaluation_config(config)
 
     def test_example_config_has_only_supported_methods_and_enables_legacy_fallback(self):
-        path = Path(__file__).resolve().parents[1] / "configs/conditional_coverage_configs/evaluate_example.yaml"
+        path = Path(__file__).resolve().parents[1] / "configs/conditional_coverage_configs/evaluate_air_lstm.yaml"
         config = load_evaluation_config(path)
         self.assertGreater(len(config["runs"]), 0)
         self.assertTrue(config["allow_chronological_fallback"])
