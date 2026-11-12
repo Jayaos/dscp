@@ -17,11 +17,14 @@ class LSTM(torch.nn.Module):
         self.lstm_layers = torch.nn.LSTM(input_size=embedding_dim, hidden_size=hidden_dim, num_layers=num_layers, batch_first=True)
         self.output_fc = torch.nn.Linear(hidden_dim, output_dim)
 
-    def forward(self, x):
+    def encode(self, x):
+        """Return hidden features (batch, time, hidden_dim) for normalized windows."""
         x = self.input_embedding(x) 
         output, (_,_) = self.lstm_layers(x)
+        return output
 
-        return self.output_fc(output)
+    def forward(self, x):
+        return self.output_fc(self.encode(x))
     
 
 class LSTMPredictor:
@@ -305,7 +308,8 @@ class LSTMPredictor:
         print("average MSE : {}".format(self.average_mse))
         print("average MAE : {}".format(self.average_mae))
 
-    def save(self, save_dir):
+    def save(self, save_dir, save_model=False):
+        """Save forecasts and optionally a reloadable checkpoint for latent-space CP."""
 
         os.makedirs(save_dir, exist_ok=True)
         data_record_save_path = os.path.join(save_dir, f"lstm_{self.data_type}_data.pkl")
@@ -339,7 +343,66 @@ class LSTMPredictor:
 
         save_data(data_record_save_path, data_record)
         save_data(predictor_results_save_path, predictor_results)
+
+        if save_model:
+            # All series share statistics fitted on the pooled inner-training prefixes.
+            normalization_source = next(iter(self.data_processed.values()))
+            normalization = {
+                name: torch.as_tensor(normalization_source[source]).detach().cpu().clone()
+                for name, source in (
+                    ("x_mean", "train_x_mu"),
+                    ("x_std", "train_x_std"),
+                    ("y_mean", "train_y_mu"),
+                    ("y_std", "train_y_std"),
+                )
+            }
+            normalization["epsilon"] = 1e-8
+            checkpoint = {
+                "format_version": 1,
+                "model_class": "LSTM",
+                "model_config": {
+                    "input_dim": self.input_dim,
+                    "embedding_dim": self.embedding_dim,
+                    "hidden_dim": self.hidden_dim,
+                    "output_dim": self.lstm.output_fc.out_features,
+                    "num_layers": self.num_layers,
+                },
+                "model_state_dict": {
+                    name: value.detach().cpu()
+                    for name, value in self.lstm.state_dict().items()
+                },
+                "normalization": normalization,
+                # Primitive metadata and tensors allow torch.load(weights_only=True).
+                "metadata": {
+                    **{
+                        name: value.item() if isinstance(value, np.generic) else value
+                        for name, value in predictor_results.items()
+                    },
+                    "data_type": self.data_type,
+                    "input_order": ["covariates", "lagged_target"],
+                },
+            }
+            model_save_path = os.path.join(save_dir, f"lstm_{self.data_type}_model.pt")
+            torch.save(checkpoint, model_save_path)
+            print("saved LSTM checkpoint to {}".format(model_save_path))
     
+
+def load_lstm_checkpoint(path, device="cpu"):
+    """Return the evaluation-mode LSTM and its checkpoint, including normalization.
+
+    Normalization tensors stay on CPU. Move them to the input device when using
+    tensor preprocessing. Model parameters can be frozen independently of latent
+    feature gradients with ``model.requires_grad_(False)``.
+    """
+    checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+    if checkpoint.get("format_version") != 1 or checkpoint.get("model_class") != "LSTM":
+        raise ValueError("Unsupported LSTM checkpoint format")
+    model = LSTM(**checkpoint["model_config"])
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.to(device)
+    model.eval()
+    return model, checkpoint
+
 
 class LSTMPredictorDataset(Dataset):
     def __init__(self, X, Y):

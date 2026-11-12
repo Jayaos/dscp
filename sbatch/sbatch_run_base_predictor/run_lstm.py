@@ -16,6 +16,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_shared_data_args(parser, "lstm")
     parser.add_argument(
+        "--save-model",
+        action="store_true",
+        help="Save trained LSTM weights and preprocessing in a .pt checkpoint beside the forecast files.",
+    )
+    parser.add_argument(
         "--predictor-train-ratio",
         type=float,
         default=0.33,
@@ -103,6 +108,7 @@ def main() -> None:
     print(f"Data type: {args.data_type}")
     print(f"Data dir: {data_dir}")
     print(f"Save dir: {save_dir}")
+    print(f"Save model: {args.save_model}")
     print(f"Predictor train ratio: {args.predictor_train_ratio}")
     print(f"Window length: {args.window_length}")
     print(f"Embedding dim: {args.embedding_dim}")
@@ -136,7 +142,7 @@ def main() -> None:
         seed=args.seed,
         device=device,
     )
-    predictor.save(str(save_dir))
+    predictor.save(str(save_dir), save_model=args.save_model)
 
 
 if __name__ == "__main__":

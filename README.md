@@ -673,6 +673,66 @@ Chronos rolling origins are defined in
 the learned-model defaults are defined by the corresponding `run_*.py`
 launchers.
 
+### Saving the LSTM for latent-space conformal methods
+
+Pass `--save-model` to the LSTM launcher to save the selected trained model
+alongside its usual forecast and result files. For example, from the repository
+root on Linux:
+
+```bash
+PYTHONPATH="$PWD:$PWD/sbatch:${PYTHONPATH:-}" python -m sbatch_run_base_predictor.run_lstm sapflux-solo3-large \
+  --data-dir data/sapflux/0.1.5/prepared \
+  --save-dir data/sapflux-solo3-large/lstm \
+  --max-epoch 50 --device cuda --save-model
+```
+
+The additional file is `lstm_<data_type>_model.pt`. It contains CPU model weights,
+architecture dimensions, the pooled inner-training normalization statistics and
+their `1e-8` epsilon, window length, input order, and split/evaluation metadata.
+These are the same selected weights and statistics used to generate the saved
+forecasts. The flag defaults to off; this is an inference checkpoint and does not
+include optimizer state or cached hidden features.
+
+Checkpoint-enabled Slurm launchers use the same training settings and output
+directories as the existing dataset launchers:
+
+```bash
+sbatch sbatch/sbatch_run_base_predictor/run_lstm_air_save_model.sbatch
+sbatch sbatch/sbatch_run_base_predictor/run_lstm_solar_save_model.sbatch
+sbatch sbatch/sbatch_run_base_predictor/run_lstm_sapflux_save_model.sbatch
+```
+
+These jobs regenerate the forecast/result files together with the matching
+checkpoint. Keep them paired; a checkpoint from a separate training run need not
+match existing forecasts. Submit one job per dataset/output directory at a time.
+
+Reload a checkpoint and access its feature extractor and prediction head with:
+
+```python
+from base_predictor.lstm_predictor import load_lstm_checkpoint
+
+model, checkpoint = load_lstm_checkpoint(
+    "data/sapflux-solo3-large/lstm/lstm_sapflux-solo3-large_model.pt",
+    device="cpu",
+)
+model.requires_grad_(False)
+stats = checkpoint["normalization"]
+# normalized_windows: float32 tensor (batch, window_length, covariates + 1),
+# with normalized historical covariates followed by the normalized lagged target.
+features = model.encode(normalized_windows)[:, -1, :]
+normalized_prediction = model.output_fc(features)
+prediction = normalized_prediction * (stats["y_std"] + stats["epsilon"]) + stats["y_mean"]
+```
+
+Normalize covariates using `(x - x_mean) / (x_std + epsilon)` and targets using
+the corresponding `y_mean`/`y_std`. Statistics remain on CPU after loading; move
+them to the input device for tensor preprocessing on a GPU. Rebuild each rolling
+window from the matching data artifact's training suffix and previously observed
+held-out values, excluding the target being predicted. CT-SSF can then optimize
+detached latent features with gradients enabled through the frozen prediction
+head. This export prepares the base predictor; it does not implement CT-SSF's
+calibration or interval construction.
+
 ### Sapflow (`sapflux-solo3-large`)
 
 The paper-faithful Sapflow input is loaded from
