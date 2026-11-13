@@ -3,6 +3,8 @@ data/
 misc/
 HopCPT/
 KOWCPI_Codes/
+CT-SSF/
+output/
 
 __pycache__/
 *.py[cod]

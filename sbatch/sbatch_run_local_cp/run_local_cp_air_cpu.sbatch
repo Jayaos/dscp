@@ -3,10 +3,10 @@
 #SBATCH --account=gts-yxie77-paid
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --array=0-2
+#SBATCH --array=0-5
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=48G
-#SBATCH -t120
+#SBATCH -t240
 #SBATCH -qinferno
 #SBATCH -o Report-local-cp-air-cpu-%A_%a.out
 #SBATCH --mail-type=ALL
