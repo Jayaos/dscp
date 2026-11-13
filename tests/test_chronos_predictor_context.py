@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+import torch  # Keep Torch loaded outside patch.dict's sys.modules rollback.
 
 
 # Importing the predictor should not require the optional Chronos dependency or

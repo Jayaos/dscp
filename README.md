@@ -702,6 +702,23 @@ sbatch sbatch/sbatch_run_base_predictor/run_lstm_solar_save_model.sbatch
 sbatch sbatch/sbatch_run_base_predictor/run_lstm_sapflux_save_model.sbatch
 ```
 
+CPU versions request 12 CPUs and 48 GB of memory per job, with the same
+training settings, 120-minute time limit, and `lstm_model_saved` output
+directories as the GPU checkpoint jobs:
+
+```bash
+sbatch sbatch/sbatch_run_base_predictor/run_lstm_air_save_model_cpu.sbatch
+sbatch sbatch/sbatch_run_base_predictor/run_lstm_solar_save_model_cpu.sbatch
+sbatch sbatch/sbatch_run_base_predictor/run_lstm_sapflux_save_model_cpu.sbatch
+```
+
+The LSTM pools all series into one global model. These jobs use CPU thread
+parallelism within that model, with OpenMP/MKL/BLAS thread counts taken from
+`SLURM_CPUS_PER_TASK`; Local-CP's independent per-sequence workers do not apply
+to this shared-model training. The scripts select `--device cpu`, hide GPUs,
+and accept a `RUNPATH` environment override for the repository location.
+Override the allocation with, for example, `sbatch --cpus-per-task=8 <script>`.
+
 These jobs regenerate the forecast/result files together with the matching
 checkpoint. Keep them paired; a checkpoint from a separate training run need not
 match existing forecasts. Submit one job per dataset/output directory at a time.
@@ -1382,3 +1399,19 @@ prefix and likewise excludes the final test suffix during tuning. Legacy tuners 
 rank candidates on their test partition and should not be assumed to provide
 an untouched final evaluation. All methods in a final comparison should use
 the same base-predictor artifact and compatible CP split boundaries.
+
+## CT-SSF Chronos experiments
+
+Chronos can export the actual forecast features, normalization, alignment, and
+frozen median head with `--save-ctssf`. New export jobs are
+`sbatch/sbatch_run_base_predictor/run_chronos_{air,solar,sapflux}_ctssf.sbatch`;
+matching experiment jobs are under `sbatch/sbatch_run_ct_ssf/`, with presets in
+`configs/ct_ssf_configs/`. The extra artifacts go to separate `chronos_ctssf`
+directories and retain the normal saved-forecast fields for other baselines.
+
+This baseline is labeled `ct_ssf_chronos_adapted`: the official repository has
+an incomplete attention/weighted-gradient path. See the
+[implementation provenance](baselines/ct_ssf/UPSTREAM.md) for the recovered
+optimizer and documented causal attention adaptation, and the
+[run instructions](baselines/ct_ssf/README.md) for the two-stage Slurm workflow,
+comparison protocol, outputs, and tests.

@@ -5,7 +5,7 @@ from base_predictor.chronos_predictor import ChronosPredictor
 from base_predictor.data import BasePredictorData
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _default_data_dir(data_type: str) -> Path:
@@ -82,6 +82,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--save-ctssf", action="store_true",
+        help="Export forecast features, alignment, normalization, and the frozen median head for CT-SSF.",
+    )
+    parser.add_argument(
+        "--model-revision", default=None,
+        help="Optional Hugging Face model commit/ref for reproducible feature generation.",
+    )
+    parser.add_argument(
         "--device",
         default="cuda",
         help="Device passed to Chronos2Pipeline.from_pretrained(device_map=...).",
@@ -107,8 +115,8 @@ def main() -> None:
     base_predictor_data = BasePredictorData()
     base_predictor_data.load_data(args.data_type, str(data_dir))
 
-    predictor = ChronosPredictor(base_predictor_data, device)
-    predictor.predict(args.window_length, args.prediction_length)
+    predictor = ChronosPredictor(base_predictor_data, device, model_revision=args.model_revision)
+    predictor.predict(args.window_length, args.prediction_length, save_ctssf=args.save_ctssf)
     predictor.save(str(save_dir))
 
 

@@ -1,0 +1,40 @@
+# CT-SSF Chronos adaptation; see baselines/ct_ssf/UPSTREAM.md.
+seed: 2026
+device: cuda
+num_threads: 4
+
+data:
+  data_path: "./data/sapflux-solo3-large/chronos_ctssf/chronos_sapflux-solo3-large_data.pkl"
+  head_path: "./data/sapflux-solo3-large/chronos_ctssf/chronos_sapflux-solo3-large_ctssf_head.pt"
+  train_ratio: 0.4
+  valid_ratio: 0.1
+  calibration_ratio: 0.16
+  test_ratio: 0.34
+
+model:
+  target_quantiles:
+    - [0.05, 0.95]
+    - [0.9, 0.1]
+  calibration_size: 500
+  rolling_calibration: true
+  weighting: learned_attention
+  bound_method: crown
+  inverse_steps: 200
+  inverse_lr: 0.01
+  inverse_optimizer: adam
+  batch_size: 256
+
+attention:
+  embedding_dim: 32
+  temperature: 0.5
+  memory_size: 128
+  epochs: 30
+  patience: 5
+  batch_size: 64
+  learning_rate: 0.001
+
+plotting:
+  plotting: false
+  plotting_seq_len: 200
+
+saving_dir: "./results/ct_ssf/sapflux/chronos/seed_${seed}/${now:%Y-%m-%d_%H-%M-%S_%f}/"

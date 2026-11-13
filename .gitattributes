@@ -41,3 +41,8 @@ sbatch/sbatch_conditional_coverage_experiment/*.sbatch text eol=lf
 
 # Keep LSTM checkpoint launchers compatible with Slurm after Windows checkouts.
 sbatch/sbatch_run_base_predictor/run_lstm_*_save_model.sbatch text eol=lf
+sbatch/sbatch_run_base_predictor/run_lstm_*_save_model_cpu.sbatch text eol=lf
+
+# Keep Chronos CT-SSF export and experiment launchers compatible with Slurm.
+sbatch/sbatch_run_base_predictor/run_chronos_*_ctssf.sbatch text eol=lf
+sbatch/sbatch_run_ct_ssf/*.sbatch text eol=lf
