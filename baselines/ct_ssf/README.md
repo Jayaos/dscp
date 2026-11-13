@@ -79,7 +79,19 @@ python -m sbatch.sbatch_run_ct_ssf.run_ct_ssf --dataset air --base-predictor lst
 python -m sbatch.sbatch_run_ct_ssf.run_ct_ssf --dataset air --base-predictor lstm --device cuda
 ```
 
-Use `--device cpu` for CPU execution. Override paired file locations with
+Use `--device cpu` for CPU execution. Air also has a dedicated CPU Slurm job:
+
+```bash
+sbatch sbatch/sbatch_run_ct_ssf/run_ct_ssf_lstm_air_cpu.sbatch
+```
+
+It requests 12 CPU cores and 48 GB of memory, with no GPU allocation, and runs
+the same saved LSTM/CT-SSF pipeline in the `dscp` environment. It can load a
+checkpoint originally trained on GPU. Adding `--device cpu` to a GPU sbatch
+script changes computation but does not remove that script's GPU allocation;
+use the dedicated CPU script when submitting a CPU job.
+
+Override paired file locations with
 `--data-path /path/lstm_air-10_data.pkl --model-path /path/lstm_air-10_model.pt`.
 An explicit LSTM YAML selects the predictor via `base_predictor: lstm`.
 Results are written to `results/ct_ssf/<dataset>/lstm/seed_<seed>/<timestamp>/`.
