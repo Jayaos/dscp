@@ -1,1 +1,1 @@
-"""Chronos adaptation of CT-SSF; see README.md and UPSTREAM.md for scope."""
+"""Chronos and LSTM adaptations of CT-SSF; see README.md and UPSTREAM.md."""

@@ -1,8 +1,8 @@
 # CT-SSF provenance and implementation choices
 
-This experiment is labeled **`ct_ssf_chronos_adapted`**, not an exact reproduction
-of the authors' reported CT-SSF results. It implements a usable Chronos semantic
-feature baseline using the authors' latent inversion, weighted conformal
+These experiments are labeled **`ct_ssf_chronos_adapted`** and
+**`ct_ssf_lstm_adapted`**, not exact reproductions of the authors' reported
+CT-SSF results. They implement semantic feature baselines using latent inversion, weighted conformal
 quantile, and output-band construction. It makes the missing attention path
 explicit and keeps test labels out of model fitting and interval construction.
 
@@ -20,6 +20,35 @@ explicit and keeps test labels out of model fitting and interval construction.
 
 No upstream repository is vendored or imported by this baseline.
 
+## LSTM adapter
+
+The LSTM adapter reuses this project's existing `--save-model` checkpoint and
+paired prediction file. It freezes the trained LSTM and reconstructs each
+held-out window with the checkpoint's training-only normalization. The semantic
+feature is the final hidden state, `encode(window)[:, -1, :]`; the head is the
+saved scalar `output_fc`. Every one-step target has its own rolling window ending
+at the previous timestamp. Training history supplies the first held-out window.
+
+The existing approximate feature optimizer and reconstructed attention objective
+are shared with Chronos. LSTM's affine head admits exact L-infinity bounds,
+`w*z+b +/- r*||w||_1`, followed by inverse target normalization. This replaces
+Chronos's nonlinear-head relaxation only. Exact bounds do not resolve finite-step
+inversion error or recover Eq. (7)'s adaptive gradient weights.
+
+The 40%/10%/16%/34% attention-training/validation/calibration/test split applies
+only to the saved held-out suffix; it does not retrain the base model. Each
+reconstructed forecast must agree with its saved prediction. Outputs record the
+head and full-checkpoint fingerprints, raw timestamps, attention objective,
+inversion settings/errors, and actual output coverage. The Chronos-specific
+choices in the table below remain applicable only to the Chronos adapter.
+
+Version 2 additionally aligns with the **locally repaired** `CT-SSF/` clone's
+`conformal/attention.py` and feature optimizer. Those repairs are not upstream
+author code. The shared reconstruction uses displacement-similarity KL attention,
+joint calibration/test masses, aligned scores, and separate actual output and
+feature coverage. The clone's MLP training/startup fixes do not apply to this
+already pretrained, frozen Chronos predictor.
+
 ## Why this is an adaptation
 
 The inspected CT-SSF HEAD is not executable as published. `main.py` references
@@ -34,7 +63,9 @@ is imported without a matching definition.
 The paper's Algorithm 1 also writes test outcomes into its weight/feature update.
 A forecasting experiment cannot use an unrevealed test outcome to construct its
 own interval. The paper does not provide enough executable detail to recover a
-unique causal attention objective or its adaptive gradient weights.
+unique causal attention objective. Eq. (7) defines a weighted gradient update;
+this implementation has not reconstructed the mapping that supplies those
+adaptive coordinate weights and retains uniform-gradient inversion.
 
 | Component | This implementation |
 | --- | --- |
@@ -45,22 +76,33 @@ unique causal attention objective or its adaptive gradient weights.
 | Inversion loss | Squared error in the head's output scale, before inverse `sinh` and affine normalization. These transforms are invertible, so an exact solution has the same target constraint. The finite optimization path differs from raw-response loss. |
 | Inversion weights | Uniform. The paper's Eq. (7) adaptive gradient weighting is **not reconstructed**. No claim of exact CT-SSF reproduction is made. |
 | Optimizer settings | Configurable SGD/Adam, fixed steps; presets use Adam, 200 steps, learning rate 0.01. These are starting settings, not tuned paper parameters. Sum of independent per-row losses avoids changing SGD's learning rate with execution batch size. |
-| Relevance learning | DSCP repair: shared two-layer query/key projection, cosine attention, trained to predict standardized `log1p(score)` from earlier scores. Inputs are forecast features and output-position one-hot encoding. No current outcome or current residual enters a query. |
+| Relevance learning | Same objective as the local clone repair: shared two-layer query/key projection, cosine attention, trained with KL divergence to semantic-error similarity. Errors are displacement vectors `u-z`, standardized per coordinate. Inputs are forecast features and output-position one-hot encoding. No current outcome or current residual enters a query. |
 | Training / validation | Chronological 40%/10%; validation chooses the attention epoch. Feature normalization and objective normalization use the training prefix only. Attention is frozen before the next 16% calibration fold. |
 | Weighted quantile | Eq. (8), with calibration weights and a test weight on the **same scale**. The test atom is at positive infinity. Low support can therefore yield an infinite interval. |
 | Band estimation | Analytic IBP or single-hidden-layer CROWN for an L-infinity ball. CROWN is intersected with IBP. Monotone `sinh`/affine inversion maps bounds to original response units. This replaces Auto-LiRPA for this supported head architecture only. |
 | Evaluation | Final 34%, with a sliding window of the latest 500 eligible scores. Test score t can enter the pool only for intervals after t. Uniform weighting is available as a FeatureCP-style ablation. |
 
-The attention objective uses a softmax over the preceding `memory_size` rows,
-excluding the query itself. Training may shuffle query rows but never their
-causal memory. The fitted embedding gives calibration weight
-`exp((dot(query, key) - dot(query, query)) / temperature)` and test weight 1.
-The common shift cancels in the normalized conformal distribution. This is an
-error-relevance surrogate, not the unpublished author attention implementation.
+The teacher distribution is `softmax(-mean((e_i-e_j)^2))`, using standardized
+semantic errors. Training minimizes KL(teacher || feature attention). Unlike
+the clone's randomly sampled proper-training memory, Chronos uses the preceding
+`memory_size` rows, excluding the query itself. Training may shuffle query rows
+but never their causal memory. The following validation fold selects the epoch;
+normalization statistics use only the training fold. Thus the objective and
+architecture align with the clone, while the temporal protocol remains DSCP's.
+
+At inference, softmax jointly normalizes calibration logits
+`dot(query, key) / temperature` and the self-logit
+`dot(query, query) / temperature` in float64. The weighted quantile receives both
+calibration and test masses, rescales them together to avoid overflow, and sorts
+score/weight pairs together. This is a reconstruction, not the unpublished
+author attention implementation. It replaces version 1's log-score regression;
+new checkpoints and results include implementation/objective version metadata.
 
 The score is an approximate surrogate distance, not a proven solution of the
 infimum in Eq. (6). Logs include remaining inversion error separately for every
-fold. Neither learned weights nor time-series dependence automatically satisfy
+fold, including relative squared errors in model and response units. Actual
+output coverage remains the primary metric; feature-ball and reconstructed
+output coverage are separately named diagnostics. Neither learned weights nor time-series dependence automatically satisfy
 the assumptions needed for exact finite-sample coverage. Bounds enclose the
 latent ball; that fact alone does not guarantee empirical coverage of outcomes.
 Float64 bounds include an outward numerical margin but are not a formal

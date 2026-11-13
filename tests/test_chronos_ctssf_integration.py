@@ -16,6 +16,7 @@ from chronos.chronos2.model import Chronos2Model
 from base_predictor.chronos_features import ChronosFeatureCapture, export_chronos_head, load_chronos_head
 from base_predictor.chronos_predictor import ChronosPredictor
 from baselines.ct_ssf.data import prepare_sequence
+from baselines.ct_ssf.run_ct_ssf import evaluate_sequence
 
 
 def tiny_pipeline(arcsinh=True, patch_size=16):
@@ -53,6 +54,22 @@ def test_export_reconstructs_real_chronos_and_preserves_forecasts(tmp_path, cova
     assert saved["ctssf"]["features"].shape[0] < len(ordinary)
     assert len(pipeline.model.output_patch_embedding._forward_pre_hooks) == 0
     assert len(pipeline.model.instance_norm._forward_hooks) == 0
+    config = {
+        "seed": 7,
+        "data": {"train_ratio": 0.4, "valid_ratio": 0.1, "calibration_ratio": 0.16, "test_ratio": 0.34},
+        "model": {"target_quantiles": [[0.05, 0.95]], "inverse_steps": 10, "batch_size": 16},
+        "attention": {"epochs": 2, "embedding_dim": 4, "memory_size": 4},
+    }
+    result = evaluate_sequence("series", saved, config, head, artifact, checkpoint_dir=tmp_path)
+    assert result["metadata"]["attention_training"]["objective"] == "semantic_error_similarity_kl"
+    assert result["metadata"]["attention_training"]["semantic_error_dim"] == 8
+    assert (tmp_path / result["metadata"]["attention_checkpoint"]).is_file()
+    interval = result["evaluation_results"][(0.05, 0.95)]
+    start = prepared["boundaries"]["test_start"]
+    np.testing.assert_array_equal(interval["target_y"], prepared["y"][start:])
+    assert interval["avg_coverage"] == np.mean(interval["coverage"])
+    assert not np.isnan(interval["lower_interval"]).any()
+    assert not np.isnan(interval["upper_interval"]).any()
 
 
 def test_capture_removes_hooks_on_exception_and_rejects_unsupported_head():

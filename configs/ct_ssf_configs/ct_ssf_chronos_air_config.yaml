@@ -1,4 +1,5 @@
-# CT-SSF Chronos adaptation; see baselines/ct_ssf/UPSTREAM.md.
+# CT-SSF Chronos adaptation v2: semantic-error similarity KL attention.
+# See baselines/ct_ssf/UPSTREAM.md; inversion settings require validation tuning.
 seed: 2026
 device: cuda
 num_threads: 4

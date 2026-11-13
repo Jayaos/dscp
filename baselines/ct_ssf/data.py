@@ -9,11 +9,16 @@ from base_predictor.chronos_features import FEATURE_FORMAT_VERSION
 
 
 def prepare_sequence(item, head, artifact, config):
+    base_predictor = artifact.get("base_predictor", "chronos")
+    if base_predictor not in {"chronos", "lstm"}:
+        raise ValueError("Unsupported CT-SSF base predictor.")
     if "ctssf" not in item:
-        raise ValueError("Missing CT-SSF features. Regenerate Chronos predictions with --save-ctssf.")
+        raise ValueError("Missing CT-SSF features. Export Chronos with --save-ctssf or load the saved LSTM checkpoint.")
     cache = item["ctssf"]
     if cache.get("format_version") != FEATURE_FORMAT_VERSION or cache.get("head_sha256") != artifact["head_sha256"]:
         raise ValueError("CT-SSF feature format/head fingerprint mismatch.")
+    if base_predictor == "lstm" and cache.get("checkpoint_sha256") != artifact["checkpoint_sha256"]:
+        raise ValueError("CT-SSF LSTM feature/checkpoint fingerprint mismatch.")
     arrays = []
     for name in ("heldout_y", "heldout_predictions"):
         array = np.asarray(item[name], dtype=np.float64)
@@ -27,7 +32,7 @@ def prepare_sequence(item, head, artifact, config):
     if n == 0 or pred.shape != y.shape or not np.isfinite(y).all() or not np.isfinite(pred).all():
         raise ValueError("Targets/predictions must be matching, nonempty finite scalar sequences.")
     features = np.asarray(cache["features"], dtype=np.float32)
-    if features.ndim != 2 or features.shape[1] != head.hidden_layer.in_features or not np.isfinite(features).all():
+    if features.ndim != 2 or features.shape[1] != artifact["architecture"]["input_dim"] or not np.isfinite(features).all():
         raise ValueError("Invalid CT-SSF feature matrix.")
     fields = {}
     for name in ("feature_indices", "output_indices", "forecast_origin", "lead", "raw_target_indices", "location", "scale"):
@@ -52,9 +57,12 @@ def prepare_sequence(item, head, artifact, config):
     if not isinstance(window, int) or not isinstance(horizon, int) or min(window, horizon) < 1:
         raise ValueError("Head provenance is missing the forecast window/horizon.")
     if provenance.get("uses_future_covariates") is not False:
-        raise ValueError("These experiments require past-only Chronos covariates.")
-    expected_origin = window + (np.arange(n) // horizon) * horizon
-    if raw[0] != window or not np.array_equal(origin, expected_origin) or not np.array_equal(lead, np.arange(n) % horizon + 1):
+        raise ValueError("These experiments require past-only covariates.")
+    raw_start = len(item["train_y"]) if base_predictor == "lstm" else window
+    if base_predictor == "lstm" and (horizon != 1 or raw_start < window):
+        raise ValueError("LSTM requires one-step forecasts and sufficient training history.")
+    expected_origin = raw_start + (np.arange(n) // horizon) * horizon
+    if raw[0] != raw_start or not np.array_equal(origin, expected_origin) or not np.array_equal(lead, np.arange(n) % horizon + 1):
         raise ValueError("CT-SSF chronology does not match the saved forecast setup.")
     # Each feature vector must belong to exactly one (origin, output patch).
     pairs = np.stack([origin, (lead - 1) // head.output_patch_size], axis=1)
