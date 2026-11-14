@@ -11,7 +11,7 @@ data:
 
 
 model:
-  head_type: independent # choices: nondecreasing, independent
+  head_type: nondecreasing # choices: nondecreasing, independent
   rnn_type: "lstm"
   dim_model: 64
   num_layers: 2
