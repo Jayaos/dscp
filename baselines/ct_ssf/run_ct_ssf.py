@@ -184,6 +184,7 @@ def evaluate_sequence(key, item, config, head, artifact, checkpoint_dir=None):
             "method": method, "base_predictor": base_predictor, "split": "test", "boundaries": boundaries,
             "implementation_version": IMPLEMENTATION_VERSION,
             "head_sha256": artifact["head_sha256"], "head_provenance": artifact["provenance"],
+            "prediction_reconstruction": data["prediction_reconstruction"],
             "base_checkpoint_sha256": artifact.get("checkpoint_sha256"),
             "upstream_commit": UPSTREAM_COMMIT, "inversion_reference_commit": INVERSION_REFERENCE_COMMIT,
             "gradient_weighting": "uniform_upstream_latent_inversion", "weighting": weighting,

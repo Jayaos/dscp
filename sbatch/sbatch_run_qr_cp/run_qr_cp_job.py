@@ -17,6 +17,16 @@ DATASET_ARTIFACTS = {
 }
 
 
+def positive_threads(value):
+    try:
+        threads = int(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("num-threads must be a positive integer") from exc
+    if threads < 1:
+        raise argparse.ArgumentTypeError("num-threads must be a positive integer")
+    return threads
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset", choices=tuple(DATASET_ARTIFACTS))
@@ -33,6 +43,15 @@ def build_parser():
         choices=("nondecreasing", "independent"),
         default=None,
         help="Override model.head_type; otherwise use the selected YAML setting.",
+    )
+    parser.add_argument(
+        "--data-path", type=Path, default=None,
+        help="Override the forecast artifact while retaining the selected QR-CP template; relative paths use the repository root.",
+    )
+    parser.add_argument("--device", default=None, help="Override the YAML device, e.g. cpu or cuda:0.")
+    parser.add_argument(
+        "--num-threads", type=positive_threads, default=None,
+        help="PyTorch tensor threads; sequences remain sequential in the existing QR-CP runner.",
     )
     parser.add_argument(
         "--output-root", type=Path, default=REPO_ROOT / "results" / "qr_cp"
@@ -59,6 +78,11 @@ def main(argv=None):
         REPO_ROOT / "data" / artifact_dir / predictor
         / f"{predictor}_{artifact_name}_data.pkl"
     )
+    if args.data_path is not None:
+        artifact_path = args.data_path.expanduser()
+        if not artifact_path.is_absolute():
+            artifact_path = REPO_ROOT / artifact_path
+        artifact_path = artifact_path.resolve()
     template_name = f"qr_{encoder}_{predictor}_{args.dataset}_config.yaml"
     template_path = REPO_ROOT / "configs" / "qr_cp_configs" / template_name
     config = load_experiment_config(template_path)
@@ -69,7 +93,9 @@ def main(argv=None):
     config.model.head_type = head_type
     config.model.prediction_step = 1
     config.data.data_path = str(artifact_path)
-    config.device = config.get("device", 0)
+    config.device = args.device if args.device is not None else config.get("device", 0)
+    if args.num_threads is not None:
+        config.num_threads = args.num_threads
     config.seed = args.seed
     output_dir = resolve_job_saving_dir(config, args.output_root)
 
@@ -95,6 +121,9 @@ def main(argv=None):
     import numpy as np
     import torch
 
+    if config.get("num_threads") is not None:
+        torch.set_num_threads(config.num_threads)
+
     from dscp.run_qr_cp import (
         run_rnn_quantile_regression_cp,
         run_transformer_quantile_regression_cp,
@@ -103,7 +132,7 @@ def main(argv=None):
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
+    if config.device != "cpu" and torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
     output_dir.mkdir(parents=True, exist_ok=True)

@@ -144,6 +144,12 @@ def attach_lstm_features(item, model, checkpoint, artifact, batch_size=256):
     # Use the same dtype arithmetic for std+epsilon as the predictor.
     location = float(stats["y_mean"].reshape(-1)[0])
     scale = float((stats["y_std"] + epsilon).reshape(-1)[0])
+    # The base predictor normally denormalizes in float32. Promoting these
+    # parameters to float64 changes rounding when scale*prediction and location
+    # nearly cancel (common for low-flow series under pooled Sapflux scaling).
+    response_dtype = np.asarray(item["heldout_predictions"]).dtype
+    if response_dtype.kind != "f":
+        response_dtype = np.dtype("float32")
     raw_indices = np.arange(train_length, train_length + n, dtype=np.int64)
     cache = {
         "format_version": FEATURE_FORMAT_VERSION, "head_sha256": artifact["head_sha256"],
@@ -151,6 +157,7 @@ def attach_lstm_features(item, model, checkpoint, artifact, batch_size=256):
         "features": np.concatenate(features), "feature_indices": np.arange(n, dtype=np.int64),
         "output_indices": np.zeros(n, dtype=np.int64), "forecast_origin": raw_indices.copy(),
         "lead": np.ones(n, dtype=np.int64), "raw_target_indices": raw_indices,
-        "location": np.full(n, location), "scale": np.full(n, scale),
+        "location": np.full(n, location, dtype=response_dtype),
+        "scale": np.full(n, scale, dtype=response_dtype),
     }
     return {**item, "ctssf": cache}

@@ -8,6 +8,51 @@ import torch
 from base_predictor.chronos_features import FEATURE_FORMAT_VERSION
 
 
+def _check_reconstruction(reconstructed, model_outputs, predictions, location, scale,
+                          raw_indices, base_predictor):
+    """Keep the pairing guard while accounting for float32 affine roundoff.
+
+    LSTM kernels/batch shapes may differ between saving and reconstruction.
+    Near zero, a relative tolerance on the denormalized forecast alone misses
+    cancellation of much larger location/scale terms. Allow a small numerical
+    budget tied to those terms, without fitting a correction to the forecasts
+    or changing them. This is a practical tolerance, not a rounding proof.
+    """
+    location, scale = np.asarray(location, dtype=float), np.asarray(scale, dtype=float)
+    strict_tolerance = 1e-5 + 1e-4 * np.abs(predictions)
+    tolerance = strict_tolerance.copy()
+    roundoff_factor = 8 if base_predictor == "lstm" else 0
+    if roundoff_factor:
+        tolerance += roundoff_factor * np.finfo(np.float32).eps * (
+            np.abs(location) + np.abs(model_outputs * scale) + scale
+        )
+    error = np.abs(reconstructed - predictions)
+    finite = np.isfinite(reconstructed) & np.isfinite(model_outputs)
+    matches = finite & (error <= tolerance)
+    diagnostics = {
+        "max_abs_error": float(error.max()), "mean_abs_error": float(error.mean()),
+        "max_abs_error_over_scale": float((error / scale).max()),
+        "strict_mismatch_count": int((~finite | (error > strict_tolerance)).sum()),
+        "failed_count": int((~matches).sum()), "sample_count": len(predictions),
+        "rtol": 1e-4, "atol": 1e-5, "float32_roundoff_factor": roundoff_factor,
+        "max_allowed_error": float(tolerance.max()),
+    }
+    if not matches.all():
+        first = int(np.flatnonzero(~matches)[0])
+        checkpoint_field = "model_path" if base_predictor == "lstm" else "head_path"
+        raise ValueError(
+            f"CT-SSF {base_predictor} features/head do not reconstruct heldout_predictions: "
+            f"{diagnostics['failed_count']}/{len(predictions)} rows failed; "
+            f"max_abs_error={diagnostics['max_abs_error']:.9g}, "
+            f"max_abs_error_over_scale={diagnostics['max_abs_error_over_scale']:.9g}. "
+            f"First failing heldout index={first}, raw index={int(raw_indices[first])}: "
+            f"saved={predictions[first]:.9g}, reconstructed={reconstructed[first]:.9g}, "
+            f"allowed_error={tolerance[first]:.9g}. "
+            f"Check that data_path and {checkpoint_field} come from the same base-predictor run."
+        )
+    return diagnostics
+
+
 def prepare_sequence(item, head, artifact, config):
     base_predictor = artifact.get("base_predictor", "chronos")
     if base_predictor not in {"chronos", "lstm"}:
@@ -71,6 +116,8 @@ def prepare_sequence(item, head, artifact, config):
         raise ValueError("CT-SSF feature mapping does not match forecast blocks.")
     expanded = features[mapping]
     device = next(head.parameters()).device
+    reconstructed = np.empty(n, dtype=np.float64)
+    model_outputs = np.empty(n, dtype=np.float64)
     with torch.no_grad():
         for start in range(0, n, 512):
             sl = slice(start, start + 512)
@@ -78,9 +125,12 @@ def prepare_sequence(item, head, artifact, config):
             idx = torch.as_tensor(offset[sl], device=device)
             loc = torch.as_tensor(fields["location"][sl], device=device)
             scl = torch.as_tensor(fields["scale"][sl], device=device)
-            reconstructed = head.to_response(head.select(z, idx), loc, scl).cpu().numpy()
-            if not np.allclose(reconstructed, pred[sl], rtol=1e-4, atol=1e-5):
-                raise ValueError("CT-SSF features/head do not reconstruct heldout_predictions.")
+            values = head.select(z, idx)
+            model_outputs[sl] = values.cpu().numpy()
+            reconstructed[sl] = head.to_response(values, loc, scl).cpu().numpy()
+    reconstruction = _check_reconstruction(
+        reconstructed, model_outputs, pred, fields["location"], fields["scale"], raw, base_predictor,
+    )
     ratios = [float(config[name]) for name in ("train_ratio", "valid_ratio", "calibration_ratio", "test_ratio")]
     if not all(math.isfinite(r) and r > 0 for r in ratios) or not math.isclose(sum(ratios), 1, abs_tol=1e-10):
         raise ValueError("Positive train/valid/calibration/test ratios must sum to one.")
@@ -93,6 +143,7 @@ def prepare_sequence(item, head, artifact, config):
     inputs = np.concatenate([expanded, np.eye(head.output_patch_size, dtype=np.float32)[offset]], axis=1)
     return {
         "y": y, "predictions": pred, "features": expanded, "attention_inputs": inputs,
+        "prediction_reconstruction": reconstruction,
         **fields,
         "boundaries": {"train_end": train_end, "valid_end": valid_end, "calibration_start": valid_end, "test_start": test_start, "test_end": n},
     }

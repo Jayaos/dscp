@@ -29,9 +29,16 @@ not retrained here.
 
 Features are computed in batches during the CT-SSF run. No new export flag or
 change to the original prediction files is needed. The runner verifies that the
-saved output layer and normalization reconstruct every saved forecast. A
-mismatched model/forecast pair fails explicitly. Results and attention checkpoints
-record fingerprints of both the head and the full LSTM checkpoint.
+saved output layer and normalization reconstruct every saved forecast. It
+preserves the saved forecast's normalization precision and allows small float32
+rounding differences from CPU/GPU kernels or batch sizes. The LSTM tolerance
+includes a margin based on the normalization scale and location, since pooled
+Sapflux scaling can amplify tiny differences for forecasts near zero. Saved
+forecasts are unchanged. Larger discrepancies fail with the affected index,
+saved/reconstructed values, and allowed error; verify that the model and data
+files come from the same run. Per-series `metadata.prediction_reconstruction`
+records the errors and tolerance. Results and attention checkpoints also record
+fingerprints of both the head and the full LSTM checkpoint.
 
 The LSTM output head is linear: `g(z) = w z + b`. With radius r, its exact
 normalized-output range is `[g(z)-r*sum(abs(w)), g(z)+r*sum(abs(w))]`.

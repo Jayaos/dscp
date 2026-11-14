@@ -12,11 +12,12 @@ import torch
 
 from base_predictor import lstm_predictor
 from baselines.ct_ssf.bounds import HeadBounder
-from baselines.ct_ssf.data import prepare_sequence
+from baselines.ct_ssf.data import _check_reconstruction, prepare_sequence
 from baselines.ct_ssf.lstm import LSTMLinearHead, attach_lstm_features, load_lstm_backbone
 from baselines.ct_ssf.run_ct_ssf import evaluate_sequence
 from baselines.ct_ssf.scores import latent_scores
 from sbatch.sbatch_run_ct_ssf.run_ct_ssf import build_parser, main, resolve_config
+from utils.utils import denormalize_array
 
 
 @pytest.fixture(autouse=True)
@@ -108,6 +109,79 @@ def test_rejects_mismatched_forecasts_and_checkpoint_metadata(saved_lstm, tmp_pa
         load_lstm_backbone(path)
 
 
+def test_pooled_float32_normalization_reconstructs_near_zero_forecasts(saved_lstm, tmp_path):
+    _, _, checkpoint, _, records, config = saved_lstm
+    changed = copy.deepcopy(checkpoint)
+    # Isolate affine cancellation using a constant head. These magnitudes occur
+    # in pooled Sapflux normalization while individual forecasts can be near 0.
+    location, scale = np.float32(2181.21142578125), np.float32(3810.22607421875)
+    changed["normalization"]["y_mean"] = torch.tensor(location)
+    changed["normalization"]["y_std"] = torch.tensor(scale)
+    changed["model_state_dict"]["output_fc.weight"].zero_()
+    changed["model_state_dict"]["output_fc.bias"].fill_(-float(location) / float(scale))
+    path = tmp_path / "pooled_model.pt"
+    torch.save(changed, path)
+    model, head, checkpoint, artifact = load_lstm_backbone(path)
+    item = copy.deepcopy(records["a"])
+    normalized_prediction = model.output_fc.bias.detach().expand(len(item["heldout_y"]), 1)
+    item["heldout_predictions"] = denormalize_array(normalized_prediction, location, scale).numpy().copy()
+    np.testing.assert_array_equal(item["heldout_predictions"], 0)
+    attached = attach_lstm_features(item, model, checkpoint, artifact)
+    assert attached["ctssf"]["location"].dtype == item["heldout_predictions"].dtype
+    assert attached["ctssf"]["scale"].dtype == item["heldout_predictions"].dtype
+    # The previous np.full() cache promoted normalization to float64, making
+    # this unchanged model falsely fail its response-space np.allclose check.
+    with torch.no_grad():
+        values = head(torch.from_numpy(attached["ctssf"]["features"]))[:, 0]
+    old_reconstruction = (values.double() * float(scale) + float(location)).numpy()
+    assert not np.allclose(old_reconstruction, item["heldout_predictions"][:, 0], rtol=1e-4, atol=1e-5)
+    prepared = prepare_sequence(attached, head, artifact, config["data"])
+    assert prepared["prediction_reconstruction"]["max_abs_error"] == 0
+    np.testing.assert_array_equal(prepared["predictions"], item["heldout_predictions"][:, 0])
+    # An appreciable mismatch must still fail, with an actionable diagnostic.
+    attached["heldout_predictions"] = attached["heldout_predictions"].copy()
+    attached["heldout_predictions"][3] += 1
+    with pytest.raises(ValueError, match="First failing heldout index=3.*same base-predictor run"):
+        prepare_sequence(attached, head, artifact, config["data"])
+
+
+def test_float32_kernel_drift_allowed_without_disabling_pairing_check():
+    location, scale = np.full(4, 2181.21142578125), np.full(4, 3810.22607421875)
+    predictions = np.array([0.0, -0.1, 0.1, 0.0])
+    # Tiny normalized discrepancies become visible near zero after rescaling.
+    reconstructed = predictions + np.array([1, -1, 2, 0]) * np.finfo(np.float32).eps * scale
+    model_outputs = (reconstructed - location) / scale
+    diagnostics = _check_reconstruction(reconstructed, model_outputs, predictions, location, scale, np.arange(100, 104), "lstm")
+    assert diagnostics["strict_mismatch_count"] == 3
+    assert diagnostics["failed_count"] == 0
+    assert diagnostics["max_abs_error_over_scale"] < 3e-7
+    for wrong in (reconstructed + scale * 1e-3, np.full(4, np.inf)):
+        with pytest.raises(ValueError, match="max_abs_error=.*raw index=100"):
+            _check_reconstruction(wrong, model_outputs, predictions, location, scale, np.arange(100, 104), "lstm")
+    # Chronos keeps its existing tolerance.
+    with pytest.raises(ValueError, match="head_path"):
+        _check_reconstruction(reconstructed, model_outputs, predictions, location, scale, np.arange(100, 104), "chronos")
+
+
+def test_reconstruction_check_accepts_cpu_batch_kernel_roundoff():
+    torch.manual_seed(19)
+    model = lstm_predictor.LSTM(3, 8, 32, 1, 2).eval().requires_grad_(False)
+    inputs = torch.randn(129, 100, 3)
+    location, scale = np.float32(2181.21142578125), np.float32(3810.22607421875)
+    with torch.no_grad():
+        baseline = torch.cat([model(batch)[:, -1, :] for batch in inputs.split(64)])
+        model.output_fc.bias.sub_(baseline.mean() + float(location) / float(scale))
+        baseline = torch.cat([model(batch)[:, -1, :] for batch in inputs.split(64)])
+        saved = denormalize_array(baseline, location, scale).numpy()[:, 0]
+        # Alternate CPU kernel plus a different batch size; same weights/inputs.
+        with torch.backends.mkldnn.flags(enabled=False):
+            recomputed = model.output_fc(model.encode(inputs)[:, -1, :])[:, 0]
+        response = denormalize_array(recomputed, location, scale).numpy()
+    diagnostics = _check_reconstruction(response, recomputed.numpy(), saved, np.full(len(saved), location), np.full(len(saved), scale), np.arange(len(saved)), "lstm")
+    assert diagnostics["failed_count"] == 0
+    assert diagnostics["max_abs_error_over_scale"] < 1e-6
+
+
 @pytest.mark.parametrize("method", ["linear_exact", "ibp", "crown"])
 def test_linear_bounds_match_corners_and_preserve_infinite_radius(method):
     layer = torch.nn.Linear(2, 1)
@@ -185,6 +259,8 @@ def test_saved_lstm_runs_end_to_end_through_cli(saved_lstm, tmp_path):
         assert metadata["base_predictor"] == "lstm"
         assert metadata["bound_method"] == "linear_exact"
         assert metadata["base_checkpoint_sha256"] == artifact["checkpoint_sha256"]
+        assert metadata["prediction_reconstruction"]["failed_count"] == 0
+        assert metadata["prediction_reconstruction"]["sample_count"] == len(records[key]["heldout_y"])
         attention = torch.load(output / metadata["attention_checkpoint"], weights_only=True)
         assert attention["base_checkpoint_sha256"] == artifact["checkpoint_sha256"]
         assert attention["objective"] == "semantic_error_similarity_kl"

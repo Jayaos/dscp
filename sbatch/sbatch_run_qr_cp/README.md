@@ -61,6 +61,70 @@ explicit `--save-dir` to match these paths. Here, `P` is `lr`, `lstm`, or
 Each task needs its selected predictor's artifact; a complete dataset array
 needs all three. QR-CP consumes the saved held-out forecasts and observations.
 
+## CPU comparison using CT-SSF's saved LSTM forecasts
+
+These separate jobs use the same `lstm_model_saved` forecast files as CT-SSF
+and the saved-LSTM Local-CP jobs:
+
+```bash
+sbatch sbatch/sbatch_run_qr_cp/run_qr_cp_lstm_saved_air_cpu.sbatch
+sbatch sbatch/sbatch_run_qr_cp/run_qr_cp_lstm_saved_solar_cpu.sbatch
+sbatch sbatch/sbatch_run_qr_cp/run_qr_cp_lstm_saved_sapflux_cpu.sbatch
+```
+
+They default to **task 1: RNN encoder with LSTM base predictions**, matching the
+current saved-LSTM Local-CP scripts. Select task 4 for Transformer or both tasks:
+
+```bash
+sbatch --array=4 sbatch/sbatch_run_qr_cp/run_qr_cp_lstm_saved_air_cpu.sbatch
+sbatch --array=1,4 sbatch/sbatch_run_qr_cp/run_qr_cp_lstm_saved_air_cpu.sbatch
+```
+
+Other task IDs are rejected. Allocations apply per array task and match the
+current saved-LSTM Local-CP CPU jobs:
+
+| Dataset | Forecast artifact | CPU cores | Memory | Time limit |
+| --- | --- | --- | --- | --- |
+| Air | `data/air-10_prediction/lstm_model_saved/lstm_air-10_data.pkl` | 12 | 48 GB | 4 hours |
+| Solar | `data/solar_prediction/lstm_model_saved/lstm_nsdb-60m_data.pkl` | 10 | 40 GB | 6 hours |
+| Sapflux | `data/sapflux-solo3-large/lstm_model_saved/lstm_sapflux-solo3-large_data.pkl` | 12 | 48 GB | 4 hours |
+
+The jobs use `dscp`, request no GPU, and pass `--device cpu` and
+`--num-threads "$SLURM_CPUS_PER_TASK"`. The existing QR-CP runner processes series
+sequentially, using these cores for PyTorch tensor operations. This differs from
+Local-CP's separate single-threaded sequence workers; it retains QR-CP's existing
+training loop and seed behavior.
+
+Each task still loads its matching
+`configs/qr_cp_configs/qr_{encoder}_lstm_{dataset}_config.yaml`. QR-CP model,
+training, preprocessing, split, plotting, and quantile-head settings are
+preserved. `QR_HEAD_TYPE` can explicitly override the template as before.
+The original GPU jobs and YAML templates are unchanged.
+
+QR-CP reads the saved `.pkl` observations and predictions, without loading or
+retraining the LSTM base model. It does not need the `.pt` checkpoint or a
+completed CT-SSF run. Once the base-predictor artifacts exist, the comparison
+methods can run independently.
+
+The new default output root is separate from ordinary QR-CP runs:
+
+```text
+results/qr_cp_lstm_saved_cpu/<dataset>/lstm/<encoder>/<head_type>/<configured_run_suffix>/
+```
+
+`QR_OUTPUT_ROOT`, `QR_SEED`, `QR_HEAD_TYPE`, and `RUNPATH` retain their existing
+override behavior. The dispatcher accepts `--data-path` to override the forecast
+file (relative to the repository root when not absolute), and `--device` and
+`--num-threads` to override runtime settings. Preview without training:
+
+```bash
+PYTHONPATH="$PWD:$PWD/sbatch:${PYTHONPATH:-}" \
+  python -m sbatch_run_qr_cp.run_qr_cp_job air \
+  --task-id 1 --device cpu --num-threads 12 \
+  --data-path data/air-10_prediction/lstm_model_saved/lstm_air-10_data.pkl \
+  --output-root results/qr_cp_lstm_saved_cpu --dry-run
+```
+
 ## Configuration and outputs
 
 Each task loads its dedicated
