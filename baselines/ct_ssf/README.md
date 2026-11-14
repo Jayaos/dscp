@@ -79,15 +79,17 @@ python -m sbatch.sbatch_run_ct_ssf.run_ct_ssf --dataset air --base-predictor lst
 python -m sbatch.sbatch_run_ct_ssf.run_ct_ssf --dataset air --base-predictor lstm --device cuda
 ```
 
-Use `--device cpu` for CPU execution. Air also has a dedicated CPU Slurm job:
+Use `--device cpu` for CPU execution. All three datasets have dedicated CPU Slurm jobs:
 
 ```bash
 sbatch sbatch/sbatch_run_ct_ssf/run_ct_ssf_lstm_air_cpu.sbatch
+sbatch sbatch/sbatch_run_ct_ssf/run_ct_ssf_lstm_solar_cpu.sbatch
+sbatch sbatch/sbatch_run_ct_ssf/run_ct_ssf_lstm_sapflux_cpu.sbatch
 ```
 
-It requests 12 CPU cores and 48 GB of memory, with no GPU allocation, and runs
-the same saved LSTM/CT-SSF pipeline in the `dscp` environment. It can load a
-checkpoint originally trained on GPU. Adding `--device cpu` to a GPU sbatch
+Each job requests 12 CPU cores and 48 GB of memory, with no GPU allocation, and
+runs the saved LSTM/CT-SSF pipeline in the `dscp` environment. These jobs can load
+checkpoints originally trained on GPU. Adding `--device cpu` to a GPU sbatch
 script changes computation but does not remove that script's GPU allocation;
 use the dedicated CPU script when submitting a CPU job.
 
