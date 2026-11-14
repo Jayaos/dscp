@@ -64,6 +64,10 @@ def build_parser():
         "positive chord-distance bandwidth.",
     )
     parser.add_argument(
+        "--data-path", type=Path, default=None,
+        help="Override the forecast artifact while keeping the selected encoder/predictor template; relative paths use the repository root.",
+    )
+    parser.add_argument(
         "--output-root", type=Path, default=None,
         help="Override the results root; Epanechnikov defaults separate bandwidths and seeds.",
     )
@@ -96,6 +100,11 @@ def main(argv=None):
         / predictor
         / f"{predictor}_{artifact_name}_data.pkl"
     )
+    if args.data_path is not None:
+        artifact_path = args.data_path.expanduser()
+        if not artifact_path.is_absolute():
+            artifact_path = REPO_ROOT / artifact_path
+        artifact_path = artifact_path.resolve()
     if args.kernel == "epanechnikov":
         template_dir = "lcp_epanechnikov_kernel_configs"
         template_name = f"lcp_{encoder}_epanechnikov_{predictor}_{args.dataset}_config.yaml"

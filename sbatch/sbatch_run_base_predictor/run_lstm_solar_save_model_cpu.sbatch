@@ -3,8 +3,8 @@
 #SBATCH --account=gts-yxie77-paid
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=12
-#SBATCH --mem=48G
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=40G
 #SBATCH -t120
 #SBATCH -qinferno
 #SBATCH -o Report-lstm-solar-save-cpu-%j.out

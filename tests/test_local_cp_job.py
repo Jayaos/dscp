@@ -183,6 +183,33 @@ class LocalCPKernelRoutingTests(unittest.TestCase):
             Path(config.saving_dir), output_root / "air" / "lr" / "rnn" / "fixture-run",
         )
 
+    def test_saved_lstm_data_override_matches_ctssf_without_changing_templates(self):
+        for dataset in local_job.DATASET_ARTIFACTS:
+            ctssf = OmegaConf.load(REPO_ROOT / "configs" / "ct_ssf_configs" / f"ct_ssf_lstm_{dataset}_config.yaml")
+            workers = "10" if dataset == "solar" else "12"
+            for task_id in (1, 4):
+                with self.subTest(dataset=dataset, task_id=task_id):
+                    args = [dataset, "--task-id", str(task_id), "--cpu-workers", workers]
+                    _, original = self.preview(args)
+                    output_root = REPO_ROOT / "results" / "local_cp_lstm_saved_cpu"
+                    for path in (ctssf.data.data_path, str((REPO_ROOT / ctssf.data.data_path).resolve())):
+                        _, saved = self.preview([
+                            *args, "--data-path", path, "--output-root", str(output_root),
+                        ])
+                        self.assertEqual(Path(saved.data.data_path), (REPO_ROOT / ctssf.data.data_path).resolve())
+                        self.assertEqual(saved.base_predictor, "lstm")
+                        for section in ("model", "training", "plotting"):
+                            self.assertEqual(saved[section], original[section])
+                        self.assertEqual(saved.device, original.device)
+                        self.assertEqual(saved.cpu_workers, original.cpu_workers)
+                        self.assertEqual(saved.seed, original.seed)
+                        self.assertEqual(
+                            {key: value for key, value in saved.data.items() if key != "data_path"},
+                            {key: value for key, value in original.data.items() if key != "data_path"},
+                        )
+                        encoder, _ = local_job.TASKS[task_id]
+                        self.assertEqual(Path(saved.saving_dir).parent, output_root / dataset / "lstm" / encoder)
+
     def test_cpu_worker_counts_must_be_positive_integers(self):
         for workers in ("0", "-1", "1.5", "nan", "inf", "bad"):
             with self.subTest(workers=workers):
@@ -225,6 +252,52 @@ class LocalCPKernelRoutingTests(unittest.TestCase):
         self.assertEqual(save.call_args.kwargs["config"].cpu_workers, 12)
         self.assertEqual(save.call_args.kwargs["f"], config_path)
 
+    @unittest.skipUnless(BASH and Path(BASH).is_file(), "Bash is required")
+    def test_saved_lstm_arrays_match_cpu_resources_and_route_only_lstm_tasks(self):
+        for dataset, (artifact_dir, artifact_name) in local_job.DATASET_ARTIFACTS.items():
+            folder = REPO_ROOT / "sbatch" / "sbatch_run_local_cp"
+            original = (folder / f"run_local_cp_{dataset}_cpu.sbatch").read_text()
+            path = folder / f"run_local_cp_lstm_saved_{dataset}_cpu.sbatch"
+            script = path.read_text()
+            self.assertIn("#SBATCH --array=1,4", script)
+            for line in original.splitlines():
+                if line.startswith("#SBATCH") and not line.startswith(("#SBATCH -J ", "#SBATCH -o ", "#SBATCH --array=")):
+                    self.assertIn(line, script)
+            self.assertNotIn("--gres", script)
+            workers = "10" if dataset == "solar" else "12"
+            stubs = (
+                "module() { :; }\nconda() { :; }\n"
+                "python() { printf 'THREADS:%s,%s,%s,%s;CUDA:%s\\n' "
+                '"$OMP_NUM_THREADS" "$MKL_NUM_THREADS" "$OPENBLAS_NUM_THREADS" '
+                '"$NUMEXPR_NUM_THREADS" "$CUDA_VISIBLE_DEVICES" >&2; '
+                "printf '%s\\0' \"$@\"; }\n"
+            )
+            for task_id in (1, 4, 0):
+                for output_override in (None, "results/comparison with spaces"):
+                    with self.subTest(dataset=dataset, task_id=task_id, output=output_override):
+                        env = self.array_environment()
+                        env.update(SLURM_ARRAY_TASK_ID=str(task_id), SLURM_CPUS_PER_TASK=workers)
+                        if output_override:
+                            env.update(LOCAL_CP_OUTPUT_ROOT=output_override, LOCAL_CP_SEED="47")
+                        result = subprocess.run(
+                            [BASH, "--noprofile", "--norc", "-s"], input=stubs + script,
+                            text=True, capture_output=True, env=env, timeout=10,
+                        )
+                        if task_id == 0:
+                            self.assertEqual(result.returncode, 2)
+                            self.assertEqual(result.stdout, "")
+                            continue
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(result.stderr.strip(), "THREADS:1,1,1,1;CUDA:")
+                        arguments = result.stdout.rstrip("\0").split("\0")
+                        self.assertEqual(arguments[:4], ["-u", "-m", "sbatch_run_local_cp.run_local_cp_job", dataset])
+                        expected_path = REPO_ROOT / "data" / artifact_dir / "lstm_model_saved" / f"lstm_{artifact_name}_data.pkl"
+                        for flag, value in (("--task-id", str(task_id)), ("--cpu-workers", workers),
+                                            ("--seed", "47" if output_override else "2026")):
+                            self.assertEqual(arguments[arguments.index(flag) + 1], value)
+                        self.assertEqual(Path(arguments[arguments.index("--data-path") + 1]), expected_path)
+                        expected_output = output_override or (REPO_ROOT / "results" / "local_cp_lstm_saved_cpu")
+                        self.assertEqual(Path(arguments[arguments.index("--output-root") + 1]), Path(expected_output))
     def test_template_kernel_bandwidth_and_explicit_overrides(self):
         config = fixture_config()
         config.model.kernel = "epanechnikov"

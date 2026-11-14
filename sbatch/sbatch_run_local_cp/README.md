@@ -59,6 +59,58 @@ explicit `--save-dir` to match these paths. Here, `P` is `lr`, `lstm`, or
 Each task needs its selected predictor's artifact; a complete dataset array
 needs all three. Local-CP consumes the saved held-out forecasts and observations.
 
+## CPU comparison using CT-SSF's saved LSTM forecasts
+
+Use these separate arrays to run Local-CP on the exact `lstm_model_saved`
+forecast files used by the CT-SSF LSTM presets:
+
+```bash
+sbatch sbatch/sbatch_run_local_cp/run_local_cp_lstm_saved_air_cpu.sbatch
+sbatch sbatch/sbatch_run_local_cp/run_local_cp_lstm_saved_solar_cpu.sbatch
+sbatch sbatch/sbatch_run_local_cp/run_local_cp_lstm_saved_sapflux_cpu.sbatch
+```
+
+Each array contains only task **1 (RNN encoder, LSTM base predictor)** and task
+**4 (Transformer encoder, LSTM base predictor)**. To run one encoder, supply
+`--array=1` or `--array=4` to `sbatch`. Other task IDs are rejected.
+
+| Dataset | Forecast artifact | CPUs / workers | Memory | Time limit |
+| --- | --- | --- | --- | --- |
+| Air | `data/air-10_prediction/lstm_model_saved/lstm_air-10_data.pkl` | 12 | 48 GB | 4 hours |
+| Solar | `data/solar_prediction/lstm_model_saved/lstm_nsdb-60m_data.pkl` | 10 | 40 GB | 12 hours |
+| Sapflux | `data/sapflux-solo3-large/lstm_model_saved/lstm_sapflux-solo3-large_data.pkl` | 12 | 48 GB | 4 hours |
+
+Resources apply per array task and match the corresponding original
+`run_local_cp_<dataset>_cpu.sbatch`. The new jobs use the same `dscp` environment,
+one numerical-library thread per sequence worker, and no GPU. They load the
+existing `lcp_{encoder}_lstm_{dataset}_config.yaml` templates, preserving model,
+training, data splits, normalization, and plotting settings. The original jobs
+and YAML templates are unchanged.
+
+Local-CP consumes the saved `.pkl` observations and forecasts; it does not need
+the LSTM `.pt` checkpoint. The saved base-predictor run must finish first, but
+Local-CP and CT-SSF can then run independently. No base predictor is retrained
+by these Local-CP jobs.
+
+The new arrays default to a separate output root:
+
+```text
+results/local_cp_lstm_saved_cpu/<dataset>/lstm/<encoder>/<configured_run_suffix>/
+```
+
+`LOCAL_CP_OUTPUT_ROOT`, `LOCAL_CP_SEED`, and `RUNPATH` retain their existing
+override behavior. The shared dispatcher now accepts `--data-path` to select
+another forecast artifact without changing the configuration template. Relative
+data paths resolve from the repository root. Preview the saved-LSTM Air task:
+
+```bash
+PYTHONPATH="$PWD:$PWD/sbatch:${PYTHONPATH:-}" \
+  python -m sbatch_run_local_cp.run_local_cp_job air \
+  --task-id 1 --cpu-workers 12 \
+  --data-path data/air-10_prediction/lstm_model_saved/lstm_air-10_data.pkl \
+  --output-root results/local_cp_lstm_saved_cpu --dry-run
+```
+
 ## Configuration
 
 The dispatcher selects the matching dataset, encoder, and predictor
