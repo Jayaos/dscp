@@ -64,6 +64,44 @@ from report.inspect_run_results import inspect_results
 summary = inspect_results("results/rescp/air/lstm/run", rolling_window_size=100)
 ```
 
+# Inspect conditional coverage results
+
+Pass the evaluation output directory containing `summary.csv` and
+`group_metrics.csv`:
+
+```bash
+python report/inspect_conditional_coverage_results.py results/conditional_coverage/air/lstm/evaluation/k3
+```
+
+The inspector displays the saved dataset summary for each run: CACE, mean
+sequence WUC, worst sequence WUC, mean sequence coverage, pooled coverage,
+and availability counts. It then displays every sequence's group coverage,
+covered/evaluated/missing counts, original group size, undercoverage, and
+absolute coverage error. Dataset, base predictor, run, method, K, and nominal
+coverage identify each report. The saved `cace_definition` is shown when present.
+
+Coverage and errors are displayed as fractions (`0.9` means 90%). Empty CSV
+metric cells display as `n/a`; zero coverage remains zero. Summary values are
+read as saved. Group labels stay local to each sequence, and sequence key types
+are displayed to distinguish identifiers such as integer `7` and string `"7"`.
+
+To inspect multiple datasets or base predictors, pass their evaluation
+directories in one command. Each directory is reported separately:
+
+```bash
+python report/inspect_conditional_coverage_results.py results/conditional_coverage/air/lstm/evaluation/k3 results/conditional_coverage/solar/lstm/evaluation/k3
+```
+
+Only Python's standard library and the two CSV files are required. Inspection
+does not modify results or rerun evaluation. It is also callable from Python:
+
+```python
+from report.inspect_conditional_coverage_results import inspect_results
+
+report = inspect_results("results/conditional_coverage/air/lstm/evaluation/k3")
+# report["summary"] and report["group_metrics"] retain the original CSV strings.
+```
+
 # Inspect tuning results
 
 From the repository root, display the best five coverage-eligible configurations:

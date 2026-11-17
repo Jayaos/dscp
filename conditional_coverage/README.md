@@ -466,3 +466,13 @@ across different sequences.
 
 JSON uses `null` for unavailable metrics; CSV leaves those cells empty. The
 input grouping artifact and all method logs remain unchanged.
+
+Inspect the saved dataset summaries and every sequence's group coverage with:
+
+```bash
+python report/inspect_conditional_coverage_results.py results/conditional_coverage/air/lstm/evaluation/k3
+```
+
+Use your evaluation `output_dir`. The inspector reads `summary.csv` and
+`group_metrics.csv` and accepts multiple evaluation directories. See the
+[report guide](../report/README.md#inspect-conditional-coverage-results) for details.
