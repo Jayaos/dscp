@@ -165,9 +165,11 @@ def _draw_boxplot(ax, run, samples, labels, *, all_sequences=False, dot_areas=No
     if average_error is not None:
         ax.axhline(average_error, color="red", linestyle=":", alpha=0.5,
                    label="Average coverage error", zorder=4)
-    ax.set_xticks(range(len(samples)))
-    ax.set_xticklabels(labels, rotation=0 if all_sequences else 45,
-                       ha="center" if all_sequences else "right", fontsize=9)
+    if all_sequences:
+        ax.set_xticks([])
+    else:
+        ax.set_xticks(range(len(samples)))
+        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=9)
     ax.set_xlim(-0.6, len(samples) - 0.4)
     finite_errors = [value for values in samples for value in values]
     limits = [0, *finite_errors]
@@ -227,7 +229,7 @@ def plot_conditional_coverage_results(results_dir, save_dir=None, file_format="p
         pooled_areas = [80 * size / largest_size for size in pooled_sizes]
         views = (
             (False, samples, sequence_labels, (max(10, min(40, 3 + 0.9 * n_sequences)), 6)),
-            (True, [pooled], [f"All sequences\nn={len(pooled)}/{n_sequences * k}"], (7, 6)),
+            (True, [pooled], [], (7, 6)),
         )
         for all_sequences, values, tick_labels, figsize in views:
             fig, ax = plt.subplots(figsize=figsize)
