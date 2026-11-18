@@ -254,6 +254,93 @@ class ConditionalCoveragePlotTests(unittest.TestCase):
                                  for line in plot_ax.lines))
 
     @unittest.skipUnless(HAS_MATPLOTLIB, "Matplotlib is required for rendering")
+    def test_outlier_dots_are_hidden_without_recomputing_boxes_or_distorting_size_legend(self):
+        from matplotlib.axes import Axes
+
+        coverages = [.5, .87, .88, .89, .9, .91, 1.]
+        sizes = [20000, 100, 200, 400, 600, 800, 30000]
+        groups = [
+            {**group_row(group, coverage), "group_size": size}
+            for group, (coverage, size) in enumerate(zip(coverages, sizes))
+        ]
+        summary = {**summary_row(k=7), "mean_sequence_coverage": .887}
+        directory = self.make_report(groups=groups, summaries=[summary])
+        before = {path.name: path.read_bytes() for path in directory.glob("*.csv")}
+        captured = []
+        original_bxp = Axes.bxp
+
+        def capture_statistics(ax, bxpstats, *args, **kwargs):
+            captured.append((list(bxpstats), ax))
+            return original_bxp(ax, bxpstats, *args, **kwargs)
+
+        with patch.object(Axes, "bxp", new=capture_statistics):
+            paths = plot_conditional_coverage_results(directory)
+
+        self.assertEqual(len(paths), 2)
+        self.assertEqual(len(captured), 2)
+        for statistics, ax in captured:
+            self.assertEqual(len(statistics), 1)
+            # These quartiles use all seven observations, including both tails.
+            for key, expected in (("med", -.01), ("q1", -.025), ("q3", .005),
+                                  ("whislo", -.03), ("whishi", .01)):
+                self.assertAlmostEqual(statistics[0][key], expected)
+            self.assertEqual(len(statistics[0]["fliers"]), 2)
+            dots = [float(point[1]) for collection in ax.collections for point in collection.get_offsets()]
+            self.assertEqual(len(dots), 5)
+            # Values exactly at either whisker remain visible.
+            for actual, expected in zip(sorted(dots), [-.03, -.02, -.01, 0., .01]):
+                self.assertAlmostEqual(actual, expected)
+            reference = next(line for line in ax.lines if line.get_label() == "Average coverage error")
+            self.assertAlmostEqual(reference.get_ydata()[0], -.013)
+
+        pooled_ax = captured[1][1]
+        points = [(float(point[1]), float(area)) for collection in pooled_ax.collections
+                  for point, area in zip(collection.get_offsets(), collection.get_sizes())]
+        for (error, area), (expected_error, expected_area) in zip(
+                points, [(-.03, 10), (-.02, 20), (-.01, 40), (0., 60), (.01, 80)]):
+            self.assertAlmostEqual(error, expected_error)
+            self.assertAlmostEqual(area, expected_area)
+        legend = pooled_ax.get_legend()
+        self.assertEqual([text.get_text() for text in legend.get_texts()], ["100", "450", "800"])
+        for handle, area in zip(legend.get_lines(), [10, 45, 80]):
+            self.assertAlmostEqual(handle.get_markersize() ** 2, area)
+        self.assertEqual(before, {path.name: path.read_bytes() for path in directory.glob("*.csv")})
+        self.assertEqual(len(load_plot_data(directory)[0]["errors"][0]), 7)
+
+    @unittest.skipUnless(HAS_MATPLOTLIB, "Matplotlib is required for rendering")
+    def test_combined_dots_use_combined_whiskers_instead_of_per_sequence_filtering(self):
+        from matplotlib.axes import Axes
+
+        groups = [
+            group_row(group, coverage, sequence=sequence)
+            for sequence, coverages in (("narrow", [.5, .87, .88, .89, .9, .91, 1.]),
+                                        ("wide", [.5, .6, .7, .8, .9, .95, 1.]))
+            for group, coverage in enumerate(coverages)
+        ]
+        directory = self.make_report(groups=groups, summaries=[summary_row(k=7)])
+        captured = []
+        original_bxp = Axes.bxp
+
+        def capture_statistics(ax, bxpstats, *args, **kwargs):
+            captured.append((list(bxpstats), ax))
+            return original_bxp(ax, bxpstats, *args, **kwargs)
+
+        with patch.object(Axes, "bxp", new=capture_statistics):
+            plot_conditional_coverage_results(directory)
+
+        self.assertEqual(len(captured), 2)
+        per_sequence = captured[0][1]
+        self.assertEqual([len(collection.get_offsets()) for collection in per_sequence.collections], [5, 7])
+        pooled_stats, pooled_ax = captured[1]
+        self.assertAlmostEqual(pooled_stats[0]["whislo"], -.4)
+        self.assertAlmostEqual(pooled_stats[0]["whishi"], .1)
+        pooled_dots = [float(point[1]) for collection in pooled_ax.collections
+                       for point in collection.get_offsets()]
+        self.assertEqual(len(pooled_dots), 14)
+        self.assertEqual(sum(abs(value + .4) < 1e-10 for value in pooled_dots), 2)
+        self.assertEqual(sum(abs(value - .1) < 1e-10 for value in pooled_dots), 2)
+
+    @unittest.skipUnless(HAS_MATPLOTLIB, "Matplotlib is required for rendering")
     def test_plot_writes_two_pdfs_per_run_without_modifying_input_csvs(self):
         from matplotlib.axes import Axes
 

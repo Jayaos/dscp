@@ -118,18 +118,18 @@ The script reads `summary.csv` and `group_metrics.csv` and saves two PDFs per
 named run, method, dataset, base predictor, and K under `<results_dir>/plots/`.
 The original chart shows a separate box for each sequence. The additional
 `*_all_sequences.pdf` combines all available group coverage errors from all
-sequences into a single box, showing every group error as one dot. Each group
-error receives equal weight; sequences with more available groups contribute
-more dots. Missing values are omitted. The combined chart keeps the same
+sequences into a single box. Each available group error receives equal weight
+in the box statistics. Dots outside the whiskers are hidden, and missing values
+are omitted. The combined chart keeps the same
 reference lines, including the average error derived from `summary.csv`.
 In the all-sequences chart, each dot's area is proportional to its original
 `group_size` from `group_metrics.csv`. Areas are scaled within each chart as
-`80 * group_size / largest_plotted_group_size` in points squared. Missing groups
-are excluded from this scaling. Box statistics continue to weight each available
+`80 * group_size / largest_visible_group_size` in points squared. Missing groups
+and hidden outlier dots are excluded from this scaling. Box statistics continue to weight each available
 group error equally; the per-sequence charts use fixed-size dots.
 The all-sequences legend shows the minimum, midpoint `(min + max) / 2`, and
-maximum plotted group sizes using the same area scale. It shows one reference
-when all plotted sizes are equal, and no size legend when all errors are missing.
+maximum visible group sizes using the same area scale. It shows one reference
+when all visible sizes are equal, and no size legend when all errors are missing.
 
 In the original chart, each x-axis position is a sequence identity with one box summarizing its
 available groups' signed coverage errors, giving each group equal weight.
@@ -140,11 +140,13 @@ marks the average signed error, computed as `mean_sequence_coverage - nominal_co
 from the run's `summary.csv` row; it is omitted when that saved mean is unavailable.
 The red reference line uses alpha 0.5. RNN and Transformer runs remain separate charts.
 Boxes show the first and third quartiles and median; whiskers extend to the
-most extreme observations within 1.5 times the interquartile range. Individual
-group errors are overlaid as dots, including outliers, so all three observations
-remain visible when K is 3. Empty groups are excluded from box statistics;
+most extreme observations within 1.5 times the interquartile range. Only group
+errors between the lower and upper whiskers (inclusive) are overlaid as dots.
+Whiskers are calculated separately for each sequence in the original chart and
+from all available errors in the combined chart. Hiding outlier dots does not
+change the box statistics or the summary-derived red reference line. Empty groups are excluded from box statistics;
 sequences with no evaluated groups are labeled `n/a`. Each sequence label shows
-the available group count as `n/K`. Integer and string sequence identifiers are
+the available group count as `n/K`, including hidden outliers. Integer and string sequence identifiers are
 distinguished.
 
 Choose a destination and PNG output for both charts with:

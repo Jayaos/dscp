@@ -138,25 +138,41 @@ def _filename(run, results_dir, file_format, *, all_sequences=False):
     return "_".join([*safe_parts, digest, "signed_coverage_error"]) + suffix + f".{file_format}"
 
 
-def _draw_boxplot(ax, run, samples, labels, *, all_sequences=False, dot_areas=None):
+def _draw_boxplot(ax, run, samples, labels, *, all_sequences=False, group_sizes=None):
+    from matplotlib.cbook import boxplot_stats
+
     positions = [index for index, values in enumerate(samples) if values]
+    statistics = boxplot_stats([samples[index] for index in positions], whis=1.5) if positions else []
+    statistics_by_position = dict(zip(positions, statistics))
     if positions:
-        ax.boxplot(
-            [samples[index] for index in positions], positions=positions,
-            widths=0.5, patch_artist=True, manage_ticks=False, whis=1.5,
-            showfliers=False,  # Every observation is already shown as a dot.
+        ax.bxp(
+            statistics, positions=positions,
+            widths=0.5, patch_artist=True, manage_ticks=False,
+            showfliers=False,
             boxprops={"facecolor": "#d9e8f5", "edgecolor": "#35658b"},
             medianprops={"color": "#bd4b20", "linewidth": 1.8},
             whiskerprops={"color": "#35658b"}, capprops={"color": "#35658b"},
             zorder=3,
         )
+    visible_errors, visible_sizes = [], []
     for index, values in enumerate(samples):
         if values:
-            offsets = ([0] if len(values) == 1 else
-                       [-0.12 + 0.24 * group / (len(values) - 1) for group in range(len(values))])
-            ax.scatter([index + offset for offset in offsets], values,
-                       color="#244865", s=dot_areas if all_sequences else 22,
-                       linewidths=0 if all_sequences else None, alpha=0.85, zorder=4)
+            stats = statistics_by_position[index]
+            retained = [position for position, value in enumerate(values)
+                        if stats["whislo"] <= value <= stats["whishi"]]
+            shown = [values[position] for position in retained]
+            visible_errors.extend(shown)
+            areas = 22
+            if all_sequences:
+                visible_sizes = [group_sizes[position] for position in retained]
+                largest_size = max(visible_sizes, default=1)
+                areas = [80 * size / largest_size for size in visible_sizes]
+            if shown:
+                offsets = ([0] if len(shown) == 1 else
+                           [-0.12 + 0.24 * group / (len(shown) - 1) for group in range(len(shown))])
+                ax.scatter([index + offset for offset in offsets], shown,
+                           color="#244865", s=areas,
+                           linewidths=0 if all_sequences else None, alpha=0.85, zorder=4)
         else:
             ax.annotate("n/a", (index, 0), xytext=(0, 7), textcoords="offset points",
                         ha="center", va="bottom", fontsize=9, color="#777777")
@@ -171,8 +187,9 @@ def _draw_boxplot(ax, run, samples, labels, *, all_sequences=False, dot_areas=No
         ax.set_xticks(range(len(samples)))
         ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=9)
     ax.set_xlim(-0.6, len(samples) - 0.4)
-    finite_errors = [value for values in samples for value in values]
-    limits = [0, *finite_errors]
+    limits = [0, *visible_errors]
+    for stats in statistics:
+        limits.extend(stats[key] for key in ("whislo", "whishi", "q1", "q3"))
     if average_error is not None:
         limits.append(average_error)
     low, high = min(limits), max(limits)
@@ -187,17 +204,19 @@ def _draw_boxplot(ax, run, samples, labels, *, all_sequences=False, dot_areas=No
     ax.set_axisbelow(True)
     ax.grid(axis="y", alpha=0.2)
     ax.spines[["top", "right"]].set_visible(False)
+    return visible_sizes
 
 
 def plot_conditional_coverage_results(results_dir, save_dir=None, file_format="pdf"):
     """Save two box plots per run and return paths; default to <results_dir>/plots.
 
     Each sequence's box summarizes its available group signed coverage errors,
-    weighting groups equally. Individual group errors are overlaid as dots.
+    weighting groups equally. Group errors within the whiskers are shown as dots;
+    all available errors still contribute to box statistics.
     Missing groups are omitted; entirely unavailable sequences are labeled n/a.
     A second chart pools every available group error from all sequences into
-    one box, with each error shown as one dot whose area is proportional to its
-    original group size. The largest plotted group uses an area of 80 points².
+    one box, with each visible dot's area proportional to its original group size.
+    The largest visible group uses an area of 80 points².
     Both use the requested format; group sizes do not weight box statistics.
     Input CSVs remain unchanged.
     """
@@ -226,8 +245,6 @@ def plot_conditional_coverage_results(results_dir, save_dir=None, file_format="p
         pooled = [value for values in samples for value in values]
         pooled_sizes = [size for errors, sizes in zip(run["errors"], run["group_sizes"])
                         for error, size in zip(errors, sizes) if error is not None]
-        largest_size = max(pooled_sizes, default=1)
-        pooled_areas = [80 * size / largest_size for size in pooled_sizes]
         views = (
             (False, samples, sequence_labels, (max(10, min(40, 3 + 0.9 * n_sequences)), 6)),
             (True, [pooled], [], (7, 6)),
@@ -235,10 +252,10 @@ def plot_conditional_coverage_results(results_dir, save_dir=None, file_format="p
         for all_sequences, values, tick_labels, figsize in views:
             fig, ax = plt.subplots(figsize=figsize)
             try:
-                _draw_boxplot(ax, run, values, tick_labels, all_sequences=all_sequences,
-                              dot_areas=pooled_areas if all_sequences else None)
-                if all_sequences and pooled_sizes:
-                    smallest_size = min(pooled_sizes)
+                visible_sizes = _draw_boxplot(ax, run, values, tick_labels, all_sequences=all_sequences,
+                                              group_sizes=pooled_sizes if all_sequences else None)
+                if all_sequences and visible_sizes:
+                    smallest_size, largest_size = min(visible_sizes), max(visible_sizes)
                     reference_sizes = list(dict.fromkeys(
                         (smallest_size, (smallest_size + largest_size) / 2, largest_size)
                     ))
