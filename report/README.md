@@ -127,6 +127,9 @@ In the all-sequences chart, each dot's area is proportional to its original
 `80 * group_size / largest_plotted_group_size` in points squared. Missing groups
 are excluded from this scaling. Box statistics continue to weight each available
 group error equally; the per-sequence charts use fixed-size dots.
+The all-sequences legend shows the minimum, midpoint `(min + max) / 2`, and
+maximum plotted group sizes using the same area scale. It shows one reference
+when all plotted sizes are equal, and no size legend when all errors are missing.
 
 In the original chart, each x-axis position is a sequence identity with one box summarizing its
 available groups' signed coverage errors, giving each group equal weight.

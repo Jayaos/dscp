@@ -212,6 +212,7 @@ def plot_conditional_coverage_results(results_dir, save_dir=None, file_format="p
 
     matplotlib.use("Agg")
     from matplotlib import pyplot as plt
+    from matplotlib.lines import Line2D
 
     destination.mkdir(parents=True, exist_ok=True)
     paths = []
@@ -236,6 +237,19 @@ def plot_conditional_coverage_results(results_dir, save_dir=None, file_format="p
             try:
                 _draw_boxplot(ax, run, values, tick_labels, all_sequences=all_sequences,
                               dot_areas=pooled_areas if all_sequences else None)
+                if all_sequences and pooled_sizes:
+                    smallest_size = min(pooled_sizes)
+                    reference_sizes = list(dict.fromkeys(
+                        (smallest_size, (smallest_size + largest_size) / 2, largest_size)
+                    ))
+                    handles = [Line2D(
+                        [], [], linestyle="None", marker="o", color="#244865",
+                        markersize=math.sqrt(80 * size / largest_size),
+                        markeredgewidth=0, alpha=0.85,
+                        label=f"{size:,.1f}".rstrip("0").rstrip("."),
+                    ) for size in reference_sizes]
+                    ax.legend(handles=handles, title="Group size (observations)", loc="upper right",
+                              fontsize=9, title_fontsize=9, labelspacing=0.8)
                 fig.tight_layout()
                 path = destination / _filename(run, results_dir, file_format, all_sequences=all_sequences)
                 fig.savefig(path, format=file_format, dpi=180, bbox_inches="tight")
