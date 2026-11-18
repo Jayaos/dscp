@@ -235,15 +235,13 @@ class ConditionalCoveragePlotTests(unittest.TestCase):
             self.assertEqual(plot_ax.get_xlabel(), "")
             self.assertEqual(plot_ax.figure.texts, [])
             references = [line for line in plot_ax.lines if line.get_linestyle() == ":"]
-            self.assertEqual(len(references), 3)
+            self.assertEqual(len(references), 1)
             red = [line for line in references if to_rgba(line.get_color()) == to_rgba("red")]
             grey = [line for line in references if to_rgba(line.get_color()) == to_rgba("grey")]
             self.assertEqual(len(red), 1)
-            self.assertEqual(len(grey), 2)
+            self.assertEqual(len(grey), 0)
             # Both charts use the saved mean, even though their boxes differ.
             self.assertAlmostEqual(red[0].get_ydata()[0], -.013)
-            for actual, expected in zip(sorted(line.get_ydata()[0] for line in grey), [-.05, -.025]):
-                self.assertAlmostEqual(actual, expected)
             self.assertTrue(all(line.get_alpha() == .5 for line in references))
 
         self.write_csv(directory / "summary.csv", [{**summary, "mean_sequence_coverage": None}])
@@ -320,7 +318,7 @@ class ConditionalCoveragePlotTests(unittest.TestCase):
             self.assertEqual(len(ax.collections), 0)
             self.assertEqual(len(ax.patches), 0)
             self.assertTrue(any("n/a" in text.get_text() for text in ax.texts))
-            self.assertLess(ax.get_ylim()[0], -.05)
+            self.assertLess(ax.get_ylim()[0], 0)
             self.assertGreater(ax.get_ylim()[1], 0)
 
     @unittest.skipUnless(HAS_MATPLOTLIB, "Matplotlib is required for rendering")

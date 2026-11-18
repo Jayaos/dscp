@@ -161,9 +161,6 @@ def _draw_boxplot(ax, run, samples, labels, *, all_sequences=False, dot_areas=No
             ax.annotate("n/a", (index, 0), xytext=(0, 7), textcoords="offset points",
                         ha="center", va="bottom", fontsize=9, color="#777777")
     ax.axhline(0, color="#303030", linewidth=1, zorder=2)
-    reference_errors = [-0.025, -0.05]
-    for value in reference_errors:
-        ax.axhline(value, color="grey", linestyle=":", alpha=0.5, zorder=2)
     average_error = run["average_coverage_error"]
     if average_error is not None:
         ax.axhline(average_error, color="red", linestyle=":", alpha=0.5,
@@ -173,7 +170,7 @@ def _draw_boxplot(ax, run, samples, labels, *, all_sequences=False, dot_areas=No
                        ha="center" if all_sequences else "right", fontsize=9)
     ax.set_xlim(-0.6, len(samples) - 0.4)
     finite_errors = [value for values in samples for value in values]
-    limits = [0, *finite_errors, *reference_errors]
+    limits = [0, *finite_errors]
     if average_error is not None:
         limits.append(average_error)
     low, high = min(limits), max(limits)
