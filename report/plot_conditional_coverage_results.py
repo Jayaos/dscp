@@ -3,7 +3,7 @@
 Example:
     python report/plot_conditional_coverage_results.py results/conditional_coverage/air/lstm/evaluation/k3
 
-Saves one grouped bar plot per named run, dataset, base predictor, and K.
+Saves one box plot per named run, dataset, base predictor, and K.
 Requires Matplotlib for plotting; only the two evaluation CSVs are read.
 """
 
@@ -118,11 +118,12 @@ def _filename(run, results_dir, file_format):
 
 
 def plot_conditional_coverage_results(results_dir, save_dir=None, file_format="pdf"):
-    """Save one chart per run and return its Path; default to <results_dir>/plots.
+    """Save one box plot per run and return paths; default to <results_dir>/plots.
 
-    Each sequence has K bars, one per local group. Heights are coverage minus
-    nominal coverage in fraction units. Missing values are marked n/a at zero;
-    actual zero errors use a small horizontal mark. Input CSVs remain unchanged.
+    Each sequence's box summarizes its available group signed coverage errors,
+    weighting groups equally. Individual group errors are overlaid as dots.
+    Missing groups are omitted; entirely unavailable sequences are labeled n/a.
+    Input CSVs remain unchanged.
     """
     if file_format not in ("pdf", "png"):
         raise ValueError("file_format must be 'pdf' or 'png'.")
@@ -142,33 +143,35 @@ def plot_conditional_coverage_results(results_dir, save_dir=None, file_format="p
         n_sequences, k = len(run["sequences"]), run["k"]
         fig, ax = plt.subplots(figsize=(max(10, min(40, 3 + 0.9 * n_sequences)), 6))
         try:
-            width = 0.8 / k
-            palette = plt.get_cmap("tab20", k)
-            missing_count = 0
-            for group in range(k):
-                x_values, y_values = [], []
-                color = palette(group)
-                for index, errors in enumerate(run["errors"]):
-                    x = index + (group - (k - 1) / 2) * width
-                    error = errors[group]
-                    if error is None:
-                        missing_count += 1
-                        ax.plot(x, 0, marker="x", color="#777777", markersize=4, zorder=4)
-                        ax.annotate("n/a", (x, 0), xytext=(0, 7), textcoords="offset points",
-                                    ha="center", va="bottom", fontsize=7, rotation=90)
-                    else:
-                        x_values.append(x)
-                        y_values.append(error)
-                        if error == 0:
-                            ax.plot(x, 0, marker="_", color=color, markersize=6, zorder=4)
-                ax.bar(x_values, y_values, width=width * 0.92, color=color,
-                       label=f"Group {group}", zorder=3)
+            samples = [[error for error in errors if error is not None] for errors in run["errors"]]
+            positions = [index for index, values in enumerate(samples) if values]
+            if positions:
+                ax.boxplot(
+                    [samples[index] for index in positions], positions=positions,
+                    widths=0.5, patch_artist=True, manage_ticks=False, whis=1.5,
+                    showfliers=False,  # Every observation is already shown as a dot.
+                    boxprops={"facecolor": "#d9e8f5", "edgecolor": "#35658b"},
+                    medianprops={"color": "#bd4b20", "linewidth": 1.8},
+                    whiskerprops={"color": "#35658b"}, capprops={"color": "#35658b"},
+                    zorder=3,
+                )
+            for index, values in enumerate(samples):
+                if values:
+                    offsets = ([0] if len(values) == 1 else
+                               [-0.12 + 0.24 * group / (len(values) - 1) for group in range(len(values))])
+                    ax.scatter([index + offset for offset in offsets], values,
+                               color="#244865", s=22, alpha=0.85, zorder=4)
+                else:
+                    ax.annotate("n/a", (index, 0), xytext=(0, 7), textcoords="offset points",
+                                ha="center", va="bottom", fontsize=9, color="#777777")
+            missing_count = sum(k - len(values) for values in samples)
 
             ax.axhline(0, color="#303030", linewidth=1, zorder=2)
             labels = [f"{key!r} ({kind})" if kind == "str" else f"{key} ({kind})"
                       for kind, key in run["sequences"]]
             ax.set_xticks(range(n_sequences))
-            ax.set_xticklabels([textwrap.fill(label, 28) for label in labels],
+            ax.set_xticklabels([textwrap.fill(label, 28) + f"\nn={len(values)}/{k}"
+                                for label, values in zip(labels, samples)],
                                rotation=45, ha="right", fontsize=9)
             ax.set_xlim(-0.6, n_sequences - 0.4)
             finite_errors = [value for errors in run["errors"] for value in errors if value is not None]
@@ -184,10 +187,10 @@ def plot_conditional_coverage_results(results_dir, save_dir=None, file_format="p
             ax.set_axisbelow(True)
             ax.grid(axis="y", alpha=0.2)
             ax.spines[["top", "right"]].set_visible(False)
-            ax.legend(title="Local group ID", ncol=min(k, 5), fontsize=8, loc="best")
-            note = "Group IDs are local to each sequence. Negative = undercoverage; positive = overcoverage."
+            note = ("Box: quartiles and median; whiskers: within 1.5 IQR. Dots: individual group errors."
+                    "\nNegative = undercoverage; positive = overcoverage. n = evaluated groups / K.")
             if missing_count:
-                note += f"\nn/a: {missing_count} group(s) without evaluated predictions."
+                note += f" {missing_count} missing group(s) omitted."
             fig.text(0.02, 0.02, note, fontsize=9, color="#555555")
             fig.tight_layout(rect=(0, 0.10, 1, 1))
             path = destination / _filename(run, results_dir, file_format)

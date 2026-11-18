@@ -1,4 +1,4 @@
-"""Check signed group bars against saved evaluator CSV identities and values."""
+"""Check signed group box plots against saved evaluator CSV identities and values."""
 
 import csv
 import importlib.util
@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from report.plot_conditional_coverage_results import (
     load_plot_data,
@@ -143,6 +144,43 @@ class ConditionalCoveragePlotTests(unittest.TestCase):
                 directory = self.make_report(f"summary_{index}", summaries=[summary])
                 with self.assertRaises(ValueError):
                     load_plot_data(directory)
+
+    @unittest.skipUnless(HAS_MATPLOTLIB, "Matplotlib is required for rendering")
+    def test_boxes_summarize_each_sequences_available_groups_without_filling_missing_values(self):
+        from matplotlib.axes import Axes
+
+        groups = [
+            group_row(group, value, sequence=sequence)
+            for sequence, values in (("complete", [.8, .9, 1.]),
+                                     ("empty", [None, None, None]),
+                                     ("partial", [.94, None, None]))
+            for group, value in enumerate(values)
+        ]
+        directory = self.make_report(groups=groups)
+        statistics, positions, axes = [], [], []
+        original_bxp = Axes.bxp
+
+        def capture_statistics(ax, bxpstats, *args, **kwargs):
+            statistics.extend(bxpstats)
+            positions.extend(kwargs["positions"])
+            axes.append(ax)
+            return original_bxp(ax, bxpstats, *args, **kwargs)
+
+        with patch.object(Axes, "bxp", new=capture_statistics):
+            paths = plot_conditional_coverage_results(directory)
+
+        self.assertEqual(len(paths), 1)
+        self.assertEqual(positions, [0, 2])
+        self.assertEqual(len(statistics), 2)
+        # The complete sequence has three equally weighted group errors.
+        for key, expected in (("med", 0.), ("q1", -.05), ("q3", .05),
+                              ("whislo", -.1), ("whishi", .1)):
+            self.assertAlmostEqual(statistics[0][key], expected)
+        # Missing groups must not introduce zero-valued observations.
+        for key in ("med", "q1", "q3", "whislo", "whishi"):
+            self.assertAlmostEqual(statistics[1][key], .04)
+        self.assertIn("empty", " ".join(label.get_text() for label in axes[0].get_xticklabels()))
+        self.assertTrue(any("n/a" in text.get_text() for text in axes[0].texts))
 
     @unittest.skipUnless(HAS_MATPLOTLIB, "Matplotlib is required for rendering")
     def test_plot_writes_one_pdf_per_run_without_modifying_input_csvs(self):

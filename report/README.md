@@ -108,7 +108,7 @@ report = inspect_results("results/conditional_coverage/air/lstm/evaluation/k3")
 
 # Plot conditional coverage results
 
-Create signed coverage error bar plots from an evaluation output directory:
+Create signed coverage error box plots from an evaluation output directory:
 
 ```bash
 python report/plot_conditional_coverage_results.py results/conditional_coverage/air/lstm/evaluation/k3
@@ -116,14 +116,18 @@ python report/plot_conditional_coverage_results.py results/conditional_coverage/
 
 The script reads `summary.csv` and `group_metrics.csv` and saves one PDF per
 named run, method, dataset, base predictor, and K under `<results_dir>/plots/`.
-Each x-axis position is a sequence identity with K adjacent bars, one per group.
+Each x-axis position is a sequence identity with one box summarizing its
+available groups' signed coverage errors, giving each group equal weight.
 The y-axis is `coverage - nominal coverage` in fraction units; negative values
 indicate undercoverage, positive values indicate overcoverage, and the horizontal
 line marks zero error. RNN and Transformer runs remain separate charts.
-Group labels are local to each sequence; matching colors across sequences do
-not imply the same learned regime. Empty groups appear as `n/a` markers, while
-exactly zero errors have small horizontal marks. Integer and string sequence
-identifiers are distinguished.
+Boxes show the first and third quartiles and median; whiskers extend to the
+most extreme observations within 1.5 times the interquartile range. Individual
+group errors are overlaid as dots, including outliers, so all three observations
+remain visible when K is 3. Empty groups are excluded from box statistics;
+sequences with no evaluated groups are labeled `n/a`. Each sequence label shows
+the available group count as `n/K`. Integer and string sequence identifiers are
+distinguished.
 
 Choose a destination and PNG output with:
 
