@@ -162,19 +162,19 @@ class ConditionalCoveragePlotTests(unittest.TestCase):
         ]
         summary = {**summary_row(), "mean_sequence_coverage": .887}
         directory = self.make_report(groups=groups, summaries=[summary])
-        statistics, positions, axes = [], [], []
+        captured = []
         original_bxp = Axes.bxp
 
         def capture_statistics(ax, bxpstats, *args, **kwargs):
-            statistics.extend(bxpstats)
-            positions.extend(kwargs["positions"])
-            axes.append(ax)
+            captured.append((list(bxpstats), list(kwargs["positions"]), ax))
             return original_bxp(ax, bxpstats, *args, **kwargs)
 
         with patch.object(Axes, "bxp", new=capture_statistics):
             paths = plot_conditional_coverage_results(directory)
 
-        self.assertEqual(len(paths), 1)
+        self.assertEqual(len(paths), 2)
+        self.assertEqual(len(captured), 2)
+        statistics, positions, ax = captured[0]
         self.assertEqual(positions, [0, 2])
         self.assertEqual(len(statistics), 2)
         # The complete sequence has three equally weighted group errors.
@@ -184,45 +184,78 @@ class ConditionalCoveragePlotTests(unittest.TestCase):
         # Missing groups must not introduce zero-valued observations.
         for key in ("med", "q1", "q3", "whislo", "whishi"):
             self.assertAlmostEqual(statistics[1][key], .04)
-        self.assertIn("empty", " ".join(label.get_text() for label in axes[0].get_xticklabels()))
-        self.assertTrue(any("n/a" in text.get_text() for text in axes[0].texts))
-        ax = axes[0]
-        self.assertEqual(ax.get_ylabel(), "Coverage error")
-        self.assertEqual(ax.get_xlabel(), "")
-        self.assertEqual(ax.figure.texts, [])
-        references = [line for line in ax.lines if line.get_linestyle() == ":"]
-        self.assertEqual(len(references), 3)
-        red = [line for line in references if to_rgba(line.get_color()) == to_rgba("red")]
-        grey = [line for line in references if to_rgba(line.get_color()) == to_rgba("grey")]
-        self.assertEqual(len(red), 1)
-        self.assertEqual(len(grey), 2)
-        # Use the saved equal-sequence coverage, not CACE, pooled coverage, or group means.
-        self.assertAlmostEqual(red[0].get_ydata()[0], -.013)
-        for actual, expected in zip(sorted(line.get_ydata()[0] for line in grey), [-.05, -.025]):
+        self.assertIn("empty", " ".join(label.get_text() for label in ax.get_xticklabels()))
+        self.assertTrue(any("n/a" in text.get_text() for text in ax.texts))
+
+        pooled_stats, pooled_positions, pooled_ax = captured[1]
+        self.assertEqual(pooled_positions, [0])
+        self.assertEqual(len(pooled_stats), 1)
+        # Every available group error contributes once, without averaging sequences.
+        for key, expected in (("med", .02), ("q1", -.025), ("q3", .055),
+                              ("whislo", -.1), ("whishi", .1)):
+            self.assertAlmostEqual(pooled_stats[0][key], expected)
+        dots = [float(point[1]) for collection in pooled_ax.collections
+                for point in collection.get_offsets()]
+        self.assertEqual(len(dots), 4)
+        for actual, expected in zip(sorted(dots), [-.1, 0., .04, .1]):
             self.assertAlmostEqual(actual, expected)
-        self.assertTrue(all(line.get_alpha() == .5 for line in references))
+        self.assertTrue(paths[1].stem.endswith("_all_sequences"))
+        self.assertFalse(paths[0].stem.endswith("_all_sequences"))
+
+        for plot_ax in (ax, pooled_ax):
+            self.assertEqual(plot_ax.get_ylabel(), "Coverage error")
+            self.assertEqual(plot_ax.get_xlabel(), "")
+            self.assertEqual(plot_ax.figure.texts, [])
+            references = [line for line in plot_ax.lines if line.get_linestyle() == ":"]
+            self.assertEqual(len(references), 3)
+            red = [line for line in references if to_rgba(line.get_color()) == to_rgba("red")]
+            grey = [line for line in references if to_rgba(line.get_color()) == to_rgba("grey")]
+            self.assertEqual(len(red), 1)
+            self.assertEqual(len(grey), 2)
+            # Both charts use the saved mean, even though their boxes differ.
+            self.assertAlmostEqual(red[0].get_ydata()[0], -.013)
+            for actual, expected in zip(sorted(line.get_ydata()[0] for line in grey), [-.05, -.025]):
+                self.assertAlmostEqual(actual, expected)
+            self.assertTrue(all(line.get_alpha() == .5 for line in references))
 
         self.write_csv(directory / "summary.csv", [{**summary, "mean_sequence_coverage": None}])
-        axes.clear()
+        captured.clear()
         with patch.object(Axes, "bxp", new=capture_statistics):
             plot_conditional_coverage_results(directory)
-        self.assertFalse(any(line.get_linestyle() == ":" and to_rgba(line.get_color()) == to_rgba("red")
-                             for line in axes[0].lines))
+        self.assertEqual(len(captured), 2)
+        for _, _, plot_ax in captured:
+            self.assertFalse(any(line.get_linestyle() == ":" and to_rgba(line.get_color()) == to_rgba("red")
+                                 for line in plot_ax.lines))
 
     @unittest.skipUnless(HAS_MATPLOTLIB, "Matplotlib is required for rendering")
-    def test_plot_writes_one_pdf_per_run_without_modifying_input_csvs(self):
+    def test_plot_writes_two_pdfs_per_run_without_modifying_input_csvs(self):
+        from matplotlib.axes import Axes
+
         names = ("qr_rnn", "qr_transformer")
         groups = [
             group_row(group, coverage, name=name)
-            for name in names for group, coverage in enumerate([.85, .95, None])
+            for name, values in ((names[0], [.85, .95, None]), (names[1], [.9, .98, None]))
+            for group, coverage in enumerate(values)
         ]
         directory = self.make_report(summaries=[summary_row(name=name) for name in names], groups=groups)
         before = {path.name: path.read_bytes() for path in directory.glob("*.csv")}
 
-        paths = plot_conditional_coverage_results(directory)
+        medians = []
+        original_bxp = Axes.bxp
 
-        self.assertEqual(len(paths), 2)
-        self.assertEqual(len(set(paths)), 2)
+        def capture_medians(ax, bxpstats, *args, **kwargs):
+            medians.append([stats["med"] for stats in bxpstats])
+            return original_bxp(ax, bxpstats, *args, **kwargs)
+
+        with patch.object(Axes, "bxp", new=capture_medians):
+            paths = plot_conditional_coverage_results(directory)
+
+        self.assertEqual(len(paths), 4)
+        self.assertEqual(len(set(paths)), 4)
+        self.assertEqual(len(medians), 4)
+        for actual, expected in zip(medians, [0., 0., .04, .04]):
+            self.assertEqual(len(actual), 1)
+            self.assertAlmostEqual(actual[0], expected)
         for path in paths:
             self.assertEqual(path.parent, directory / "plots")
             self.assertEqual(path.suffix, ".pdf")
@@ -230,8 +263,37 @@ class ConditionalCoveragePlotTests(unittest.TestCase):
             for token in ("air", "lstm", "qr_cp", "k3"):
                 self.assertIn(token, path.name)
         for name in names:
-            self.assertTrue(any(name in path.name for path in paths))
+            matching = [path for path in paths if name in path.name]
+            self.assertEqual(len(matching), 2)
+            self.assertEqual(sum(path.stem.endswith("_all_sequences") for path in matching), 1)
         self.assertEqual(before, {path.name: path.read_bytes() for path in directory.glob("*.csv")})
+
+    @unittest.skipUnless(HAS_MATPLOTLIB, "Matplotlib is required for rendering")
+    def test_all_missing_groups_render_two_unavailable_charts_without_synthetic_points(self):
+        from matplotlib.figure import Figure
+
+        groups = [group_row(group, None, sequence=sequence)
+                  for sequence in ("first", "second") for group in range(3)]
+        directory = self.make_report(groups=groups,
+                                     summaries=[{**summary_row(), "mean_sequence_coverage": None}])
+        axes = []
+        original_savefig = Figure.savefig
+
+        def capture_figure(fig, *args, **kwargs):
+            axes.extend(fig.axes)
+            return original_savefig(fig, *args, **kwargs)
+
+        with patch.object(Figure, "savefig", new=capture_figure):
+            paths = plot_conditional_coverage_results(directory)
+
+        self.assertEqual(len(paths), 2)
+        self.assertEqual(len(axes), 2)
+        for ax in axes:
+            self.assertEqual(len(ax.collections), 0)
+            self.assertEqual(len(ax.patches), 0)
+            self.assertTrue(any("n/a" in text.get_text() for text in ax.texts))
+            self.assertLess(ax.get_ylim()[0], -.05)
+            self.assertGreater(ax.get_ylim()[1], 0)
 
     @unittest.skipUnless(HAS_MATPLOTLIB, "Matplotlib is required for rendering")
     def test_cli_renders_png_from_outside_repository(self):
@@ -245,8 +307,9 @@ class ConditionalCoveragePlotTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         images = list(destination.glob("*.png"))
-        self.assertEqual(len(images), 1)
-        self.assertTrue(images[0].read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertEqual(len(images), 2)
+        self.assertEqual(sum(path.stem.endswith("_all_sequences") for path in images), 1)
+        self.assertTrue(all(path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n") for path in images))
 
 
 if __name__ == "__main__":

@@ -114,9 +114,16 @@ Create signed coverage error box plots from an evaluation output directory:
 python report/plot_conditional_coverage_results.py results/conditional_coverage/air/lstm/evaluation/k3
 ```
 
-The script reads `summary.csv` and `group_metrics.csv` and saves one PDF per
+The script reads `summary.csv` and `group_metrics.csv` and saves two PDFs per
 named run, method, dataset, base predictor, and K under `<results_dir>/plots/`.
-Each x-axis position is a sequence identity with one box summarizing its
+The original chart shows a separate box for each sequence. The additional
+`*_all_sequences.pdf` combines all available group coverage errors from all
+sequences into a single box, showing every group error as one dot. Each group
+error receives equal weight; sequences with more available groups contribute
+more dots. Missing values are omitted. The combined chart keeps the same
+reference lines, including the average error derived from `summary.csv`.
+
+In the original chart, each x-axis position is a sequence identity with one box summarizing its
 available groups' signed coverage errors, giving each group equal weight.
 The y-axis, labeled "Coverage error", is `coverage - nominal coverage` in fraction units; negative values
 indicate undercoverage, positive values indicate overcoverage, and the horizontal
@@ -132,7 +139,7 @@ sequences with no evaluated groups are labeled `n/a`. Each sequence label shows
 the available group count as `n/K`. Integer and string sequence identifiers are
 distinguished.
 
-Choose a destination and PNG output with:
+Choose a destination and PNG output for both charts with:
 
 ```bash
 python report/plot_conditional_coverage_results.py results/conditional_coverage/air/lstm/evaluation/k3 --save-dir report/plots/conditional_coverage --format png
