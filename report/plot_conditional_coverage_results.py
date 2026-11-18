@@ -22,7 +22,9 @@ else:
     from inspect_conditional_coverage_results import _read_csv
 
 
-SUMMARY_FIELDS = ("name", "method", "dataset", "base_predictor", "k", "nominal_coverage")
+SUMMARY_FIELDS = (
+    "name", "method", "dataset", "base_predictor", "k", "nominal_coverage", "mean_sequence_coverage",
+)
 GROUP_FIELDS = ("name", "method", "sequence_key", "sequence_key_type", "group", "coverage")
 
 
@@ -43,6 +45,7 @@ def load_plot_data(results_dir):
 
     ``errors`` is a sequence-major list, with groups in numeric order 0..K-1.
     Missing coverage is None. Group labels remain local to each sequence.
+    ``average_coverage_error`` is the saved mean sequence coverage minus nominal.
     Validate all rows before any plots are written.
     """
     results_dir = Path(results_dir).expanduser().resolve()
@@ -61,8 +64,13 @@ def load_plot_data(results_dir):
         if k <= 0:
             raise ValueError(f"summary.csv: run {identity!r} requires positive K.")
         nominal = _fraction(row["nominal_coverage"], f"summary.csv: {identity!r}", nominal=True)
+        mean_coverage = row["mean_sequence_coverage"].strip()
+        average_error = (
+            _fraction(mean_coverage, f"summary.csv: {identity!r}, mean_sequence_coverage") - nominal
+            if mean_coverage else None
+        )
         runs[identity] = {field: row[field] for field in SUMMARY_FIELDS}
-        runs[identity].update(k=k, nominal_coverage=nominal)
+        runs[identity].update(k=k, nominal_coverage=nominal, average_coverage_error=average_error)
         by_run[identity] = {}
 
     for row in groups:
@@ -164,9 +172,14 @@ def plot_conditional_coverage_results(results_dir, save_dir=None, file_format="p
                 else:
                     ax.annotate("n/a", (index, 0), xytext=(0, 7), textcoords="offset points",
                                 ha="center", va="bottom", fontsize=9, color="#777777")
-            missing_count = sum(k - len(values) for values in samples)
-
             ax.axhline(0, color="#303030", linewidth=1, zorder=2)
+            reference_errors = [-0.025, -0.05]
+            for value in reference_errors:
+                ax.axhline(value, color="grey", linestyle=":", alpha=0.5, zorder=2)
+            average_error = run["average_coverage_error"]
+            if average_error is not None:
+                ax.axhline(average_error, color="red", linestyle=":", alpha=0.5,
+                           label="Average coverage error", zorder=4)
             labels = [f"{key!r} ({kind})" if kind == "str" else f"{key} ({kind})"
                       for kind, key in run["sequences"]]
             ax.set_xticks(range(n_sequences))
@@ -175,11 +188,13 @@ def plot_conditional_coverage_results(results_dir, save_dir=None, file_format="p
                                rotation=45, ha="right", fontsize=9)
             ax.set_xlim(-0.6, n_sequences - 0.4)
             finite_errors = [value for errors in run["errors"] for value in errors if value is not None]
-            low, high = min([0, *finite_errors]), max([0, *finite_errors])
+            limits = [0, *finite_errors, *reference_errors]
+            if average_error is not None:
+                limits.append(average_error)
+            low, high = min(limits), max(limits)
             padding = max(0.02, (high - low) * 0.15)
             ax.set_ylim(low - padding, high + padding)
-            ax.set_xlabel("Sequence identity")
-            ax.set_ylabel("Signed coverage error (coverage - nominal)")
+            ax.set_ylabel("Coverage error")
             title = (f"{run['dataset'] or 'Unknown dataset'} | {run['base_predictor'] or 'Unknown predictor'} | "
                      f"{run['method']} | {run['name']}")
             ax.set_title(textwrap.fill(title, 110) +
@@ -187,12 +202,7 @@ def plot_conditional_coverage_results(results_dir, save_dir=None, file_format="p
             ax.set_axisbelow(True)
             ax.grid(axis="y", alpha=0.2)
             ax.spines[["top", "right"]].set_visible(False)
-            note = ("Box: quartiles and median; whiskers: within 1.5 IQR. Dots: individual group errors."
-                    "\nNegative = undercoverage; positive = overcoverage. n = evaluated groups / K.")
-            if missing_count:
-                note += f" {missing_count} missing group(s) omitted."
-            fig.text(0.02, 0.02, note, fontsize=9, color="#555555")
-            fig.tight_layout(rect=(0, 0.10, 1, 1))
+            fig.tight_layout()
             path = destination / _filename(run, results_dir, file_format)
             fig.savefig(path, format=file_format, dpi=180, bbox_inches="tight")
             paths.append(path)

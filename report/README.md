@@ -118,9 +118,12 @@ The script reads `summary.csv` and `group_metrics.csv` and saves one PDF per
 named run, method, dataset, base predictor, and K under `<results_dir>/plots/`.
 Each x-axis position is a sequence identity with one box summarizing its
 available groups' signed coverage errors, giving each group equal weight.
-The y-axis is `coverage - nominal coverage` in fraction units; negative values
+The y-axis, labeled "Coverage error", is `coverage - nominal coverage` in fraction units; negative values
 indicate undercoverage, positive values indicate overcoverage, and the horizontal
-line marks zero error. RNN and Transformer runs remain separate charts.
+line marks zero error. Grey dotted lines mark -0.025 and -0.05. A red dotted line
+marks the average signed error, computed as `mean_sequence_coverage - nominal_coverage`
+from the run's `summary.csv` row; it is omitted when that saved mean is unavailable.
+All three dotted reference lines use alpha 0.5. RNN and Transformer runs remain separate charts.
 Boxes show the first and third quartiles and median; whiskers extend to the
 most extreme observations within 1.5 times the interquartile range. Individual
 group errors are overlaid as dots, including outliers, so all three observations
