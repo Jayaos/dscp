@@ -183,7 +183,7 @@ def _draw_boxplot(ax, run, samples, labels, *, all_sequences=False, dot_areas=No
              f"{run['method']} | {run['name']}")
     ax.set_title(textwrap.fill(title, 70 if all_sequences else 110) +
                  f"\nK = {run['k']} | Nominal coverage = {run['nominal_coverage']:.6g}",
-                 pad=14, fontsize=ax.title.get_fontsize() + 2, fontweight="bold")
+                 pad=14, fontsize=ax.title.get_fontsize() + 5, fontweight="bold")
     ax.set_axisbelow(True)
     ax.grid(axis="y", alpha=0.2)
     ax.spines[["top", "right"]].set_visible(False)
@@ -248,9 +248,9 @@ def plot_conditional_coverage_results(results_dir, save_dir=None, file_format="p
                         markeredgewidth=0, alpha=0.85,
                         label=f"{size:,.1f}".rstrip("0").rstrip("."),
                     ) for size in reference_sizes]
-                    ax.legend(handles=handles, title="Group size (observations)", loc="best",
-                              prop={"size": 11, "weight": "bold"},
-                              title_fontproperties={"size": 11, "weight": "bold"}, labelspacing=0.8)
+                    ax.legend(handles=handles, title="Group size", loc="best",
+                              prop={"size": 14, "weight": "bold"},
+                              title_fontproperties={"size": 14, "weight": "bold"}, labelspacing=0.8)
                 fig.tight_layout()
                 path = destination / _filename(run, results_dir, file_format, all_sequences=all_sequences)
                 fig.savefig(path, format=file_format, dpi=180, bbox_inches="tight")
