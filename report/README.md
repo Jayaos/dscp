@@ -122,6 +122,11 @@ sequences into a single box, showing every group error as one dot. Each group
 error receives equal weight; sequences with more available groups contribute
 more dots. Missing values are omitted. The combined chart keeps the same
 reference lines, including the average error derived from `summary.csv`.
+In the all-sequences chart, each dot's area is proportional to its original
+`group_size` from `group_metrics.csv`. Areas are scaled within each chart as
+`80 * group_size / largest_plotted_group_size` in points squared. Missing groups
+are excluded from this scaling. Box statistics continue to weight each available
+group error equally; the per-sequence charts use fixed-size dots.
 
 In the original chart, each x-axis position is a sequence identity with one box summarizing its
 available groups' signed coverage errors, giving each group equal weight.

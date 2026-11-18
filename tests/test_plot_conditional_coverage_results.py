@@ -81,8 +81,10 @@ class ConditionalCoveragePlotTests(unittest.TestCase):
     def test_groups_use_numeric_order_and_typed_sequences_remain_distinct(self):
         group_order = [10, 2, 0, 1, 9, 8, 7, 6, 5, 4, 3]
         groups = [
-            group_row(group, group / 20, sequence="7", key_type=key_type)
-            for key_type in ("int", "str") for group in group_order
+            {**group_row(group, group / 20, sequence="7", key_type=key_type),
+             "group_size": base_size + group * 10}
+            for key_type, base_size in (("int", 1000), ("str", 2000))
+            for group in group_order
         ]
         directory = self.make_report(summaries=[summary_row(k=11)], groups=groups)
 
@@ -90,6 +92,8 @@ class ConditionalCoveragePlotTests(unittest.TestCase):
 
         self.assertEqual(chart["sequences"], [("int", "7"), ("str", "7")])
         self.assertEqual(len(chart["errors"]), 2)
+        self.assertEqual(chart["group_sizes"], [[base_size + group * 10 for group in range(11)]
+                                               for base_size in (1000, 2000)])
         for values in chart["errors"]:
             self.assertEqual(len(values), 11)
             for group, value in enumerate(values):
@@ -129,6 +133,13 @@ class ConditionalCoveragePlotTests(unittest.TestCase):
                 directory = self.make_report(name, groups=groups)
                 with self.assertRaises(ValueError):
                     load_plot_data(directory)
+        for index, group_size in enumerate([-1, 0, "2.5", "nan", "invalid", ""]):
+            with self.subTest(group_size=group_size):
+                groups = [group_row(group, .9) for group in range(3)]
+                groups[0]["group_size"] = group_size
+                directory = self.make_report(f"group_size_{index}", groups=groups)
+                with self.assertRaises(ValueError):
+                    load_plot_data(directory)
 
     def test_invalid_coverage_nominal_and_k_are_rejected(self):
         for index, coverage in enumerate([-.1, 1.1, "nan", "inf", "invalid"]):
@@ -160,6 +171,12 @@ class ConditionalCoveragePlotTests(unittest.TestCase):
                                      ("partial", [.94, None, None]))
             for group, value in enumerate(values)
         ]
+        sizes = {"complete": [100, 200, 400], "empty": [20000] * 3, "partial": [800, 10000, 0]}
+        for row in groups:
+            row["group_size"] = sizes[row["sequence_key"]][row["group"]]
+            row["missing_count"] = row["group_size"] - row["evaluated_count"]
+        # Rows need not be ordered by group; errors and sizes must stay paired.
+        groups = [groups[index] for index in (2, 0, 1, 5, 3, 4, 8, 6, 7)]
         summary = {**summary_row(), "mean_sequence_coverage": .887}
         directory = self.make_report(groups=groups, summaries=[summary])
         captured = []
@@ -199,6 +216,17 @@ class ConditionalCoveragePlotTests(unittest.TestCase):
         self.assertEqual(len(dots), 4)
         for actual, expected in zip(sorted(dots), [-.1, 0., .04, .1]):
             self.assertAlmostEqual(actual, expected)
+        sized_dots = [(float(point[1]), float(area)) for collection in pooled_ax.collections
+                      for point, area in zip(collection.get_offsets(), collection.get_sizes())]
+        self.assertEqual(len(sized_dots), 4)
+        # Original group sizes 100, 200, 400, 800 yield proportional areas;
+        # all have the same evaluated_count, and larger missing groups do not set the scale.
+        for (error, area), (expected_error, expected_area) in zip(
+                sized_dots, [(-.1, 10), (0., 20), (.1, 40), (.04, 80)]):
+            self.assertAlmostEqual(error, expected_error)
+            self.assertAlmostEqual(area, expected_area)
+        self.assertTrue(all(float(area) == 22 for collection in ax.collections
+                            for area in collection.get_sizes()))
         self.assertTrue(paths[1].stem.endswith("_all_sequences"))
         self.assertFalse(paths[0].stem.endswith("_all_sequences"))
 

@@ -26,7 +26,7 @@ else:
 SUMMARY_FIELDS = (
     "name", "method", "dataset", "base_predictor", "k", "nominal_coverage", "mean_sequence_coverage",
 )
-GROUP_FIELDS = ("name", "method", "sequence_key", "sequence_key_type", "group", "coverage")
+GROUP_FIELDS = ("name", "method", "sequence_key", "sequence_key_type", "group", "coverage", "group_size")
 
 
 def _fraction(value, context, *, nominal=False):
@@ -45,6 +45,7 @@ def load_plot_data(results_dir):
     """Return one plot record per run, preserving typed sequence identities.
 
     ``errors`` is a sequence-major list, with groups in numeric order 0..K-1.
+    ``group_sizes`` contains the corresponding original group sizes.
     Missing coverage is None. Group labels remain local to each sequence.
     ``average_coverage_error`` is the saved mean sequence coverage minus nominal.
     Validate all rows before any plots are written.
@@ -95,10 +96,19 @@ def load_plot_data(results_dir):
             group_nominal = _fraction(row["nominal_coverage"], context, nominal=True)
             if not math.isclose(group_nominal, nominal, rel_tol=0, abs_tol=1e-12):
                 raise ValueError(f"{context}: nominal coverage disagrees with summary.csv.")
-        values[group] = (
+        try:
+            group_size = int(row["group_size"])
+        except ValueError as exc:
+            raise ValueError(f"{context}, group {group}: group_size must be a nonnegative integer.") from exc
+        if group_size < 0:
+            raise ValueError(f"{context}, group {group}: group_size must be nonnegative.")
+        error = (
             _fraction(row["coverage"], f"{context}, group {group}") - nominal
             if row["coverage"].strip() else None
         )
+        if error is not None and group_size == 0:
+            raise ValueError(f"{context}, group {group}: available coverage requires positive group_size.")
+        values[group] = (error, group_size)
 
     plots = []
     for identity, run in runs.items():
@@ -111,7 +121,8 @@ def load_plot_data(results_dir):
                                  f"expected all {run['k']} group rows, including empty groups.")
         plots.append({
             **run, "sequences": list(sequences),
-            "errors": [[values[group] for group in range(run["k"])] for values in sequences.values()],
+            "errors": [[values[group][0] for group in range(run["k"])] for values in sequences.values()],
+            "group_sizes": [[values[group][1] for group in range(run["k"])] for values in sequences.values()],
         })
     return plots
 
@@ -127,7 +138,7 @@ def _filename(run, results_dir, file_format, *, all_sequences=False):
     return "_".join([*safe_parts, digest, "signed_coverage_error"]) + suffix + f".{file_format}"
 
 
-def _draw_boxplot(ax, run, samples, labels, *, all_sequences=False):
+def _draw_boxplot(ax, run, samples, labels, *, all_sequences=False, dot_areas=None):
     positions = [index for index, values in enumerate(samples) if values]
     if positions:
         ax.boxplot(
@@ -144,7 +155,8 @@ def _draw_boxplot(ax, run, samples, labels, *, all_sequences=False):
             offsets = ([0] if len(values) == 1 else
                        [-0.12 + 0.24 * group / (len(values) - 1) for group in range(len(values))])
             ax.scatter([index + offset for offset in offsets], values,
-                       color="#244865", s=22, alpha=0.85, zorder=4)
+                       color="#244865", s=dot_areas if all_sequences else 22,
+                       linewidths=0 if all_sequences else None, alpha=0.85, zorder=4)
         else:
             ax.annotate("n/a", (index, 0), xytext=(0, 7), textcoords="offset points",
                         ha="center", va="bottom", fontsize=9, color="#777777")
@@ -184,7 +196,9 @@ def plot_conditional_coverage_results(results_dir, save_dir=None, file_format="p
     weighting groups equally. Individual group errors are overlaid as dots.
     Missing groups are omitted; entirely unavailable sequences are labeled n/a.
     A second chart pools every available group error from all sequences into
-    one box, with each error shown as one dot. Both use the requested format.
+    one box, with each error shown as one dot whose area is proportional to its
+    original group size. The largest plotted group uses an area of 80 points².
+    Both use the requested format; group sizes do not weight box statistics.
     Input CSVs remain unchanged.
     """
     if file_format not in ("pdf", "png"):
@@ -209,6 +223,10 @@ def plot_conditional_coverage_results(results_dir, save_dir=None, file_format="p
         sequence_labels = [textwrap.fill(label, 28) + f"\nn={len(values)}/{k}"
                            for label, values in zip(labels, samples)]
         pooled = [value for values in samples for value in values]
+        pooled_sizes = [size for errors, sizes in zip(run["errors"], run["group_sizes"])
+                        for error, size in zip(errors, sizes) if error is not None]
+        largest_size = max(pooled_sizes, default=1)
+        pooled_areas = [80 * size / largest_size for size in pooled_sizes]
         views = (
             (False, samples, sequence_labels, (max(10, min(40, 3 + 0.9 * n_sequences)), 6)),
             (True, [pooled], [f"All sequences\nn={len(pooled)}/{n_sequences * k}"], (7, 6)),
@@ -216,7 +234,8 @@ def plot_conditional_coverage_results(results_dir, save_dir=None, file_format="p
         for all_sequences, values, tick_labels, figsize in views:
             fig, ax = plt.subplots(figsize=figsize)
             try:
-                _draw_boxplot(ax, run, values, tick_labels, all_sequences=all_sequences)
+                _draw_boxplot(ax, run, values, tick_labels, all_sequences=all_sequences,
+                              dot_areas=pooled_areas if all_sequences else None)
                 fig.tight_layout()
                 path = destination / _filename(run, results_dir, file_format, all_sequences=all_sequences)
                 fig.savefig(path, format=file_format, dpi=180, bbox_inches="tight")
