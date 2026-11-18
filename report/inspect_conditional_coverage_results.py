@@ -35,11 +35,12 @@ GROUP_COLUMNS = (
     ("Group", "group"), ("Coverage", "coverage"),
     ("Covered", "covered_count"), ("Evaluated", "evaluated_count"),
     ("Missing", "missing_count"), ("Size", "group_size"),
-    ("Undercoverage", "undercoverage"), ("Abs error", "absolute_coverage_error"),
+    ("Undercoverage", "undercoverage"), ("Signed error", "coverage_error"),
+    ("Abs error", "absolute_coverage_error"),
 )
 FRACTION_FIELDS = {
     "cace", "wuc", "worst_sequence_wuc", "mean_sequence_coverage",
-    "pooled_coverage", "coverage", "undercoverage", "absolute_coverage_error",
+    "pooled_coverage", "coverage", "undercoverage", "coverage_error", "absolute_coverage_error",
 }
 
 
@@ -129,6 +130,7 @@ def inspect_results(results_dir):
     print("Summary CACE and WUC average sequences equally; mean seq coverage also weights sequences equally.")
     print("Pooled coverage weights evaluated observations; worst WUC is the largest sequence WUC.")
     print("Group labels are local to each sequence. Coverage uses evaluated predictions only.")
+    print("Signed error = coverage - nominal coverage; negative means undercoverage, positive means overcoverage.")
     print("\nDataset summary (summary.csv)")
     for rows in contexts.values():
         _print_context(rows[0])
@@ -149,7 +151,12 @@ def inspect_results(results_dir):
         for (key_type, key), rows in sequences.items():
             label = repr(key) if key_type == "str" else key
             print(f"  Sequence: {label} ({key_type})")
-            _print_table(sorted(rows, key=lambda row: int(row["group"])), GROUP_COLUMNS)
+            display_rows = []
+            for row in sorted(rows, key=lambda row: int(row["group"])):
+                nominal = row.get("nominal_coverage") or runs[identity]["nominal_coverage"]
+                error = float(row["coverage"]) - float(nominal) if row["coverage"] and nominal else None
+                display_rows.append({**row, "coverage_error": error})
+            _print_table(display_rows, GROUP_COLUMNS)
 
     return {"summary": summary, "group_metrics": groups}
 

@@ -76,8 +76,12 @@ python report/inspect_conditional_coverage_results.py results/conditional_covera
 The inspector displays the saved dataset summary for each run: CACE, mean
 sequence WUC, worst sequence WUC, mean sequence coverage, pooled coverage,
 and availability counts. It then displays every sequence's group coverage,
-covered/evaluated/missing counts, original group size, undercoverage, and
-absolute coverage error. Dataset, base predictor, run, method, K, and nominal
+covered/evaluated/missing counts, original group size, undercoverage, signed
+coverage error, and absolute coverage error. Signed error is `coverage - nominal
+coverage`: negative means undercoverage and positive means overcoverage. It is
+calculated for display from each group's nominal coverage, falling back to the
+matching summary row's nominal coverage when needed.
+Dataset, base predictor, run, method, K, and nominal
 coverage identify each report. The saved `cace_definition` is shown when present.
 
 Coverage and errors are displayed as fractions (`0.9` means 90%). Empty CSV
@@ -100,6 +104,42 @@ from report.inspect_conditional_coverage_results import inspect_results
 
 report = inspect_results("results/conditional_coverage/air/lstm/evaluation/k3")
 # report["summary"] and report["group_metrics"] retain the original CSV strings.
+```
+
+# Plot conditional coverage results
+
+Create signed coverage error bar plots from an evaluation output directory:
+
+```bash
+python report/plot_conditional_coverage_results.py results/conditional_coverage/air/lstm/evaluation/k3
+```
+
+The script reads `summary.csv` and `group_metrics.csv` and saves one PDF per
+named run, method, dataset, base predictor, and K under `<results_dir>/plots/`.
+Each x-axis position is a sequence identity with K adjacent bars, one per group.
+The y-axis is `coverage - nominal coverage` in fraction units; negative values
+indicate undercoverage, positive values indicate overcoverage, and the horizontal
+line marks zero error. RNN and Transformer runs remain separate charts.
+Group labels are local to each sequence; matching colors across sequences do
+not imply the same learned regime. Empty groups appear as `n/a` markers, while
+exactly zero errors have small horizontal marks. Integer and string sequence
+identifiers are distinguished.
+
+Choose a destination and PNG output with:
+
+```bash
+python report/plot_conditional_coverage_results.py results/conditional_coverage/air/lstm/evaluation/k3 --save-dir report/plots/conditional_coverage --format png
+```
+
+Matplotlib is required and is included in `envs/env-dscp.yml`. Input CSVs are
+unchanged. Filenames include the dataset, base predictor, method, run, K, and a
+hash of the evaluation identity to avoid collisions. Rerunning the same input
+and format replaces its plots. The function is also callable from Python:
+
+```python
+from report.plot_conditional_coverage_results import plot_conditional_coverage_results
+
+paths = plot_conditional_coverage_results("results/conditional_coverage/air/lstm/evaluation/k3")
 ```
 
 # Inspect tuning results
